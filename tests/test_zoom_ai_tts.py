@@ -16,7 +16,6 @@ from aiohttp import web
 from pipecat.frames.frames import ErrorFrame, InterruptionFrame, TTSAudioRawFrame, TTSSpeakFrame
 from pipecat.services.zoom_ai.tts import MAX_INPUT_CHARS, ZoomAITTSService, _split_text
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.transcriptions.language import Language
 from pipecat.utils.errors import ErrorCategory
 
 PCM = b"\x01\x02\x03\x04" * 2048
@@ -195,13 +194,6 @@ async def test_stream_that_ends_early_is_reported(aiohttp_client):
     errors = [f for f in up if isinstance(f, ErrorFrame)]
     assert len(errors) == 1
     assert "stream ended early" in errors[0].error
-
-
-def test_language_is_english_only():
-    tts = ZoomAITTSService(api_key="k", aiohttp_session=None)  # type: ignore[arg-type]
-    assert tts.language_to_service_language(Language.EN_US) == "en-US"
-    assert tts.language_to_service_language(Language.EN_GB) == "en-US"
-    assert tts.language_to_service_language(Language.ES) is None
 
 
 @pytest.mark.asyncio

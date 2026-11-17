@@ -27,7 +27,6 @@ from pipecat.frames.frames import Frame
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.services.zoom_ai.stt import _headers, _tracking_id
-from pipecat.transcriptions.language import Language
 from pipecat.utils.errors import ErrorCategory, classify_http_status_code
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
@@ -80,8 +79,8 @@ class ZoomAITTSSettings(TTSSettings):
 
     ``voice`` is a Zoom TTS voice ID, such as ``jenna`` (the default) or ``ava``; see
     https://developers.zoom.us/docs/ai-services/tts/#language-and-voices for the list.
-    The API speaks US English only and has no model choice, so ``language`` and
-    ``model`` are ``None``.
+    The API has no language or model field, so ``language`` and ``model`` are
+    ``None``.
 
     Parameters:
         speed: Speaking rate multiplier, from 0.5 to 2.0. ``None`` uses the voice's
@@ -161,18 +160,6 @@ class ZoomAITTSService(TTSService):
             True, as this service supports metrics.
         """
         return True
-
-    def language_to_service_language(self, language: Language) -> str | None:
-        """Convert a Language to the Zoom TTS input language.
-
-        Args:
-            language: The language to convert.
-
-        Returns:
-            ``"en-US"`` for English, the only input language Zoom TTS speaks, and
-            None for any other language.
-        """
-        return "en-US" if str(language.value).lower().startswith("en") else None
 
     def _payload(self, text: str) -> dict[str, Any]:
         payload: dict[str, Any] = {"input": text, "response_format": "pcm_44100"}
