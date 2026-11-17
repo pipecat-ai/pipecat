@@ -705,6 +705,11 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
 class RTVIMessageGroup:
     """A group of related messages, as the documentation shows them together.
 
+    Groups only organize the documentation: they become the document's tags,
+    which the generated reference uses for its sections. They aren't part of
+    the protocol, so regrouping messages changes nothing on the wire and
+    leaves a released version's contract hash as it is.
+
     Parameters:
         name: The group's name, e.g. ``"User Interface"``.
         description: What the group's messages are about.
