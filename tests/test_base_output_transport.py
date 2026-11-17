@@ -20,6 +20,7 @@ from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
+    AssistantImageRawFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -27,15 +28,23 @@ from pipecat.frames.frames import (
     FilterControlFrame,
     FilterEnableFrame,
     FilterUpdateSettingsFrame,
+    FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InterruptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMMessagesAppendFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
+    OutputTransportMessageFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserStartedSpeakingFrame,
     VolumeFrame,
     VolumeGainFrame,
 )
@@ -43,6 +52,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.utils.text.base_text_aggregator import TextType
 
 
 class _PassthroughMixer(BaseAudioMixer):
@@ -96,6 +106,16 @@ async def _clock_idle(sender):
     """Wait until the clock task has pushed every timed frame it holds."""
     while sender._clock_frame or not sender._clock_queue.empty():
         await asyncio.sleep(0.01)
+
+
+async def _until(predicate, *, timeout: float = 1.0) -> None:
+    """Poll until ``predicate()`` is true or the timeout expires."""
+
+    async def poll() -> None:
+        while not predicate():
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(poll(), timeout=timeout)
 
 
 async def _make_transport(
@@ -945,4 +965,340 @@ class TestBaseOutputTransportVolume(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(self._written(transport), [32767])
         finally:
+            await transport.cancel(CancelFrame())
+
+
+class TestBaseOutputTransportFunctionCallResults(unittest.IsolatedAsyncioTestCase):
+    """Synchronous function results may bypass filler when the queue holds only filler."""
+
+    async def _held_write_transport(self):
+        transport = await _make_transport()
+        release = asyncio.Event()
+
+        async def write(_frame):
+            await release.wait()
+            return True
+
+        transport.write_audio_frame.side_effect = write
+        return transport, release
+
+    async def _deliver_in_progress(self, transport, tool_call_id="1"):
+        """Hold writes, deliver an in-progress frame, and assert it was registered."""
+        sender = transport._media_senders[None]
+        in_progress = FunctionCallInProgressFrame(
+            function_name="lookup",
+            tool_call_id=tool_call_id,
+            arguments={},
+            cancel_on_interruption=True,
+        )
+        await transport.process_frame(in_progress, FrameDirection.DOWNSTREAM)
+        await _until(lambda: tool_call_id in sender._delivered_synchronous_calls)
+        return sender, in_progress
+
+    def _result(self, tool_call_id="1"):
+        return FunctionCallResultFrame(
+            function_name="lookup", tool_call_id=tool_call_id, arguments={}, result={"slots": 2}
+        )
+
+    def _filler_line(self, sender, chunks=5):
+        return TTSAudioRawFrame(b"\x01" * (sender.audio_chunk_size * chunks), sender.sample_rate, 1)
+
+    async def _assert_result_bypasses(self, transport, result):
+        """The transport must take the immediate push path, not queue for the audio task."""
+        sender = transport._media_senders[None]
+        self.assertIn(result.tool_call_id, sender._delivered_synchronous_calls)
+        calls = len(transport.push_frame.call_args_list)
+        await transport.process_frame(result, FrameDirection.DOWNSTREAM)
+        self.assertGreater(len(transport.push_frame.call_args_list), calls)
+        self.assertIs(transport.push_frame.call_args_list[-1].args[0], result)
+        self.assertNotIn(result.tool_call_id, sender._delivered_synchronous_calls)
+
+    async def _assert_result_queued(self, transport, result):
+        """The transport must not bypass; the result waits in or behind the audio queue."""
+        calls = len(transport.push_frame.call_args_list)
+        await transport.process_frame(result, FrameDirection.DOWNSTREAM)
+        self.assertEqual(len(transport.push_frame.call_args_list), calls)
+        sender = transport._media_senders[None]
+        self.assertTrue(sender._audio_queue.has_frame(FunctionCallResultFrame))
+
+    async def test_a_synchronous_result_passes_filler_queued_before_it(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await self._assert_result_bypasses(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_an_asynchronous_in_progress_is_never_registered_for_bypass(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender = transport._media_senders[None]
+            in_progress = FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=False,
+            )
+            pushes_before = len(transport.push_frame.call_args_list)
+            await transport.process_frame(in_progress, FrameDirection.DOWNSTREAM)
+            await _until(
+                lambda: len(transport.push_frame.call_args_list) > pushes_before,
+                timeout=1.0,
+            )
+            self.assertNotIn("1", sender._delivered_synchronous_calls)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_a_result_stays_behind_its_queued_in_progress_frame(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender = transport._media_senders[None]
+            line = self._filler_line(sender)
+            in_progress = FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            )
+            await transport.process_frame(line, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(in_progress, FrameDirection.DOWNSTREAM)
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_context_bound_tts_queued_after_delivered_in_progress_blocks_bypass(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStartedFrame(append_to_context=True), FrameDirection.DOWNSTREAM
+            )
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_context_bound_tts_taken_from_queue_forgets_bypass_registration(self):
+        """Taking a context-bound line from the queue forgets delivered calls before push."""
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            await transport.process_frame(
+                TTSStartedFrame(append_to_context=False), FrameDirection.DOWNSTREAM
+            )
+            await transport.process_frame(
+                TTSStartedFrame(append_to_context=True), FrameDirection.DOWNSTREAM
+            )
+            await _until(lambda: "1" not in sender._delivered_synchronous_calls)
+            self.assertNotIn("1", sender._delivered_synchronous_calls)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_llm_full_response_start_in_the_queue_blocks_bypass(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await transport.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_llm_messages_append_behind_filler_blocks_bypass(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                LLMMessagesAppendFrame(messages=[{"role": "user", "content": "Hi"}]),
+                FrameDirection.DOWNSTREAM,
+            )
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_a_parallel_sibling_in_progress_blocks_bypass(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport, tool_call_id="1")
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            ip2 = FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="2",
+                arguments={},
+                cancel_on_interruption=True,
+            )
+            await transport.process_frame(ip2, FrameDirection.DOWNSTREAM)
+            await self._assert_result_queued(transport, self._result(tool_call_id="1"))
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_then_result_stays_queued(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_user_speech_after_delivered_in_progress_blocks_bypass(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await transport.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_cancel_discards_a_delivered_synchronous_call(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                FunctionCallCancelFrame(function_name="lookup", tool_call_id="1"),
+                FrameDirection.DOWNSTREAM,
+            )
+            self.assertNotIn("1", sender._delivered_synchronous_calls)
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_filler_text_not_appended_to_context_does_not_block_bypass(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            text = TTSTextFrame("One moment.", text_type=TextType.SENTENCE)
+            text.append_to_context = False
+            await transport.process_frame(text, FrameDirection.DOWNSTREAM)
+            await self._assert_result_bypasses(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_context_bound_tts_stopped_after_filler_does_not_block_bypass(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await transport.process_frame(TTSStoppedFrame(), FrameDirection.DOWNSTREAM)
+            await self._assert_result_bypasses(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_llm_full_response_end_behind_filler_blocks_bypass(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await transport.process_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_function_calls_started_resets_user_speech_guard(self):
+        transport = await _make_transport()
+        try:
+            sender = transport._media_senders[None]
+            await transport.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            self.assertTrue(sender._user_spoke_during_function_calls)
+            await transport.process_frame(
+                FunctionCallsStartedFrame(function_calls=[]), FrameDirection.DOWNSTREAM
+            )
+            self.assertFalse(sender._user_spoke_during_function_calls)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_assistant_image_queued_after_in_progress_blocks_bypass(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            image = AssistantImageRawFrame(image=b"\xff", size=(1, 1), format="RGB")
+            await transport.process_frame(image, FrameDirection.DOWNSTREAM)
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_assistant_image_behind_filler_still_blocks_bypass(self):
+        transport, release = await self._held_write_transport()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            image = AssistantImageRawFrame(image=b"\xff", size=(1, 1), format="RGB")
+            await transport.process_frame(image, FrameDirection.DOWNSTREAM)
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_a_non_filler_frame_in_hand_blocks_bypass(self):
+        """While the audio task is delivering a non-filler frame, a result stays queued."""
+        transport, release = await self._held_write_transport()
+        hold_message = asyncio.Event()
+        try:
+            sender, _ = await self._deliver_in_progress(transport)
+            msg = OutputTransportMessageFrame(message={"type": "test"})
+
+            async def held_send(_frame):
+                await hold_message.wait()
+
+            transport.send_message = AsyncMock(side_effect=held_send)
+            await transport.process_frame(msg, FrameDirection.DOWNSTREAM)
+            await _until(lambda: sender._frame_in_hand is msg, timeout=2.0)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            hold_message.set()
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_user_speech_after_calls_started_blocks_in_progress_registration(self):
+        """User speech before the in-progress frame is delivered keeps the result queued."""
+        transport, release = await self._held_write_transport()
+        try:
+            sender = transport._media_senders[None]
+            await transport.process_frame(
+                FunctionCallsStartedFrame(function_calls=[]), FrameDirection.DOWNSTREAM
+            )
+            await transport.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+            in_progress = FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            )
+            pushes_before = len(transport.push_frame.call_args_list)
+            await transport.process_frame(in_progress, FrameDirection.DOWNSTREAM)
+            await _until(
+                lambda: len(transport.push_frame.call_args_list) > pushes_before,
+                timeout=1.0,
+            )
+            self.assertNotIn("1", sender._delivered_synchronous_calls)
+            await transport.process_frame(self._filler_line(sender), FrameDirection.DOWNSTREAM)
+            await self._assert_result_queued(transport, self._result())
+        finally:
+            release.set()
             await transport.cancel(CancelFrame())

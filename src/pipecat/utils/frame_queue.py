@@ -7,7 +7,7 @@
 """Frame queue utilities for Pipecat pipeline processors."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from pipecat.frames.frames import Frame
@@ -60,6 +60,13 @@ class FrameQueue(asyncio.Queue):
             isinstance(self._frame_getter(item), frame_type)
             for item in self._queue  # pyright: ignore[reportAttributeAccessIssue]
         )
+
+    def iter_frames(self) -> Iterator[Frame]:
+        """Yield each enqueued frame, in queue order."""
+        for item in self._queue:  # pyright: ignore[reportAttributeAccessIssue]
+            frame = self._frame_getter(item)
+            if frame is not None:
+                yield frame
 
     @property
     def has_uninterruptible(self) -> bool:
