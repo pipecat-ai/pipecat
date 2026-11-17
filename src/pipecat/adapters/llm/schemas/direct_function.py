@@ -167,6 +167,10 @@ class BaseDirectFunctionWrapper:
             if is_first_param:
                 continue
 
+            # *args and **kwargs are not arguments the LLM can pass by name
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
+
             type_hint = hints.get(name)
 
             # Convert type hint to JSON schema
