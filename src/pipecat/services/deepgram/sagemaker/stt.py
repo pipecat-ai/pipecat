@@ -511,14 +511,22 @@ class DeepgramSageMakerSTTService(STTService):
                 alternatives, transcript, and metadata.
         """
         alternatives = parsed.get("channel", {}).get("alternatives", [])
-        if not alternatives or not alternatives[0].get("transcript"):
+        if not alternatives:
             return
 
-        transcript = alternatives[0]["transcript"]
-        if not transcript.strip():
-            return
-
+        transcript = alternatives[0].get("transcript") or ""
         is_final = parsed.get("is_final", False)
+
+        if not transcript.strip():
+            if is_final and parsed.get("from_finalize", False):
+                # Deepgram's own endpointing already sent the transcript in a
+                # regular is_final, before it was asked to finalize, so the
+                # confirmation has no text to mark as finalized. Push it on its
+                # own: that finalizes those transcripts for the pipeline and
+                # reports the STT TTFB.
+                self.confirm_finalize()
+                await self._push_transcription_finalized()
+            return
 
         # Extract language if available
         language = None
