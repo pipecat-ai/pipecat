@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Audio quality analysis for Pipecat backed by the ai-coustics Tyto model.
+"""Audio quality analysis for Pipecat backed by Tyto, the ai-coustics audio decision model.
 
 Classes:
     AICAudioQualityScores: Audio quality scores for one window of user audio.
@@ -109,8 +109,8 @@ class AICTytoObserver(BaseObserver):
 
     The observer buffers the user's audio and analyzes the latest 5 s window
     in a background thread after every 5 s of received audio. Each result goes
-    to the ``on_analysis_result`` event. When the call ends, the observer
-    combines the results into one summary and gives it to the
+    to the ``on_analysis_result`` event during the call. When the call ends, the
+    observer combines the results into one summary and gives it to the
     ``on_call_summary`` event.
 
     Tyto must score the audio before enhancement. When :class:`AICFilter` is the
