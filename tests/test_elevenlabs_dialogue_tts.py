@@ -557,7 +557,7 @@ async def test_dialogue_interleaved_contexts_align_words_independently():
     reported = []
 
     async def _record(word_times, context_id, *args, **kwargs):
-        reported.extend((context_id, word, start) for word, start in word_times)
+        reported.extend((context_id, word, start) for word, start, *_ in word_times)
 
     service.add_word_timestamps = _record
 
@@ -598,7 +598,7 @@ async def test_dialogue_context_completion_resets_only_its_own_clock():
     reported = []
 
     async def _record(word_times, context_id, *args, **kwargs):
-        reported.extend((context_id, word) for word, _ in word_times)
+        reported.extend((context_id, word) for word, *_ in word_times)
 
     service.add_word_timestamps = _record
 
@@ -652,7 +652,7 @@ async def test_dialogue_word_timestamps_report_audio_tags_as_words():
     reported = []
 
     async def _record(word_times, *args, **kwargs):
-        reported.extend(word for word, _ in word_times)
+        reported.extend(word for word, *_ in word_times)
 
     service.add_word_timestamps = _record
     service._expression_formatter = ExpressionFormatter(service.get_expression_adapter, service)
