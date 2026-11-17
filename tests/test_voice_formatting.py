@@ -652,8 +652,7 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_ten_digit_amount_is_not_read_as_a_phone_number(self):
-        # The phone transform runs first and used to take the last nine digits,
-        # leaving "two dollars 5 0 0 0 0 0 0 0 0".
+        # The phone transform runs before the currency one, so it must leave the amount whole.
         self.assertEqual(
             await VoiceFormatter()("The budget is $2500000000.", "*"),
             "The budget is two billion, five hundred million dollars.",
