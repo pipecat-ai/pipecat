@@ -113,6 +113,14 @@ jobs:
         run: |
           uv run python scripts/deprecations/generate_removals.py --version "${{ inputs.version }}" --draft-removals
 
+      # Record the RTVI protocol version this release ships. Adds it to
+      # rtvi/spec/released.json, which rides along in this same release PR, so
+      # tests/test_rtvi_spec.py keeps its wire format from changing. No-op when
+      # an earlier release already shipped the version.
+      - name: Record released RTVI protocol version
+        run: |
+          uv run python scripts/rtvi/record_released_spec.py --version "${{ inputs.version }}"
+
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
@@ -134,6 +142,7 @@ jobs:
             - ✅ Removes processed changelog fragments
             - ✅ Updates removals.json with any symbols removed in this release
             - ✅ Drafts removals.json records (`deprecated_in: null`) for modules moved or removed without a deprecation
+            - ✅ Records the RTVI protocol version this release ships in rtvi/spec/released.json
             - ✅ Ready to merge for release
 
             ### Next Steps
