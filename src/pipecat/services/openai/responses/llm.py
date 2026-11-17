@@ -1226,6 +1226,8 @@ class OpenAIResponsesLLMService(
             if event_lane is not None and event_lane != lane:
                 if event_type in _RESPONSE_END_EVENT_TYPES:
                     self._draining_lanes.discard(event_lane)
+                    # OpenAI still bills an abandoned response.
+                    await self._report_event_usage((event.get("response") or {}).get("usage"))
                 continue
 
             if event_type in _RESPONSE_END_EVENT_TYPES:
