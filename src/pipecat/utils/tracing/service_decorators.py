@@ -1498,6 +1498,7 @@ class _RealtimeReply:
         self.had_audio = False
         self.ttfb: float | None = None
         self.usage: LLMTokenUsage | None = None
+        self.grace_task: asyncio.Task | None = None
         self.exported = False
 
     @property
@@ -1602,6 +1603,10 @@ def traced_realtime_llm(cls: P) -> P:
         if reply.exported:
             return
         reply.exported = True
+        grace_task = reply.grace_task
+        reply.grace_task = None
+        if grace_task is not None and grace_task is not asyncio.current_task():
+            grace_task.cancel()
         if state.pending is reply:
             state.pending = None
         if state.reply is reply:
@@ -1635,9 +1640,9 @@ def traced_realtime_llm(cls: P) -> P:
     def schedule_grace_export(service, state: _RealtimeLLMTraceState, reply: _RealtimeReply):
         """Export the pending reply after the grace period, unless it was already exported.
 
-        The timer is never cancelled. It checks whether its reply is still the
-        one waiting and does nothing otherwise, so no state change has to
-        ``await`` it.
+        Exporting the reply cancels the timer without awaiting it, so no state
+        change has to ``await``. The timer still checks that its reply is the
+        one waiting, in case it runs before the cancellation lands.
         """
 
         async def grace():
@@ -1646,11 +1651,7 @@ def traced_realtime_llm(cls: P) -> P:
                 export_reply(service, state, reply)
 
         try:
-            create_task = getattr(service, "create_task", None)
-            if create_task is not None:
-                create_task(grace(), name="realtime-llm-trace-export")
-            else:
-                asyncio.get_running_loop().create_task(grace())
+            reply.grace_task = service.create_task(grace(), name="realtime-llm-trace-export")
         except Exception as e:
             logging.warning(f"Error scheduling realtime llm_response export: {e}")
             export_reply(service, state, reply)
@@ -1760,8 +1761,11 @@ def traced_realtime_llm(cls: P) -> P:
 
     def close_all(service, state: _RealtimeLLMTraceState):
         """Close everything still open: pipeline end or service cleanup."""
-        if state.reply is not None:
-            end_reply(service, state, time.time_ns(), interrupted=True)
+        reply = state.reply
+        if reply is not None:
+            reply.end_ns = max(time.time_ns(), reply.start_ns)
+            reply.interrupted = True
+            export_reply(service, state, reply)
         if state.pending is not None:
             export_reply(service, state, state.pending)
         for span in list(state.tool_spans.values()):

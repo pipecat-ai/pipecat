@@ -489,6 +489,37 @@ async def test_pipeline_end_exports_a_pending_reply(exporter, svc):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("closer", ["end_frame", "next_reply"])
+async def test_exporting_a_reply_cancels_its_grace_timer(exporter, svc, monkeypatch, closer):
+    monkeypatch.setattr(service_decorators, "_REALTIME_REPLY_EXPORT_GRACE_SECS", 10.0)
+    await svc.push_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+    await svc.push_frame(LLMFullResponseStartFrame())
+    await svc.push_frame(LLMFullResponseEndFrame())
+    await svc.start_llm_usage_metrics(_usage())
+    assert svc.tasks
+    if closer == "end_frame":
+        await svc.push_frame(EndFrame())
+    else:
+        await svc.push_frame(LLMFullResponseStartFrame())
+    await asyncio.sleep(0)
+
+    assert len(_spans(exporter)) == 1
+    assert all(task.done() for task in svc.tasks)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_end_mid_reply_leaves_no_grace_timer(exporter, svc):
+    await svc.push_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+    await svc.push_frame(LLMFullResponseStartFrame())
+    await svc.push_frame(EndFrame())
+    await svc.cleanup()
+
+    (span,) = _spans(exporter)
+    assert span.attributes["llm.interrupted"] is True
+    assert svc.tasks == []
+
+
+@pytest.mark.asyncio
 async def test_tts_text_is_the_fallback_output_including_text_before_start(exporter, svc):
     tts = TTSTextFrame("Weather", text_type=TextType.SENTENCE)
     await svc.push_frame(tts)
