@@ -16,6 +16,8 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     TTSUpdateSettingsFrame,
 )
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.rime.tts import RimeTTSService
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import SleepFrame, run_test
@@ -70,6 +72,12 @@ def test_language_resolution(language, model):
 def test_tts_preserves_language_before_provider_conversion():
     tts = RecordingTTS(language=Language.DE)
     assert tts._settings.language == "provider-de"
+    assert tts.text_aggregation_language == "de"
+
+
+@pytest.mark.parametrize("service_cls", [CartesiaTTSService, RimeTTSService])
+def test_service_with_its_own_aggregator_follows_the_tts_language(service_cls):
+    tts = service_cls(api_key="test", settings=service_cls.Settings(language=Language.DE))
     assert tts.text_aggregation_language == "de"
 
 

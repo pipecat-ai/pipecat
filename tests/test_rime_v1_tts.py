@@ -502,6 +502,31 @@ async def test_round_trip_streams_one_context_per_turn(protocol: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_text_is_split_into_sentences_with_the_tts_language() -> None:
+    async with _rime_server(_speaking_reply()) as (url, requests):
+        service = RimeV1TTSService(
+            settings=RimeV1TTSService.Settings(model="coda", language=Language.DE),
+            api_key="key",
+            websocket_url=f"{url}/custom/stream",
+        )
+        await run_test(
+            service,
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                *[LLMTextFrame(token) for token in ["Das ist bzw.", " wichtig.", " Danke."]],
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.2),
+            ],
+            start_timeout=3.0,
+        )
+
+    assert [r.text for r in requests if r.WhichOneof("payload") == "text"] == [
+        "Das ist bzw. wichtig. ",
+        "Danke. ",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_token_mode_streams_tokens_and_keeps_spell_tags_whole() -> None:
     async with _rime_server(_speaking_reply()) as (url, requests):
         service = RimeV1TTSService(

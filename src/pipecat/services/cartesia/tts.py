@@ -432,7 +432,9 @@ class CartesiaTTSService(WebsocketTTSService):
         #    to use an LLMTextProcessor and/or a text_transformer to identify
         #    and insert these tags for the purpose of the TTS service alone.
         self._text_aggregator = SkipTagsAggregator(
-            [("<spell>", "</spell>")], aggregation_type=self._text_aggregation_mode
+            [("<spell>", "</spell>")],
+            aggregation_type=self._text_aggregation_mode,
+            language=self._text_aggregator.language,
         )
 
         self._api_key = api_key
