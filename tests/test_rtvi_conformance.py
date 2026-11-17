@@ -534,6 +534,18 @@ class TestRTVIServerReceives(unittest.IsolatedAsyncioTestCase):
                     session = await self._receive(version, type, example.get("data"))
                     self.assertEqual(session.responses_to("under-test"), [])
 
+    async def test_unknown_fields_are_ignored(self):
+        # A later protocol version can add a field to a client message's data.
+        for version in _supported_versions():
+            spec = _Spec(version)
+            for type in sorted(spec.client_types):
+                data = spec.messages[type]["examples"][0]["payload"].get("data")
+                if not isinstance(data, dict):
+                    continue
+                with self.subTest(version=version, type=type):
+                    session = await self._receive(version, type, {**data, "x_unknown": 1})
+                    self.assertEqual(session.responses_to("under-test"), [])
+
 
 class TestRTVIBehaviors(unittest.IsolatedAsyncioTestCase):
     """The server follows each of the document's behaviors.
