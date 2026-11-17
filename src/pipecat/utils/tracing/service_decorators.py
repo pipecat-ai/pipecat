@@ -1830,6 +1830,12 @@ def traced_realtime_llm(cls: P) -> P:
             if state.reply is None and state.speech_end is None:
                 note_speech_end(service, state, time.time())
             else:
+                reply = state.reply
+                onset = state.speech_onset
+                if reply is not None and onset is not None and int(onset * 1e9) < reply.start_ns:
+                    # The onset was of the speech this stop ends, not a barge-in
+                    # on the reply, so the next onset must replace it.
+                    state.speech_onset = None
                 discard_held(state)
         elif isinstance(frame, UserStartedSpeakingFrame):
             note_speech_onset(state, time.time())

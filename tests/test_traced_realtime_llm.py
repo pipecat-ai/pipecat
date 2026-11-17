@@ -45,6 +45,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSTextFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -380,6 +381,26 @@ async def test_user_stopped_speaking_is_the_fallback_start_and_a_late_one_is_ign
     await _settle()
     _, second = _spans(exporter)
     assert second.start_time > after
+
+
+@pytest.mark.asyncio
+async def test_barge_in_after_a_late_user_stop_ends_the_reply_at_the_new_onset(exporter, svc):
+    # The service's own VAD starts the reply before the turn strategy's stop.
+    await svc.push_frame(ProposedUserStartedSpeakingFrame())
+    await svc.push_frame(UserStartedSpeakingFrame())
+    await asyncio.sleep(0.01)
+    await svc.push_frame(LLMFullResponseStartFrame())
+    await svc.push_frame(UserStoppedSpeakingFrame())
+    await asyncio.sleep(0.1)
+    before_barge_in = time.time_ns()
+    await svc.push_frame(ProposedUserStartedSpeakingFrame())
+    await svc.push_frame(InterruptionFrame())
+    await svc.start_llm_usage_metrics(_usage())
+
+    await _settle()
+    (span,) = _spans(exporter)
+    assert span.attributes["llm.interrupted"] is True
+    assert span.end_time >= before_barge_in
 
 
 @pytest.mark.asyncio
