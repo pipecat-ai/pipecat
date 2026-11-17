@@ -699,6 +699,9 @@ class BotTranscriptionMessage(BaseModel):
     """Message containing bot transcription text.
 
     Sent when the bot's speech is transcribed.
+
+    .. deprecated:: 1.17.0
+        Use :class:`BotOutputMessage` instead. Will be removed in 2.0.0.
     """
 
     label: MessageLiteral = MESSAGE_LABEL

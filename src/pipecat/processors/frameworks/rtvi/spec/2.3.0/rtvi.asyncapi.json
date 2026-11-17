@@ -2171,7 +2171,7 @@
       "bot_transcription": {
         "name": "bot-transcription",
         "title": "bot-transcription",
-        "summary": "The text of the bot's LLM response, a whole sentence at a time. On by default; turned off by the server's `bot_llm_enabled` setting.",
+        "summary": "The text of the bot's LLM response, a whole sentence at a time. On by default; turned off by the server's `bot_llm_enabled` setting. Deprecated. Use bot-output instead.",
         "tags": [
           {
             "name": "Speaking and Transcription"
@@ -2208,7 +2208,8 @@
           }
         ],
         "description": "It carries no timing. For text as the bot speaks it, use tts-raw-text.",
-        "x-rtvi-enabled-by": "bot_llm_enabled"
+        "x-rtvi-enabled-by": "bot_llm_enabled",
+        "x-rtvi-deprecated": "Use bot-output instead."
       },
       "bot_llm_text": {
         "name": "bot-llm-text",

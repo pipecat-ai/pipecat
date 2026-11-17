@@ -601,6 +601,7 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         {"text": "It's sunny in Lisbon."},
         enabled_by="bot_llm_enabled",
         details="It carries no timing. For text as the bot speaks it, use tts-raw-text.",
+        deprecated="Use bot-output instead.",
     ),
     _server(
         RTVI.BotLLMTextMessage,

@@ -1653,6 +1653,17 @@
       "location": "pipecat/processors/frameworks/rtvi/models.py"
     },
     {
+      "subject": "BotTranscriptionMessage",
+      "module": "pipecat.processors.frameworks.rtvi.models",
+      "kind": "class",
+      "deprecated_in": "1.17.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "BotOutputMessage",
+      "message": "Use :class:`BotOutputMessage` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/processors/frameworks/rtvi/models.py"
+    },
+    {
       "subject": "LLMFunctionCallMessage",
       "module": "pipecat.processors.frameworks.rtvi.models",
       "kind": "class",
