@@ -14,7 +14,6 @@ from pydantic import BaseModel, TypeAdapter
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 import pipecat.processors.frameworks.rtvi.processor as rtvi_processor
-import pipecat.services.google.rtvi as google_rtvi
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserverParams
 from pipecat.processors.frameworks.rtvi.spec import (
     BEHAVIORS,
@@ -34,16 +33,11 @@ _UNSENT_MODELS = {"bot-tts-audio"}
 def _message_models() -> dict[str, type[BaseModel]]:
     """Every RTVI message model, by its type: each model with a label and a fixed type."""
     models = {}
-    for module in (RTVI, google_rtvi):
-        for obj in vars(module).values():
-            if (
-                inspect.isclass(obj)
-                and issubclass(obj, BaseModel)
-                and obj.__module__ == module.__name__
-            ):
-                type = obj.model_fields.get("type")
-                if "label" in obj.model_fields and type and isinstance(type.default, str):
-                    models[type.default] = obj
+    for obj in vars(RTVI).values():
+        if inspect.isclass(obj) and issubclass(obj, BaseModel) and obj.__module__ == RTVI.__name__:
+            type = obj.model_fields.get("type")
+            if "label" in obj.model_fields and type and isinstance(type.default, str):
+                models[type.default] = obj
     return models
 
 
