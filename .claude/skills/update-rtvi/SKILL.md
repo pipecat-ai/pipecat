@@ -47,7 +47,8 @@ If the list is empty (logging, internals, refactoring), stop and report "no prot
 Read `PROTOCOL_VERSION` in `models.py` and `spec/released.json`.
 
 - **`PROTOCOL_VERSION` isn't in `released.json`**: it hasn't shipped, so the change joins it. No bump.
-- **It is, and the change is Added, Loosened, Behavior or Deprecated**: bump the minor version, `X.Y.0` to `X.(Y+1).0`.
+- **It is, and the change is Added, Loosened or Behavior**: bump the minor version, `X.Y.0` to `X.(Y+1).0`.
+- **It is, and the change only deprecates a message**: no bump. A deprecated message is still sent and accepted, so its deprecation joins the released version's document, and the contract hash ignores it.
 - **It is, and the change is Tightened or Removed or renamed**: this breaks existing clients and needs a major version. Stop and ask the developer: a major bump changes which clients the server serves (see `LEGACY_SUPPORTED_MAJOR` and the client-ready version check), and usually the change can be made compatible instead, by adding the new form next to the old one and deprecating the old.
 - **It is, and the change only makes a schema more precise** while the server already sends exactly that: the README's rule for released versions applies. No bump; the version's `contract_sha256` in `released.json` is updated by hand. Confirm with the developer before touching `released.json`, and show the conformance test that proves the server sends what the new schema says.
 

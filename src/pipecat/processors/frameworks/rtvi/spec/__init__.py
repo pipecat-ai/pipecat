@@ -1108,8 +1108,9 @@ def released() -> dict[str, dict]:
     return json.loads(released_path().read_text(encoding="utf-8"))
 
 
-# Keys that only describe, and maps whose keys are names rather than keywords.
-_PROSE = frozenset({"description", "summary", "title", "examples", "tags"})
+# Keys that only describe, and maps whose keys are names rather than keywords. A
+# deprecation describes too: a deprecated message is sent and accepted as before.
+_PROSE = frozenset({"description", "summary", "title", "examples", "tags", "x-rtvi-deprecated"})
 _NAMED = frozenset(
     {"properties", "patternProperties", "$defs", "schemas", "messages", "channels", "operations"}
 )
@@ -1132,8 +1133,8 @@ def contract_sha256(version: str = RTVI.PROTOCOL_VERSION) -> str:
     """The SHA-256 of a protocol version's contract, as hex.
 
     The contract is the document without its descriptions, summaries, titles,
-    examples and tags, so clearer wording doesn't change it, and any change to
-    the wire format does.
+    examples, tags and deprecations, so clearer wording doesn't change it, and
+    any change to the wire format does.
 
     Args:
         version: The protocol version. Defaults to the current one.

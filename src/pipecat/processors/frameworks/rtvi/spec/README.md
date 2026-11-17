@@ -58,7 +58,7 @@ The documents are generated, never edited by hand. The current version's documen
 
 ## Releases
 
-Clients implement a protocol version from its document, so once a Pipecat release has shipped a version, its wire format never changes: what the server accepts and sends, and how. Any change to it is a new protocol version. The document's descriptions and examples can still be improved.
+Clients implement a protocol version from its document, so once a Pipecat release has shipped a version, its wire format never changes: what the server accepts and sends, and how. Any change to it is a new protocol version. The document's descriptions and examples can still be improved, and a message can be marked deprecated, since a deprecated message is still sent and accepted.
 
 A released version's schemas can also describe its wire format more precisely, where the server already sends exactly what the more precise schema says, such as `metrics` data typed by kind rather than left as any object. `tests/test_rtvi_conformance.py` must show the server's messages match it. Since the hash covers the schemas, update the version's `contract_sha256` in `released.json` in the same change, by hand: the record script never overwrites a version it has recorded.
 
@@ -68,7 +68,7 @@ A released version's schemas can also describe its wire format more precisely, w
 { "2.3.0": { "contract_sha256": "56d5…", "pipecat": "1.15.0" } }
 ```
 
-The hash covers the document without its descriptions, summaries, titles, examples and tags, so rewording a description doesn't change it, and a change to the wire format does.
+The hash covers the document without its descriptions, summaries, titles, examples, tags and deprecations, so rewording a description or deprecating a message doesn't change it, and a change to the wire format does.
 
 When a release is prepared, the changelog workflow (`.github/workflows/generate-changelog.yml`) runs `scripts/rtvi/record_released_spec.py --version <release>`, which adds the current protocol version to `released.json` in the release PR. A version already recorded stays as it is. `tests/test_rtvi_spec.py` fails when the wire format of a recorded version has changed, which means it's time to bump `PROTOCOL_VERSION`.
 
