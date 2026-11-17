@@ -2603,12 +2603,10 @@
         "properties": {
           "ref": {
             "description": "Stable client-assigned element reference.",
-            "title": "Ref",
             "type": "string"
           },
           "role": {
             "description": "ARIA-style role for the node.",
-            "title": "Role",
             "type": "string"
           },
           "name": {
@@ -2621,8 +2619,7 @@
               }
             ],
             "default": null,
-            "description": "Optional accessible name.",
-            "title": "Name"
+            "description": "Optional accessible name."
           },
           "value": {
             "anyOf": [
@@ -2634,8 +2631,7 @@
               }
             ],
             "default": null,
-            "description": "Optional current value for inputs/progress/etc.",
-            "title": "Value"
+            "description": "Optional current value for inputs/progress/etc."
           },
           "state": {
             "anyOf": [
@@ -2650,8 +2646,7 @@
               }
             ],
             "default": null,
-            "description": "Optional short state tags (e.g. `\"focused\"`, `\"disabled\"`, `\"offscreen\"`).",
-            "title": "State"
+            "description": "Optional short state tags (e.g. `\"focused\"`, `\"disabled\"`, `\"offscreen\"`)."
           },
           "level": {
             "anyOf": [
@@ -2663,8 +2658,7 @@
               }
             ],
             "default": null,
-            "description": "Optional heading level.",
-            "title": "Level"
+            "description": "Optional heading level."
           },
           "colcount": {
             "anyOf": [
@@ -2676,8 +2670,7 @@
               }
             ],
             "default": null,
-            "description": "Optional column count for grid-like containers.",
-            "title": "Colcount"
+            "description": "Optional column count for grid-like containers."
           },
           "rowcount": {
             "anyOf": [
@@ -2689,8 +2682,7 @@
               }
             ],
             "default": null,
-            "description": "Optional row count for grid-like containers.",
-            "title": "Rowcount"
+            "description": "Optional row count for grid-like containers."
           },
           "children": {
             "anyOf": [
@@ -2705,8 +2697,7 @@
               }
             ],
             "default": null,
-            "description": "Optional child nodes.",
-            "title": "Children"
+            "description": "Optional child nodes."
           }
         },
         "required": [
@@ -2722,12 +2713,10 @@
         "properties": {
           "ref": {
             "description": "Ref of the element that carries the selection.",
-            "title": "Ref",
             "type": "string"
           },
           "text": {
             "description": "Selected text.",
-            "title": "Text",
             "type": "string"
           },
           "start_offset": {
@@ -2740,8 +2729,7 @@
               }
             ],
             "default": null,
-            "description": "Optional selection start offset.",
-            "title": "Start Offset"
+            "description": "Optional selection start offset."
           },
           "end_offset": {
             "anyOf": [
@@ -2753,8 +2741,7 @@
               }
             ],
             "default": null,
-            "description": "Optional selection end offset.",
-            "title": "End Offset"
+            "description": "Optional selection end offset."
           }
         },
         "required": [
@@ -2769,12 +2756,15 @@
         "description": "Client accessibility snapshot sent in a `ui-snapshot` message.",
         "properties": {
           "root": {
-            "$ref": "#/components/schemas/A11yNode",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/A11yNode"
+              }
+            ],
             "description": "Root accessibility node."
           },
           "captured_at": {
             "description": "Client-side epoch milliseconds when captured.",
-            "title": "Captured At",
             "type": "integer"
           },
           "selection": {
@@ -2802,7 +2792,6 @@
         "properties": {
           "library": {
             "description": "The RTVI library the client uses, such as `@pipecat-ai/client-js`.",
-            "title": "Library",
             "type": "string"
           },
           "library_version": {
@@ -2815,8 +2804,7 @@
               }
             ],
             "default": null,
-            "description": "The version of that library.",
-            "title": "Library Version"
+            "description": "The version of that library."
           },
           "platform": {
             "anyOf": [
@@ -2828,8 +2816,7 @@
               }
             ],
             "default": null,
-            "description": "The platform the client runs on, such as a browser or `iOS`.",
-            "title": "Platform"
+            "description": "The platform the client runs on, such as a browser or `iOS`."
           },
           "platform_version": {
             "anyOf": [
@@ -2841,8 +2828,7 @@
               }
             ],
             "default": null,
-            "description": "The platform's version.",
-            "title": "Platform Version"
+            "description": "The platform's version."
           },
           "platform_details": {
             "anyOf": [
@@ -2852,8 +2838,7 @@
               }
             ],
             "default": null,
-            "description": "Anything else the client says about its platform.",
-            "title": "Platform Details"
+            "description": "Anything else the client says about its platform."
           }
         },
         "required": [
@@ -2867,7 +2852,6 @@
         "properties": {
           "value": {
             "description": "How loud the audio is, from 0 (quiet) to 1 (loud).",
-            "title": "Value",
             "type": "number"
           }
         },
@@ -2881,82 +2865,28 @@
         "description": "What a bot does in a session.",
         "properties": {
           "audio_in": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Whether the bot receives the user's audio.",
-            "title": "Audio In"
+            "type": "boolean"
           },
           "audio_out": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Whether the bot sends audio to the user.",
-            "title": "Audio Out"
+            "type": "boolean"
           },
           "video_in": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Whether the bot receives the user's video.",
-            "title": "Video In"
+            "type": "boolean"
           },
           "screen_in": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Whether the bot receives the user's screen share. Known when the transport captures its video sources from `video_in_sources`; unknown when the application captures them itself.",
-            "title": "Screen In"
+            "type": "boolean"
           },
           "video_out": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Whether the bot sends video to the user.",
-            "title": "Video Out"
+            "type": "boolean"
           },
           "metrics": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Whether the bot reports metrics.",
-            "title": "Metrics"
+            "type": "boolean"
           }
         },
         "title": "BotCapabilities",
@@ -2967,26 +2897,15 @@
         "properties": {
           "text": {
             "description": "The marker as the LLM produced it; empty when the response carried none.",
-            "title": "Text",
             "type": "string"
           },
           "kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "What the marker means, such as `complete`, `short` or `long` for the markers that say whether the user's turn was complete, or `null` when it means nothing the server knows.",
-            "title": "Kind"
+            "type": "string"
           },
           "raw": {
             "default": "",
             "description": "The response's text as the LLM produced it, markers included.",
-            "title": "Raw",
             "type": "string"
           },
           "markers": {
@@ -2994,12 +2913,13 @@
             "items": {
               "type": "string"
             },
-            "title": "Markers",
             "type": "array"
           }
         },
         "required": [
-          "text"
+          "text",
+          "raw",
+          "markers"
         ],
         "title": "BotLLMMarkerMessageData",
         "type": "object"
@@ -3009,7 +2929,6 @@
         "properties": {
           "text": {
             "description": "The text.",
-            "title": "Text",
             "type": "string"
           },
           "output_type": {
@@ -3021,8 +2940,7 @@
                 "type": "string"
               }
             ],
-            "description": "What form the text is in (e.g., sentence, code, etc.).",
-            "title": "Output Type"
+            "description": "What form the text is in (e.g., sentence, code, etc.)."
           },
           "text_type": {
             "anyOf": [
@@ -3031,14 +2949,10 @@
               },
               {
                 "type": "string"
-              },
-              {
-                "type": "null"
               }
             ],
-            "default": null,
-            "description": "What form the text is in, always the same as `output_type`. Deprecated: Use `output_type` instead.",
-            "title": "Text Type"
+            "deprecated": true,
+            "description": "What form the text is in, always the same as `output_type`. Deprecated: Use `output_type` instead."
           },
           "aggregated_by": {
             "anyOf": [
@@ -3047,99 +2961,46 @@
               },
               {
                 "type": "string"
-              },
-              {
-                "type": "null"
               }
             ],
-            "default": null,
-            "description": "What form the text is in, always the same as `output_type`. Deprecated: Use `output_type` instead.",
-            "title": "Aggregated By"
+            "deprecated": true,
+            "description": "What form the text is in, always the same as `output_type`. Deprecated: Use `output_type` instead."
           },
           "segment_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Identifies the segment the text belongs to; every message about one segment, such as its spoken progress, carries the same id.",
-            "title": "Segment Id"
+            "type": "integer"
           },
           "spoken": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "**(v1 only)** Whether the text has been spoken by TTS.",
-            "title": "Spoken"
+            "type": "boolean"
           },
           "will_be_spoken": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "**(v2+)** Whether the text will be spoken by TTS.",
-            "title": "Will Be Spoken"
+            "type": "boolean"
           },
           "spoken_status": {
-            "anyOf": [
-              {
-                "enum": [
-                  "new",
-                  "in-progress",
-                  "completed"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "**(v2+)** Lifecycle status of the segment: `\"new\"` on its first message, the only one for text that isn't spoken; `\"in-progress\"` as each of its words is spoken, for TTS services with word timestamps; `\"completed\"` once its last word is spoken.",
-            "title": "Spoken Status"
+            "enum": [
+              "new",
+              "in-progress",
+              "completed"
+            ],
+            "type": "string"
           },
           "spoken_progress": {
-            "anyOf": [
+            "allOf": [
               {
                 "$ref": "#/components/schemas/SpokenProgressData"
-              },
-              {
-                "type": "null"
               }
             ],
-            "default": null,
             "description": "**(v2+)** Accumulated / remaining text breakdown. Present when `will_be_spoken` is `true`."
           },
           "delivery": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "**(2.3.0+)** The delivery of the text just spoken, by its universal names, such as `[\"warm\", \"emphasis\"]`, empty for the voice's baseline. They change within a segment where its delivery does, so a segment's `\"new\"` message has none. Present in expressive conversation (alpha).",
-            "title": "Delivery"
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -3154,33 +3015,19 @@
         "properties": {
           "version": {
             "description": "The RTVI protocol version the bot speaks with this client.",
-            "title": "Version",
             "type": "string"
           },
           "about": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
+            "additionalProperties": true,
             "description": "Information about the bot, such as the Pipecat library and version.",
-            "title": "About"
+            "type": "object"
           },
           "capabilities": {
-            "anyOf": [
+            "allOf": [
               {
                 "$ref": "#/components/schemas/BotCapabilities"
-              },
-              {
-                "type": "null"
               }
             ],
-            "default": null,
             "description": "What the bot does in this session (media sent and received, metrics), so the client can show only the UI that applies. Added in protocol 2.2.0."
           }
         },
@@ -3194,30 +3041,12 @@
         "description": "Click an element on the client.",
         "properties": {
           "ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Snapshot ref from `<ui_state>`.",
-            "title": "Ref"
+            "type": "string"
           },
           "target_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Element id registered on the client. Used as a fallback when `ref` is not set or has gone stale.",
-            "title": "Target Id"
+            "type": "string"
           }
         },
         "title": "Click",
@@ -3228,11 +3057,14 @@
         "properties": {
           "version": {
             "description": "The RTVI protocol version the client speaks, such as `2.3.0`.",
-            "title": "Version",
             "type": "string"
           },
           "about": {
-            "$ref": "#/components/schemas/AboutClientData",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AboutClientData"
+              }
+            ],
             "description": "Information about the client. A server receiving a `client-ready` without it, or with an invalid one, still starts the session, as a client of an unknown library."
           }
         },
@@ -3252,7 +3084,6 @@
               "$ref": "#/components/schemas/KeypadEntry"
             },
             "minItems": 1,
-            "title": "Buttons",
             "type": "array"
           }
         },
@@ -3267,12 +3098,10 @@
         "properties": {
           "error": {
             "description": "What went wrong.",
-            "title": "Error",
             "type": "string"
           },
           "fatal": {
             "description": "Whether the bot stopped because of the error.",
-            "title": "Fatal",
             "type": "boolean"
           }
         },
@@ -3288,7 +3117,6 @@
         "properties": {
           "error": {
             "description": "What went wrong.",
-            "title": "Error",
             "type": "string"
           }
         },
@@ -3303,7 +3131,6 @@
         "properties": {
           "format": {
             "description": "The file's MIME type, such as `application/pdf` or `image/png`.",
-            "title": "Format",
             "type": "string"
           },
           "name": {
@@ -3316,8 +3143,7 @@
               }
             ],
             "default": null,
-            "description": "The file's name.",
-            "title": "Name"
+            "description": "The file's name."
           },
           "source": {
             "anyOf": [
@@ -3328,8 +3154,7 @@
                 "$ref": "#/components/schemas/FileUrl"
               }
             ],
-            "description": "Where the file's content is: its bytes, or a URL.",
-            "title": "Source"
+            "description": "Where the file's content is: its bytes, or a URL."
           }
         },
         "required": [
@@ -3349,12 +3174,10 @@
               "bytes",
               "url"
             ],
-            "title": "Type",
             "type": "string"
           },
           "bytes": {
             "description": "The file's content, base64-encoded.",
-            "title": "Bytes",
             "type": "string"
           },
           "width": {
@@ -3367,8 +3190,7 @@
               }
             ],
             "default": null,
-            "description": "For an image, its width in pixels.",
-            "title": "Width"
+            "description": "For an image, its width in pixels."
           },
           "height": {
             "anyOf": [
@@ -3380,8 +3202,7 @@
               }
             ],
             "default": null,
-            "description": "For an image, its height in pixels.",
-            "title": "Height"
+            "description": "For an image, its height in pixels."
           }
         },
         "required": [
@@ -3400,12 +3221,10 @@
               "bytes",
               "url"
             ],
-            "title": "Type",
             "type": "string"
           },
           "url": {
             "description": "The file's URL: whatever the `POST /files` upload endpoint returned (`pipecat:<id>` with the default local storage, or a URL minted by a custom storage backend), a cloud-storage URI (`s3://`, `gs://`), or a plain `http(s)` URL. The URL is resolved at completion time: the LLM provider fetches it itself when it can (public URLs, its own cloud IAM), and otherwise the LLM service's `FileResolver` downloads the bytes and inlines them.",
-            "title": "Url",
             "type": "string"
           }
         },
@@ -3419,30 +3238,12 @@
         "description": "Move input focus to a target element.",
         "properties": {
           "ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Snapshot ref from `<ui_state>`.",
-            "title": "Ref"
+            "type": "string"
           },
           "target_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Element id registered on the client.",
-            "title": "Target Id"
+            "type": "string"
           }
         },
         "title": "Focus",
@@ -3452,43 +3253,16 @@
         "description": "Briefly emphasize a target element (flash, glow, pulse).",
         "properties": {
           "ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Snapshot ref from `<ui_state>`.",
-            "title": "Ref"
+            "type": "string"
           },
           "target_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Element id registered on the client.",
-            "title": "Target Id"
+            "type": "string"
           },
           "duration_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional highlight duration. Client default applies when None.",
-            "title": "Duration Ms"
+            "type": "integer"
           }
         },
         "title": "Highlight",
@@ -3518,35 +3292,16 @@
         "properties": {
           "tool_call_id": {
             "description": "Unique identifier of the call.",
-            "title": "Tool Call Id",
             "type": "string"
           },
           "function_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Name of the function called.",
-            "title": "Function Name"
+            "type": "string"
           },
           "arguments": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
+            "additionalProperties": true,
             "description": "Arguments passed to the function.",
-            "title": "Arguments"
+            "type": "object"
           }
         },
         "required": [
@@ -3561,18 +3316,15 @@
         "properties": {
           "function_name": {
             "description": "Name of the function called.",
-            "title": "Function Name",
             "type": "string"
           },
           "tool_call_id": {
             "description": "Unique identifier of the call.",
-            "title": "Tool Call Id",
             "type": "string"
           },
           "args": {
             "additionalProperties": true,
             "description": "Arguments passed to the function.",
-            "title": "Args",
             "type": "object"
           }
         },
@@ -3589,18 +3341,15 @@
         "properties": {
           "function_name": {
             "description": "Name of the function called.",
-            "title": "Function Name",
             "type": "string"
           },
           "tool_call_id": {
             "description": "Unique identifier of the call, as the server reported it.",
-            "title": "Tool Call Id",
             "type": "string"
           },
           "arguments": {
             "additionalProperties": true,
             "description": "Arguments the function was called with.",
-            "title": "Arguments",
             "type": "object"
           },
           "result": {
@@ -3613,8 +3362,7 @@
                 "type": "string"
               }
             ],
-            "description": "What the function returned.",
-            "title": "Result"
+            "description": "What the function returned."
           }
         },
         "required": [
@@ -3630,17 +3378,8 @@
         "description": "Data for LLM function call start notification.",
         "properties": {
           "function_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Name of the function called.",
-            "title": "Function Name"
+            "type": "string"
           }
         },
         "title": "LLMFunctionCallStartMessageData",
@@ -3651,37 +3390,18 @@
         "properties": {
           "tool_call_id": {
             "description": "Unique identifier of the call.",
-            "title": "Tool Call Id",
             "type": "string"
           },
           "cancelled": {
             "description": "Whether the call was cancelled rather than completed.",
-            "title": "Cancelled",
             "type": "boolean"
           },
           "function_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Name of the function called.",
-            "title": "Function Name"
+            "type": "string"
           },
           "result": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The result, when the call completed with one.",
-            "title": "Result"
+            "description": "The result, when the call completed with one."
           }
         },
         "required": [
@@ -3696,96 +3416,39 @@
         "properties": {
           "prompt_tokens": {
             "description": "Number of tokens in the input prompt, net or gross of the cache counts depending on the service. Includes tool results the provider feeds back to the model, which are billed as input.",
-            "title": "Prompt Tokens",
             "type": "integer"
           },
           "completion_tokens": {
             "description": "Number of tokens in the generated completion, including any reasoning tokens.",
-            "title": "Completion Tokens",
             "type": "integer"
           },
           "total_tokens": {
             "description": "Total number of tokens used, including any cached input tokens.",
-            "title": "Total Tokens",
             "type": "integer"
           },
           "cache_read_input_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Number of tokens read from cache, if applicable. Billed below the input rate.",
-            "title": "Cache Read Input Tokens"
+            "type": "integer"
           },
           "cache_creation_input_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Number of tokens written to cache, if applicable. Billed at or above the input rate.",
-            "title": "Cache Creation Input Tokens"
+            "type": "integer"
           },
           "reasoning_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Number of completion tokens used for reasoning, if applicable.",
-            "title": "Reasoning Tokens"
+            "type": "integer"
           },
           "input_audio_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Number of prompt tokens that were audio, if applicable.",
-            "title": "Input Audio Tokens"
+            "type": "integer"
           },
           "output_audio_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Number of completion tokens that were audio, if applicable.",
-            "title": "Output Audio Tokens"
+            "type": "integer"
           },
           "cache_read_input_audio_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Number of cache-read tokens that were audio, if applicable.",
-            "title": "Cache Read Input Audio Tokens"
+            "type": "integer"
           }
         },
         "required": [
@@ -3800,116 +3463,53 @@
         "description": "Data for a metrics message: the metrics the bot's services reported.",
         "properties": {
           "processing": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/ProcessingMetricsData"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "How long each service took to process, in seconds.",
-            "title": "Processing"
+            "items": {
+              "$ref": "#/components/schemas/ProcessingMetricsData"
+            },
+            "type": "array"
           },
           "ttfb": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/TTFBMetricsData"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Each service's time to first byte, in seconds.",
-            "title": "Ttfb"
+            "items": {
+              "$ref": "#/components/schemas/TTFBMetricsData"
+            },
+            "type": "array"
           },
           "ttfa": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/TTFAMetricsData"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Each TTS service's time to first audio: its time to first byte plus any silence before the first audible sample.",
-            "title": "Ttfa"
+            "items": {
+              "$ref": "#/components/schemas/TTFAMetricsData"
+            },
+            "type": "array"
           },
           "ttfat": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/TTFATMetricsData"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Each LLM service's time to first answer token: its time to first byte plus any reasoning it streamed first.",
-            "title": "Ttfat"
+            "items": {
+              "$ref": "#/components/schemas/TTFATMetricsData"
+            },
+            "type": "array"
           },
           "tokens": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/LLMTokenUsage"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "The tokens each LLM call used.",
-            "title": "Tokens"
+            "items": {
+              "$ref": "#/components/schemas/LLMTokenUsage"
+            },
+            "type": "array"
           },
           "stt_usage": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/STTUsageMetricsData"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "How much audio each STT service received.",
-            "title": "Stt Usage"
+            "items": {
+              "$ref": "#/components/schemas/STTUsageMetricsData"
+            },
+            "type": "array"
           },
           "characters": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/TTSUsageMetricsData"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "How many characters each TTS service spoke.",
-            "title": "Characters"
+            "items": {
+              "$ref": "#/components/schemas/TTSUsageMetricsData"
+            },
+            "type": "array"
           }
         },
         "title": "MetricsMessageData",
@@ -3920,22 +3520,12 @@
         "properties": {
           "view": {
             "description": "App-defined view name (route, screen id, tab key, etc.).",
-            "title": "View",
             "type": "string"
           },
           "params": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
+            "additionalProperties": true,
             "description": "Optional view-specific parameters.",
-            "title": "Params"
+            "type": "object"
           }
         },
         "required": [
@@ -3949,25 +3539,14 @@
         "properties": {
           "processor": {
             "description": "Name of the processor generating the metrics.",
-            "title": "Processor",
             "type": "string"
           },
           "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional model name associated with the metrics.",
-            "title": "Model"
+            "type": "string"
           },
           "value": {
             "description": "Processing time measurement in seconds.",
-            "title": "Value",
             "type": "number"
           }
         },
@@ -3986,17 +3565,14 @@
             "items": {
               "type": "string"
             },
-            "title": "Base64Audiobatch",
             "type": "array"
           },
           "sampleRate": {
             "description": "The audio's sample rate, in Hz.",
-            "title": "Samplerate",
             "type": "integer"
           },
           "numChannels": {
             "description": "The audio's number of channels.",
-            "title": "Numchannels",
             "type": "integer"
           }
         },
@@ -4013,17 +3589,14 @@
         "properties": {
           "base64Audio": {
             "description": "16-bit PCM audio, base64-encoded.",
-            "title": "Base64Audio",
             "type": "string"
           },
           "sampleRate": {
             "description": "The audio's sample rate, in Hz.",
-            "title": "Samplerate",
             "type": "integer"
           },
           "numChannels": {
             "description": "The audio's number of channels.",
-            "title": "Numchannels",
             "type": "integer"
           }
         },
@@ -4040,7 +3613,6 @@
         "properties": {
           "t": {
             "description": "The message's type, one of the application's own.",
-            "title": "T",
             "type": "string"
           },
           "d": {
@@ -4051,8 +3623,7 @@
               }
             ],
             "default": null,
-            "description": "The message's data, of the application's own.",
-            "title": "D"
+            "description": "The message's data, of the application's own."
           }
         },
         "required": [
@@ -4066,19 +3637,10 @@
         "properties": {
           "t": {
             "description": "The `t` of the client message this answers.",
-            "title": "T",
             "type": "string"
           },
           "d": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The answer's data, of the application's own.",
-            "title": "D"
+            "description": "The answer's data, of the application's own."
           }
         },
         "required": [
@@ -4092,34 +3654,26 @@
         "properties": {
           "text": {
             "description": "The transcribed text.",
-            "title": "Text",
             "type": "string"
           },
           "user_id": {
             "description": "Identifier for the user who spoke.",
-            "title": "User Id",
             "type": "string"
           },
           "timestamp": {
             "description": "When the user said it.",
-            "title": "Timestamp",
             "type": "string"
           },
           "final": {
             "description": "Whether the transcription is final, as opposed to interim.",
-            "title": "Final",
             "type": "boolean"
           },
           "speaker": {
-            "anyOf": [
+            "allOf": [
               {
                 "$ref": "#/components/schemas/TranscriptionSpeaker"
-              },
-              {
-                "type": "null"
               }
             ],
-            "default": null,
             "description": "Who said it, when the STT service's diarization tells speakers apart."
           }
         },
@@ -4137,7 +3691,6 @@
         "properties": {
           "audio_seconds": {
             "description": "Client-measured seconds of audio submitted to the service since the last usage report.",
-            "title": "Audio Seconds",
             "type": "number"
           }
         },
@@ -4152,24 +3705,18 @@
         "properties": {
           "processor": {
             "description": "Name of the processor generating the metrics.",
-            "title": "Processor",
             "type": "string"
           },
           "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional model name associated with the metrics.",
-            "title": "Model"
+            "type": "string"
           },
           "value": {
-            "$ref": "#/components/schemas/STTUsage",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/STTUsage"
+              }
+            ],
             "description": "Usage statistics for the STT operation."
           }
         },
@@ -4184,43 +3731,16 @@
         "description": "Scroll a target element into view.",
         "properties": {
           "ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Snapshot ref from `<ui_state>`.",
-            "title": "Ref"
+            "type": "string"
           },
           "target_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Element id registered on the client.",
-            "title": "Target Id"
+            "type": "string"
           },
           "behavior": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional scroll behavior hint. Typical values: `\"smooth\"` or `\"instant\"`. Clients may ignore.",
-            "title": "Behavior"
+            "type": "string"
           }
         },
         "title": "ScrollTo",
@@ -4230,56 +3750,20 @@
         "description": "Select text on the page so the user can see what the worker means.",
         "properties": {
           "ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Snapshot ref from `<ui_state>`. Typically the ref of a paragraph or input element.",
-            "title": "Ref"
+            "type": "string"
           },
           "target_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Element id registered on the client. Used as a fallback when `ref` is not set or has gone stale.",
-            "title": "Target Id"
+            "type": "string"
           },
           "start_offset": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Character offset within the target's text where the selection should start. For `<input>` and `<textarea>` this is the value offset; for document elements it is computed against the concatenation of descendant text nodes in document order.",
-            "title": "Start Offset"
+            "type": "integer"
           },
           "end_offset": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "End character offset, exclusive. Same coordinate system as `start_offset`.",
-            "title": "End Offset"
+            "type": "integer"
           }
         },
         "title": "SelectText",
@@ -4290,11 +3774,14 @@
         "properties": {
           "content": {
             "description": "Text that goes with the file, such as a question about it.",
-            "title": "Content",
             "type": "string"
           },
           "file": {
-            "$ref": "#/components/schemas/File",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/File"
+              }
+            ],
             "description": "The file."
           },
           "options": {
@@ -4323,13 +3810,11 @@
           "run_immediately": {
             "default": true,
             "description": "Whether the bot responds to the file right away, interrupting itself if it is speaking. When false, the file waits in the conversation for the bot's next response.",
-            "title": "Run Immediately",
             "type": "boolean"
           },
           "audio_response": {
             "default": true,
             "description": "Whether the bot speaks its response. When false, the response is text only.",
-            "title": "Audio Response",
             "type": "boolean"
           },
           "custom_options": {
@@ -4343,8 +3828,7 @@
               }
             ],
             "default": null,
-            "description": "Options for the LLM provider, such as OpenAI's `detail` or Bedrock's `citations`.",
-            "title": "Custom Options"
+            "description": "Options for the LLM provider, such as OpenAI's `detail` or Bedrock's `citations`."
           }
         },
         "title": "SendFileOptions",
@@ -4355,7 +3839,6 @@
         "properties": {
           "content": {
             "description": "The text.",
-            "title": "Content",
             "type": "string"
           },
           "options": {
@@ -4383,13 +3866,11 @@
           "run_immediately": {
             "default": true,
             "description": "Whether the bot responds to the text right away, interrupting itself if it is speaking. When false, the text waits in the conversation for the bot's next response.",
-            "title": "Run Immediately",
             "type": "boolean"
           },
           "audio_response": {
             "default": true,
             "description": "Whether the bot speaks its response. When false, the response is text only.",
-            "title": "Audio Response",
             "type": "boolean"
           }
         },
@@ -4402,42 +3883,26 @@
           "value": {
             "default": "",
             "description": "The text to write.",
-            "title": "Value",
             "type": "string"
           },
           "ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Snapshot ref from `<ui_state>`. Typically the ref of an `<input>` or `<textarea>`.",
-            "title": "Ref"
+            "type": "string"
           },
           "target_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Element id registered on the client. Used as a fallback when `ref` is not set or has gone stale.",
-            "title": "Target Id"
+            "type": "string"
           },
           "replace": {
             "default": true,
             "description": "When True (the default), overwrite the current value. When False, append to it.",
-            "title": "Replace",
             "type": "boolean"
           }
         },
+        "required": [
+          "value",
+          "replace"
+        ],
         "title": "SetInputValue",
         "type": "object"
       },
@@ -4446,12 +3911,10 @@
         "properties": {
           "accumulated_text": {
             "description": "Text already spoken in this segment, including the current word.",
-            "title": "Accumulated Text",
             "type": "string"
           },
           "remaining_text": {
             "description": "Text not yet spoken in this segment.",
-            "title": "Remaining Text",
             "type": "string"
           }
         },
@@ -4467,35 +3930,22 @@
         "properties": {
           "processor": {
             "description": "Name of the processor generating the metrics.",
-            "title": "Processor",
             "type": "string"
           },
           "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional model name associated with the metrics.",
-            "title": "Model"
+            "type": "string"
           },
           "ttfa": {
             "description": "TTFA measurement in seconds (`ttfb` plus `leading_silence`).",
-            "title": "Ttfa",
             "type": "number"
           },
           "ttfb": {
             "description": "Time-to-first-byte that TTFA builds on, in seconds. This mirrors the standalone `TTFBMetricsData` (emitted earlier) for convenience; it is not a separate measurement, so don't aggregate both.",
-            "title": "Ttfb",
             "type": "number"
           },
           "leading_silence": {
             "description": "Silence padding before the first audible sample, in seconds (`ttfa` minus `ttfb`).",
-            "title": "Leading Silence",
             "type": "number"
           }
         },
@@ -4513,35 +3963,22 @@
         "properties": {
           "processor": {
             "description": "Name of the processor generating the metrics.",
-            "title": "Processor",
             "type": "string"
           },
           "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional model name associated with the metrics.",
-            "title": "Model"
+            "type": "string"
           },
           "ttfat": {
             "description": "TTFAT measurement in seconds (`ttfb` plus `thinking_time`).",
-            "title": "Ttfat",
             "type": "number"
           },
           "ttfb": {
             "description": "Time-to-first-byte that TTFAT builds on, in seconds. This mirrors the standalone `TTFBMetricsData` (emitted earlier) for convenience; it is not a separate measurement, so don't aggregate both.",
-            "title": "Ttfb",
             "type": "number"
           },
           "thinking_time": {
             "description": "Time between the model's first output and the first answer token, in seconds (`ttfat` minus `ttfb`). Reasoning is the usual reason a model streams something before it starts answering, though a model that reasons none still spends a little time here.",
-            "title": "Thinking Time",
             "type": "number"
           }
         },
@@ -4559,25 +3996,14 @@
         "properties": {
           "processor": {
             "description": "Name of the processor generating the metrics.",
-            "title": "Processor",
             "type": "string"
           },
           "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional model name associated with the metrics.",
-            "title": "Model"
+            "type": "string"
           },
           "value": {
             "description": "TTFB measurement in seconds.",
-            "title": "Value",
             "type": "number"
           }
         },
@@ -4593,25 +4019,14 @@
         "properties": {
           "processor": {
             "description": "Name of the processor generating the metrics.",
-            "title": "Processor",
             "type": "string"
           },
           "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional model name associated with the metrics.",
-            "title": "Model"
+            "type": "string"
           },
           "value": {
             "description": "Number of characters processed by TTS.",
-            "title": "Value",
             "type": "integer"
           }
         },
@@ -4627,7 +4042,6 @@
         "properties": {
           "text": {
             "description": "The text.",
-            "title": "Text",
             "type": "string"
           }
         },
@@ -4655,60 +4069,23 @@
         "properties": {
           "title": {
             "description": "Required headline.",
-            "title": "Title",
             "type": "string"
           },
           "subtitle": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional second line beneath the title.",
-            "title": "Subtitle"
+            "type": "string"
           },
           "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional body text.",
-            "title": "Description"
+            "type": "string"
           },
           "image_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional leading image.",
-            "title": "Image Url"
+            "type": "string"
           },
           "duration_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional dismiss timer. Client default applies when None.",
-            "title": "Duration Ms"
+            "type": "integer"
           }
         },
         "required": [
@@ -4722,12 +4099,10 @@
         "properties": {
           "label": {
             "description": "The provider's label for the speaker (e.g. `\"A\"`, `\"S1\"`, `\"2\"`).",
-            "title": "Label",
             "type": "string"
           },
           "number": {
             "description": "The speaker's place in the order speakers first appeared, starting at `1`.",
-            "title": "Number",
             "type": "integer"
           }
         },
@@ -4755,19 +4130,10 @@
                 "select_text"
               ]
             },
-            "title": "Command",
             "type": "string"
           },
           "payload": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The command's payload, a JSON object.",
-            "title": "Payload"
+            "description": "The command's payload, a JSON object."
           }
         },
         "required": [
@@ -4781,7 +4147,6 @@
         "properties": {
           "job_id": {
             "description": "The job group id the client wants cancelled.",
-            "title": "Job Id",
             "type": "string"
           },
           "reason": {
@@ -4794,8 +4159,7 @@
               }
             ],
             "default": null,
-            "description": "Optional human-readable reason.",
-            "title": "Reason"
+            "description": "Optional human-readable reason."
           }
         },
         "required": [
@@ -4810,11 +4174,14 @@
           "command": {
             "const": "click",
             "description": "The command's name.",
-            "title": "Command",
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/Click",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Click"
+              }
+            ],
             "description": "The command's payload."
           }
         },
@@ -4830,7 +4197,6 @@
         "properties": {
           "event": {
             "description": "App-defined event.",
-            "title": "Event",
             "type": "string"
           },
           "payload": {
@@ -4841,8 +4207,7 @@
               }
             ],
             "default": null,
-            "description": "App-defined payload, schemaless by design.",
-            "title": "Payload"
+            "description": "App-defined payload, schemaless by design."
           }
         },
         "required": [
@@ -4857,11 +4222,14 @@
           "command": {
             "const": "focus",
             "description": "The command's name.",
-            "title": "Command",
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/Focus",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Focus"
+              }
+            ],
             "description": "The command's payload."
           }
         },
@@ -4878,11 +4246,14 @@
           "command": {
             "const": "highlight",
             "description": "The command's name.",
-            "title": "Command",
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/Highlight",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Highlight"
+              }
+            ],
             "description": "The command's payload."
           }
         },
@@ -4900,46 +4271,35 @@
             "const": "job_completed",
             "default": "job_completed",
             "description": "Always `\"job_completed\"`.",
-            "title": "Kind",
             "type": "string"
           },
           "job_id": {
             "description": "The shared job-group identifier.",
-            "title": "Job Id",
             "type": "string"
           },
           "worker_name": {
             "description": "The worker that produced the response.",
-            "title": "Worker Name",
             "type": "string"
           },
           "status": {
             "description": "Completion status string.",
-            "title": "Status",
             "type": "string"
           },
           "response": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The worker's response payload.",
-            "title": "Response"
+            "description": "The worker's response payload."
           },
           "at": {
             "default": 0,
             "description": "Epoch milliseconds when the response was received.",
-            "title": "At",
             "type": "integer"
           }
         },
         "required": [
+          "kind",
           "job_id",
           "worker_name",
-          "status"
+          "status",
+          "at"
         ],
         "title": "UIJobCompletedData",
         "type": "object"
@@ -4951,23 +4311,22 @@
             "const": "group_completed",
             "default": "group_completed",
             "description": "Always `\"group_completed\"`.",
-            "title": "Kind",
             "type": "string"
           },
           "job_id": {
             "description": "The shared job-group identifier.",
-            "title": "Job Id",
             "type": "string"
           },
           "at": {
             "default": 0,
             "description": "Epoch milliseconds when the group completed.",
-            "title": "At",
             "type": "integer"
           }
         },
         "required": [
-          "job_id"
+          "kind",
+          "job_id",
+          "at"
         ],
         "title": "UIJobGroupCompletedData",
         "type": "object"
@@ -4979,58 +4338,39 @@
             "const": "group_started",
             "default": "group_started",
             "description": "Always `\"group_started\"`.",
-            "title": "Kind",
             "type": "string"
           },
           "job_id": {
             "description": "Shared job-group identifier for the group.",
-            "title": "Job Id",
             "type": "string"
           },
           "workers": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Names of the workers the work was dispatched to.",
-            "title": "Workers"
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Optional human-readable label for the group.",
-            "title": "Label"
+            "type": "string"
           },
           "cancellable": {
             "default": true,
             "description": "Whether the client may request cancellation.",
-            "title": "Cancellable",
             "type": "boolean"
           },
           "at": {
             "default": 0,
             "description": "Epoch milliseconds when the group started.",
-            "title": "At",
             "type": "integer"
           }
         },
         "required": [
-          "job_id"
+          "kind",
+          "job_id",
+          "cancellable",
+          "at"
         ],
         "title": "UIJobGroupStartedData",
         "type": "object"
@@ -5042,40 +4382,30 @@
             "const": "job_update",
             "default": "job_update",
             "description": "Always `\"job_update\"`.",
-            "title": "Kind",
             "type": "string"
           },
           "job_id": {
             "description": "The shared job-group identifier.",
-            "title": "Job Id",
             "type": "string"
           },
           "worker_name": {
             "description": "The worker that produced the update.",
-            "title": "Worker Name",
             "type": "string"
           },
           "data": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The worker's update payload, forwarded verbatim.",
-            "title": "Data"
+            "description": "The worker's update payload, forwarded verbatim."
           },
           "at": {
             "default": 0,
             "description": "Epoch milliseconds when the update was emitted.",
-            "title": "At",
             "type": "integer"
           }
         },
         "required": [
+          "kind",
           "job_id",
-          "worker_name"
+          "worker_name",
+          "at"
         ],
         "title": "UIJobUpdateData",
         "type": "object"
@@ -5086,11 +4416,14 @@
           "command": {
             "const": "navigate",
             "description": "The command's name.",
-            "title": "Command",
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/Navigate",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Navigate"
+              }
+            ],
             "description": "The command's payload."
           }
         },
@@ -5107,11 +4440,14 @@
           "command": {
             "const": "scroll_to",
             "description": "The command's name.",
-            "title": "Command",
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/ScrollTo",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ScrollTo"
+              }
+            ],
             "description": "The command's payload."
           }
         },
@@ -5128,11 +4464,14 @@
           "command": {
             "const": "select_text",
             "description": "The command's name.",
-            "title": "Command",
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/SelectText",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SelectText"
+              }
+            ],
             "description": "The command's payload."
           }
         },
@@ -5149,11 +4488,14 @@
           "command": {
             "const": "set_input_value",
             "description": "The command's name.",
-            "title": "Command",
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/SetInputValue",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SetInputValue"
+              }
+            ],
             "description": "The command's payload."
           }
         },
@@ -5168,7 +4510,11 @@
         "description": "Inner `data` for a `ui-snapshot` message.",
         "properties": {
           "tree": {
-            "$ref": "#/components/schemas/A11ySnapshot",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/A11ySnapshot"
+              }
+            ],
             "description": "The serialized accessibility tree."
           }
         },
@@ -5184,11 +4530,14 @@
           "command": {
             "const": "toast",
             "description": "The command's name.",
-            "title": "Command",
             "type": "string"
           },
           "payload": {
-            "$ref": "#/components/schemas/Toast",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Toast"
+              }
+            ],
             "description": "The command's payload."
           }
         },
@@ -5204,7 +4553,6 @@
         "properties": {
           "text": {
             "description": "What the user said or typed.",
-            "title": "Text",
             "type": "string"
           },
           "input_type": {
@@ -5214,71 +4562,37 @@
               "chat",
               "backchannel"
             ],
-            "title": "Input Type",
             "type": "string"
           },
           "timestamp": {
             "description": "When the user said or sent it.",
-            "title": "Timestamp",
             "type": "string"
           },
           "final": {
             "description": "Whether the text is final. Only an interim transcription isn't.",
-            "title": "Final",
             "type": "boolean"
           },
           "user_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "Identifier for the user who spoke or typed. For chat, set only when the transport knows the sender, such as Daily and LiveKit.",
-            "title": "User Id"
+            "type": "string"
           },
           "msg_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "For chat, the id of the client's `send-text` message.",
-            "title": "Msg Id"
+            "type": "string"
           },
           "perception": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/UserPerceptionSignal"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "For a transcription, how the user said it, when the STT service reports a reading with it. Part of expressive conversation (alpha).",
-            "title": "Perception"
+            "items": {
+              "$ref": "#/components/schemas/UserPerceptionSignal"
+            },
+            "type": "array"
           },
           "speaker": {
-            "anyOf": [
+            "allOf": [
               {
                 "$ref": "#/components/schemas/TranscriptionSpeaker"
-              },
-              {
-                "type": "null"
               }
             ],
-            "default": null,
             "description": "For a transcription, who said it, when the STT service's diarization tells speakers apart."
           }
         },
@@ -5296,12 +4610,10 @@
         "properties": {
           "label": {
             "description": "The label, such as `\"frustrated\"`.",
-            "title": "Label",
             "type": "string"
           },
           "confidence": {
             "description": "How sure the reading is, from 0 to 1.",
-            "title": "Confidence",
             "type": "number"
           }
         },
@@ -5317,7 +4629,6 @@
         "properties": {
           "name": {
             "description": "What is read, such as `\"tone\"`.",
-            "title": "Name",
             "type": "string"
           },
           "labels": {
@@ -5326,25 +4637,16 @@
             "items": {
               "$ref": "#/components/schemas/UserPerceptionLabel"
             },
-            "title": "Labels",
             "type": "array"
           },
           "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
             "description": "The measure, for a signal read as a value.",
-            "title": "Value"
+            "type": "number"
           }
         },
         "required": [
-          "name"
+          "name",
+          "labels"
         ],
         "title": "UserPerceptionSignal",
         "type": "object"
@@ -5354,22 +4656,18 @@
         "properties": {
           "text": {
             "description": "The transcribed text.",
-            "title": "Text",
             "type": "string"
           },
           "user_id": {
             "description": "Identifier for the user who spoke.",
-            "title": "User Id",
             "type": "string"
           },
           "timestamp": {
             "description": "When the user said it.",
-            "title": "Timestamp",
             "type": "string"
           },
           "final": {
             "description": "Whether the transcription is final, as opposed to interim.",
-            "title": "Final",
             "type": "boolean"
           }
         },

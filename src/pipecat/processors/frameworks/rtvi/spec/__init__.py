@@ -98,6 +98,7 @@ _JSON_VALUES = {"`None`": "`null`", "`True`": "`true`", "`False`": "`false`"}
 # A deprecation in a field's entry, which ends it: its first sentence names the
 # replacement, and the rest is about Pipecat's releases, not the protocol.
 _DEPRECATED = re.compile(r"\.\. deprecated::[^\n]*\n\s*([^.]*\.).*", re.S)
+_DEPRECATION = ".. deprecated::"
 
 
 def _markdown(text: str) -> str:
@@ -120,10 +121,23 @@ def _docstring(cls: type) -> tuple[str, dict[str, str]]:
     A field a base class declares keeps the description from the base's docstring,
     unless the class describes it again.
     """
-    fields = {}
-    for klass in reversed(cls.__mro__):
-        fields.update(_parameters(_own_doc(klass)))
+    fields = {name: _markdown(text) for name, text in _entries(cls).items()}
     return _summary(_own_doc(cls)), fields
+
+
+def _deprecations(cls: type) -> tuple[bool, set[str]]:
+    """Whether a class is deprecated, and which of its fields are."""
+    deprecated = _DEPRECATION in _own_doc(cls).split("\nParameters:")[0]
+    fields = {name for name, text in _entries(cls).items() if _DEPRECATION in text}
+    return deprecated, fields
+
+
+def _entries(cls: type) -> dict[str, str]:
+    """The entries of a class's ``Parameters:`` section and its bases', by field."""
+    entries = {}
+    for klass in reversed(cls.__mro__):
+        entries.update(_parameters(_own_doc(klass)))
+    return entries
 
 
 def _own_doc(cls: type) -> str:
@@ -132,14 +146,14 @@ def _own_doc(cls: type) -> str:
 
 
 def _parameters(doc: str) -> dict[str, str]:
-    """The field descriptions in a docstring's ``Parameters:`` section."""
+    """The field entries in a docstring's ``Parameters:`` section, as written."""
     fields = {}
     section = re.search(r"^Parameters:\n(.*?)(?=^\S|\Z)", doc, re.M | re.S)
     if section:
         for entry in re.split(r"^    (?=\S)", section.group(1), flags=re.M):
             name, _, text = entry.partition(":")
             if name.strip():
-                fields[name.strip()] = _markdown(text)
+                fields[name.strip()] = text
     return fields
 
 
@@ -867,8 +881,21 @@ class _SchemaGenerator(GenerateJsonSchema):
     A model's whole docstring is written for Python readers; the document gives a
     client's author the first paragraph, and a description for each field from the
     docstring's ``Parameters:`` section. An enum's description is trimmed after
-    generation, since Pydantic sets it after this generator runs.
+    generation, since Pydantic sets it after this generator runs. A model or field
+    the docstring deprecates is marked ``deprecated``.
+
+    Fields have no titles, which would only repeat their names. A field that
+    refers to another schema and has its own description wraps the reference in
+    ``allOf``, since JSON Schema draft 7, which AsyncAPI's schemas follow, ignores
+    the keywords next to a ``$ref``.
+
+    The server's messages are described as the server sends them: it leaves out
+    each field whose value is ``None``. So in them a field that can be ``None`` is
+    optional and never ``null``, and every other field is always there.
     """
+
+    def field_title_should_be_set(self, schema: Any) -> bool:
+        return False
 
     def _describe(self, json_schema: JsonSchemaValue, cls: type):
         summary, fields = _docstring(cls)
@@ -876,9 +903,19 @@ class _SchemaGenerator(GenerateJsonSchema):
             json_schema["description"] = summary
         else:
             json_schema.pop("description", None)
-        for name, field in json_schema.get("properties", {}).items():
+        deprecated, deprecated_fields = _deprecations(cls)
+        if deprecated:
+            json_schema["deprecated"] = True
+        if self.mode == "serialization":
+            _as_sent(json_schema)
+        properties = json_schema.get("properties", {})
+        for name, field in properties.items():
             if name in fields:
                 field.setdefault("description", fields[name])
+            if name in deprecated_fields:
+                field["deprecated"] = True
+            if "$ref" in field and len(field) > 1:
+                properties[name] = {"allOf": [{"$ref": field.pop("$ref")}], **field}
 
     def model_schema(self, schema: core_schema.ModelSchema) -> JsonSchemaValue:
         json_schema = super().model_schema(schema)
@@ -889,6 +926,32 @@ class _SchemaGenerator(GenerateJsonSchema):
         json_schema = super().dataclass_schema(schema)
         self._describe(json_schema, schema["cls"])
         return json_schema
+
+
+_NULL = {"type": "null"}
+# Keywords that constrain a value: a schema without any of them allows any value, None too.
+_TYPED = frozenset({"type", "$ref", "anyOf", "allOf", "oneOf", "const", "enum"})
+
+
+def _as_sent(json_schema: JsonSchemaValue):
+    """An object's schema as the server sends it, leaving out each field that is ``None``."""
+    properties = json_schema.get("properties", {})
+    required = []
+    for name, field in properties.items():
+        options = field.get("anyOf", [])
+        nullable = _NULL in options or field.get("default", _NO_DATA) is None
+        if _NULL in options:
+            rest = [option for option in options if option != _NULL]
+            field = {key: value for key, value in field.items() if key != "anyOf"}
+            field = {**rest[0], **field} if len(rest) == 1 else {"anyOf": rest, **field}
+        if field.get("default", _NO_DATA) is None:
+            del field["default"]
+        properties[name] = field
+        if not nullable and _TYPED & field.keys():
+            required.append(name)
+    json_schema.pop("required", None)
+    if required:
+        json_schema["required"] = required
 
 
 def _message_key(spec: RTVIMessageSpec) -> str:
@@ -1089,8 +1152,11 @@ def released() -> dict[str, dict]:
 
 
 # Keys that only describe, and maps whose keys are names rather than keywords. A
-# deprecation describes too: a deprecated message is sent and accepted as before.
-_PROSE = frozenset({"description", "summary", "title", "examples", "tags", "x-rtvi-deprecated"})
+# deprecation describes too: a deprecated message or field is sent and accepted as
+# before.
+_PROSE = frozenset(
+    {"description", "summary", "title", "examples", "tags", "deprecated", "x-rtvi-deprecated"}
+)
 _NAMED = frozenset(
     {"properties", "patternProperties", "$defs", "schemas", "messages", "channels", "operations"}
 )

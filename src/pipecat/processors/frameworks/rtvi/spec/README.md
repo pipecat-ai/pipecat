@@ -35,7 +35,7 @@ The document is written from the server's point of view. Its `receiveClientMessa
 - `x-rtvi-min-client-version`: the lowest client protocol version the server sends the message to. A client tells the server its version in `client-ready`.
 - `x-rtvi-deprecated`: for a deprecated message, what replaces it.
 
-The schema of a client message says what the server accepts, and the schema of a server message what the server sends. A field the server leaves out when it has no value is optional.
+The schema of a client message says what the server accepts, and the schema of a server message what the server sends. The server leaves out each field that has no value, so in a server message a field that can have none is optional and never `null`, and every other field is always there. A deprecated field is marked `deprecated`.
 
 The document's `x-rtvi-behaviors` lists the rules the server follows across messages, beyond the shape of each one: which message answers a request and with which `id`, which version `bot-ready` reports, which messages the settings turn off, and how the server holds the bot's text until the bot speaks it and drops it when the user interrupts. Each behavior has an `id`, a `description`, and the types of the `messages` it involves.
 

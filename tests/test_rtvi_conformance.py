@@ -167,8 +167,11 @@ class _Spec:
         return Draft7Validator(schema)
 
     def resolve(self, schema: dict) -> dict:
-        """The schema a ``$ref`` points to, or the schema itself."""
-        while "$ref" in schema:
+        """The schema a ``$ref`` points to, also from an ``allOf`` of one, or the schema itself."""
+        while "$ref" in schema or len(schema.get("allOf", [])) == 1:
+            if "allOf" in schema:
+                schema = schema["allOf"][0]
+                continue
             schema = self.document["components"]["schemas"][schema["$ref"].rsplit("/", 1)[1]]
         return schema
 
