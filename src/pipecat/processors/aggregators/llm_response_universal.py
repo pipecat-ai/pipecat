@@ -72,6 +72,7 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMetadataFrame,
     TextFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     TranslationFrame,
     TTSStartedFrame,
@@ -937,14 +938,15 @@ class LLMUserAggregator(LLMContextAggregator):
             frame,
             (
                 InterimTranscriptionFrame,
+                TranscriptionFinalizedFrame,
                 TranslationFrame,
                 EagerTranscriptionFrame,
             ),
         ):
-            # Interim transcriptions, translations and eager end-of-turn
-            # transcripts are consumed here and not pushed downstream, same as
-            # final TranscriptionFrame. The turn strategies still see them: the
-            # controller is fed every frame below.
+            # Interim transcriptions, finalization confirmations, translations
+            # and eager end-of-turn transcripts are consumed here and not pushed
+            # downstream, same as final TranscriptionFrame. The turn strategies
+            # still see them: the controller is fed every frame below.
             pass
         elif isinstance(frame, UserBackchannelFrame):
             message = UserBackchannelMessage(
@@ -1391,6 +1393,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 InputAudioRawFrame,
                 InterimTranscriptionFrame,
                 TranscriptionFrame,
+                TranscriptionFinalizedFrame,
                 EagerTranscriptionFrame,
                 UserBackchannelFrame,
             ),
