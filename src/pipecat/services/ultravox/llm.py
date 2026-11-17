@@ -846,6 +846,7 @@ class UltravoxRealtimeLLMService(LLMService):
             if delta:
                 tts_frame = TTSTextFrame(text=delta, text_type=TextType.WORD)
                 tts_frame.includes_inter_frame_spaces = True
+                tts_frame.will_be_spoken = True
                 await self.push_frame(tts_frame)
         elif medium == "text":
             if final:

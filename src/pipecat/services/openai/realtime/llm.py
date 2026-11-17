@@ -1170,6 +1170,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         # Push TTSTextFrame
         tts_text_frame = TTSTextFrame(text, text_type=TextType.SENTENCE)
         tts_text_frame.includes_inter_frame_spaces = True
+        tts_text_frame.will_be_spoken = True
         await self.push_frame(tts_text_frame)
 
     async def _handle_evt_function_call_arguments_done(self, evt):

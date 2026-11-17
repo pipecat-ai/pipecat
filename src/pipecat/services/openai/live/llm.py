@@ -972,6 +972,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
 
         tts_text_frame = TTSTextFrame(text, text_type=TextType.SENTENCE)
         tts_text_frame.includes_inter_frame_spaces = True
+        tts_text_frame.will_be_spoken = True
         await self.push_frame(tts_text_frame)
 
     async def _push_interim_transcription(self, transcript: str, evt: events.ServerEvent):
