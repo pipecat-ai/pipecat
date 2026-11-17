@@ -27,6 +27,7 @@ signal into _bot_speaking would let a turn that produces zero audio look
 """
 
 import asyncio
+import time
 import unittest
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
@@ -34,9 +35,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    CancelFrame,
     DataFrame,
     Frame,
     InterruptionFrame,
@@ -49,9 +52,15 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.frame_processor import (
+    FrameDirection,
+    FrameProcessor,
+    FrameProcessorSetup,
+)
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 _SAMPLE_RATE = 16000
 
@@ -95,10 +104,34 @@ class FakeInterruptibleTTSService(InterruptibleTTSService):
             yield
 
 
+async def _wait_for_reconnect(tts: InterruptibleTTSService):
+    """Wait for the reconnect an interruption started.
+
+    The reconnect runs on its own task so that the interruption can carry on
+    downstream without waiting for the handshake (see
+    test_reconnect_does_not_hold_the_interruption).
+    """
+    task = tts._reconnect_task
+    assert task is not None, "the interruption did not start a reconnect"
+    await asyncio.wait_for(asyncio.shield(task), timeout=1)
+
+
+async def _set_up(tts: InterruptibleTTSService):
+    """Give a service its task manager without running a whole pipeline."""
+    await tts.setup(
+        FrameProcessorSetup(
+            clock=SystemClock(),
+            task_manager=TaskManager(loop=asyncio.get_running_loop()),
+            pipeline_worker=None,
+        )
+    )
+    return tts
+
+
 @pytest.mark.asyncio
 async def test_reconnects_when_bot_confirmed_speaking():
     """BotStartedSpeakingFrame confirms speech; interrupting must reconnect."""
-    tts = FakeInterruptibleTTSService()
+    tts = await _set_up(FakeInterruptibleTTSService())
 
     reconnected = {"disconnect": False, "connect": False}
 
@@ -118,6 +151,7 @@ async def test_reconnects_when_bot_confirmed_speaking():
     with patch.object(TTSService, "_handle_interruption", new=AsyncMock()):
         await tts._handle_interruption(InterruptionFrame(), FrameDirection.DOWNSTREAM)
 
+    await _wait_for_reconnect(tts)
     assert reconnected == {"disconnect": True, "connect": True}
 
 
@@ -127,7 +161,7 @@ async def test_reconnects_when_started_but_not_yet_confirmed():
     arrived yet — the narrow race window _tts_started exists for. Interrupting
     here must still reconnect, even though _bot_speaking is still False.
     """
-    tts = FakeInterruptibleTTSService()
+    tts = await _set_up(FakeInterruptibleTTSService())
 
     reconnected = {"disconnect": False, "connect": False}
 
@@ -147,6 +181,7 @@ async def test_reconnects_when_started_but_not_yet_confirmed():
     with patch.object(TTSService, "_handle_interruption", new=AsyncMock()):
         await tts._handle_interruption(InterruptionFrame(), FrameDirection.DOWNSTREAM)
 
+    await _wait_for_reconnect(tts)
     assert reconnected == {"disconnect": True, "connect": True}
     # Consumed by the interruption it was needed for.
     assert tts._tts_started is False
@@ -367,6 +402,183 @@ async def test_interrupted_reply_stays_interruptible_behind_uninterruptible_spee
     audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
     assert audio
     assert all(f.interruptible for f in audio)
+
+
+RECONNECT_DELAY = 0.3
+
+
+class FakeSlowReconnectTTSService(FakeInterruptibleTTSService):
+    """Takes a while to close the old connection and open a new one.
+
+    Reconnect delays of 270–390 ms are what Sarvam and Smallest show against
+    their real servers; the delay is what a reconnect used to cost the
+    interruption it was started for.
+    """
+
+    def __init__(self):
+        super().__init__(push_stop_frames=True, stop_frame_timeout_s=0.3)
+        self.reconnects = 0
+        self.connected = False
+        self.reconnect_delay = RECONNECT_DELAY
+        self._audio_task: asyncio.Task | None = None
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        await self._connect()
+
+    async def _connect(self):
+        self.reconnects += 1
+        await asyncio.sleep(self.reconnect_delay)
+        self.connected = True
+
+    async def _disconnect(self):
+        # The old connection is gone: whatever audio it still owed the current
+        # reply is gone with it.
+        self.connected = False
+        if self._audio_task:
+            await self.cancel_task(self._audio_task)
+            self._audio_task = None
+        await asyncio.sleep(self.reconnect_delay)
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        if not self._audio_task:
+            self._audio_task = self.create_task(self._stream_audio(context_id))
+        yield None
+
+    async def _stream_audio(self, context_id: str):
+        for _ in range(6):
+            await asyncio.sleep(0.05)
+            await self.append_to_audio_context(
+                context_id,
+                TTSAudioRawFrame(b"\x00" * 320, _SAMPLE_RATE, 1, context_id=context_id),
+            )
+        yield None
+
+
+class _TimestampSink(FrameProcessor):
+    """Records when each frame got past the service under test."""
+
+    def __init__(self):
+        super().__init__()
+        self.seen: list[tuple[float, str]] = []
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, (TTSStartedFrame, TTSAudioRawFrame, InterruptionFrame)):
+            self.seen.append((time.monotonic(), type(frame).__name__))
+        await self.push_frame(frame, direction)
+
+
+@pytest.mark.asyncio
+async def test_reconnect_does_not_hold_the_interruption():
+    """The interruption leaves the TTS before the reconnect finishes.
+
+    The frame has to pass through the TTS to reach the output transport, which
+    is what stops the audio still queued for the interrupted reply. An
+    interruption held here for the whole handshake keeps the bot talking over
+    the user for that long.
+    """
+    tts = FakeSlowReconnectTTSService()
+    tts.reconnect_delay = RECONNECT_DELAY
+    held: list[float] = []
+
+    original_process_frame = tts.process_frame
+    arrived_at: list[float] = []
+
+    async def process_frame(frame: Frame, direction: FrameDirection):
+        if isinstance(frame, InterruptionFrame):
+            arrived_at.append(time.monotonic())
+        await original_process_frame(frame, direction)
+
+    original_push_frame = tts.push_frame
+
+    async def push_frame(frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        await original_push_frame(frame, direction)
+        if isinstance(frame, InterruptionFrame) and arrived_at:
+            held.append(time.monotonic() - arrived_at[-1])
+
+    tts.process_frame = process_frame  # type: ignore[method-assign]
+    tts.push_frame = push_frame  # type: ignore[method-assign]
+
+    await asyncio.wait_for(
+        run_test(
+            Pipeline([tts]),
+            frames_to_send=[
+                LLMFullResponseStartFrame(),
+                TextFrame("Hello there. This is a long reply."),
+                SleepFrame(sleep=RECONNECT_DELAY + 0.2),
+                BotStartedSpeakingFrame(),
+                SleepFrame(sleep=0.05),
+                InterruptionFrame(),
+                SleepFrame(sleep=1.5),
+            ],
+        ),
+        timeout=10,
+    )
+
+    assert tts.reconnects == 2, "the interruption should still reconnect"
+    assert held, "the interruption never made it through"
+    assert held[0] < RECONNECT_DELAY / 2, (
+        f"the TTS held the interruption for {held[0]:.2f}s, which is the "
+        f"reconnect ({RECONNECT_DELAY}s) running on the interruption path"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_second_interruption_does_not_start_a_second_reconnect():
+    """A reconnect already running is enough; the connection it replaces was
+    the one in use, and it is the one holding back audio."""
+    tts = await _set_up(FakeSlowReconnectTTSService())
+
+    with patch.object(TTSService, "_handle_interruption", new=AsyncMock()):
+        tts._bot_speaking = True
+        await tts._handle_interruption(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+        first = tts._reconnect_task
+        assert first is not None
+
+        tts._bot_speaking = True
+        await tts._handle_interruption(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+        assert tts._reconnect_task is first
+
+    await asyncio.wait_for(first, timeout=5)
+    assert isinstance(tts._reconnect_task, asyncio.Task)
+    assert tts._reconnect_task is first
+
+
+@pytest.mark.asyncio
+async def test_a_failed_reconnect_is_reported():
+    """A reconnect failing must not take the pipeline down with it."""
+
+    class FailingReconnectTTSService(FakeSlowReconnectTTSService):
+        async def _connect(self):
+            raise OSError("connection refused")
+
+    tts = await _set_up(FailingReconnectTTSService())
+
+    with patch.object(FrameProcessor, "push_error", AsyncMock()) as pushed:
+        with patch.object(TTSService, "_handle_interruption", new=AsyncMock()):
+            tts._bot_speaking = True
+            await tts._handle_interruption(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+        assert tts._reconnect_task is not None
+        await asyncio.wait_for(tts._reconnect_task, timeout=5)
+
+    pushed.assert_called_once()
+    assert "connection refused" in pushed.call_args.kwargs["error_msg"]
+
+
+@pytest.mark.asyncio
+async def test_stopping_waits_for_the_reconnect_to_abort():
+    """The service must not open a connection while shutting down."""
+    tts = await _set_up(FakeSlowReconnectTTSService())
+
+    with patch.object(TTSService, "_handle_interruption", new=AsyncMock()):
+        tts._bot_speaking = True
+        await tts._handle_interruption(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+    await tts.cancel(CancelFrame())
+
+    assert tts._reconnect_task is None
+    assert tts.connected is False
 
 
 if __name__ == "__main__":
