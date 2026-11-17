@@ -309,9 +309,27 @@ def _transport_routes_enabled(transport: str) -> bool:
     return all(_is_module_available(module) for module in _transport_route_dependencies(transport))
 
 
+# -t values the prebuilt client dropdown understands as ?transport= (the
+# client maps "webrtc" to its "smallwebrtc" option).
+_CLIENT_TRANSPORT_PARAMS = ["daily", "livekit", "moq", "twilio", "webrtc", "websocket"]
+
+
+def _client_transport_param(args: argparse.Namespace) -> str | None:
+    """Return the ?transport= value for the prebuilt client, if -t maps to one."""
+    if args.transport in _CLIENT_TRANSPORT_PARAMS:
+        return args.transport
+    return None
+
+
 def _runner_url(args: argparse.Namespace) -> str:
-    """Return the browser URL for the runner prebuilt client."""
-    return f"http://{args.host}:{args.port}"
+    """Return the browser URL for the runner prebuilt client.
+
+    Includes ``?transport=`` so the client preselects the transport chosen
+    via ``-t``.
+    """
+    base = f"http://{args.host}:{args.port}"
+    param = _client_transport_param(args)
+    return f"{base}/client/?transport={param}" if param else base
 
 
 def _transport_status_lists() -> tuple[list[str], list[str]]:
@@ -707,7 +725,7 @@ def _configure_server_app(args: argparse.Namespace):
     # endpoint families (/ws and /ws-client).
     ws_used_tokens: set[str] = set()
 
-    _setup_frontend_routes(app)
+    _setup_frontend_routes(app, args)
     # Registered before the WebRTC routes so POST /sessions/{session_id}/files
     # wins over the catch-all /sessions/{session_id}/{path:path} proxy (routes
     # match in registration order).
@@ -1133,7 +1151,7 @@ def _resolve_download_path(folder: str, filename: str) -> Path:
     return file_path
 
 
-def _setup_frontend_routes(app: FastAPI):
+def _setup_frontend_routes(app: FastAPI, args: argparse.Namespace):
     """Mount the prebuilt frontend UI and root redirect for all transports."""
     try:
         from pipecat_ai_prebuilt.frontend import PipecatPrebuiltUI
@@ -1143,10 +1161,14 @@ def _setup_frontend_routes(app: FastAPI):
 
     app.mount("/client", PipecatPrebuiltUI)
 
+    # Carry -t into the client so its transport dropdown preselects it.
+    transport_param = _client_transport_param(args)
+    client_url = f"/client/?transport={transport_param}" if transport_param else "/client/"
+
     @app.get("/", include_in_schema=False)
     async def root_redirect():
         """Redirect root requests to client interface."""
-        return RedirectResponse(url="/client/")
+        return RedirectResponse(url=client_url)
 
 
 def _setup_webrtc_routes(

@@ -22,14 +22,17 @@ from pydantic import BaseModel
 from starlette.testclient import WebSocketDisconnect
 
 from pipecat.runner.run import (
+    _client_transport_param,
     _extract_ws_token,
     _generate_ws_token,
     _parse_ice_servers,
     _print_startup_message,
     _resolve_file_storage,
     _run_telephony_bot,
+    _runner_url,
     _setup_daily_routes,
     _setup_file_uploads_routes,
+    _setup_frontend_routes,
     _setup_sip_routes,
     _setup_telephony_routes,
     _setup_unified_start_route,
@@ -596,7 +599,7 @@ class TestRunnerRun(unittest.TestCase):
             ),
         )
 
-    def test_startup_message_webrtc_uses_root_open_url(self):
+    def test_startup_message_webrtc_open_url_preselects_transport(self):
         args = argparse.Namespace(
             transport="webrtc", host="localhost", port=7860, esp32=False, whatsapp=False
         )
@@ -604,16 +607,15 @@ class TestRunnerRun(unittest.TestCase):
         with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
             output = self._capture_startup_message(args)
 
-        self.assertIn("   → Open: http://localhost:7860\n", output)
-        self.assertNotIn("/client", output)
+        self.assertIn("   → Open: http://localhost:7860/client/?transport=webrtc\n", output)
 
-    def test_startup_message_daily_uses_root_open_url(self):
+    def test_startup_message_daily_open_url_preselects_transport(self):
         args = argparse.Namespace(transport="daily", host="localhost", port=7860, dialin=False)
 
         with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
             output = self._capture_startup_message(args)
 
-        self.assertIn("   → Open: http://localhost:7860\n", output)
+        self.assertIn("   → Open: http://localhost:7860/client/?transport=daily\n", output)
         self.assertNotIn("/daily in your browser", output)
 
     def test_startup_message_telephony_keeps_provider_endpoint_details(self):
@@ -629,7 +631,7 @@ class TestRunnerRun(unittest.TestCase):
         with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
             output = self._capture_startup_message(args)
 
-        self.assertIn("   → Open: http://localhost:7860\n", output)
+        self.assertIn("   → Open: http://localhost:7860/client/?transport=twilio\n", output)
         self.assertIn("   → XML webhook: http://localhost:7860/\n", output)
         self.assertIn("   → WebSocket:   ws://localhost:7860/ws\n", output)
 
@@ -1483,6 +1485,54 @@ class TestStartFileUploadUrl(unittest.TestCase):
     def test_telephony_advertises_nothing(self):
         result = self._post_start({"transport": "twilio"}, MagicMock())
         self.assertNotIn("fileUploadUrl", result)
+
+
+class TestClientTransportParam(unittest.TestCase):
+    """-t flows through to the prebuilt client's ?transport= query param."""
+
+    def _args(self, transport):
+        return argparse.Namespace(transport=transport, host="localhost", port=7860)
+
+    def test_client_transports_map_to_themselves(self):
+        for transport in ["daily", "livekit", "moq", "twilio", "webrtc", "websocket"]:
+            self.assertEqual(_client_transport_param(self._args(transport)), transport)
+
+    def test_transports_without_a_client_option_map_to_none(self):
+        for transport in [None, "exotel", "plivo", "telnyx", "vonage", "sip", "eval"]:
+            self.assertIsNone(_client_transport_param(self._args(transport)))
+
+    def test_runner_url_includes_the_param(self):
+        self.assertEqual(
+            _runner_url(self._args("moq")), "http://localhost:7860/client/?transport=moq"
+        )
+
+    def test_runner_url_without_a_param_is_the_base_url(self):
+        self.assertEqual(_runner_url(self._args(None)), "http://localhost:7860")
+        self.assertEqual(_runner_url(self._args("exotel")), "http://localhost:7860")
+
+    def _root_redirect_location(self, transport):
+        async def fake_ui(scope, receive, send):  # pragma: no cover - never called
+            pass
+
+        frontend = types.ModuleType("pipecat_ai_prebuilt.frontend")
+        frontend.PipecatPrebuiltUI = fake_ui
+        prebuilt = types.ModuleType("pipecat_ai_prebuilt")
+        prebuilt.frontend = frontend
+        app = FastAPI()
+        with patch.dict(
+            sys.modules,
+            {"pipecat_ai_prebuilt": prebuilt, "pipecat_ai_prebuilt.frontend": frontend},
+        ):
+            _setup_frontend_routes(app, self._args(transport))
+        response = TestClient(app).get("/", follow_redirects=False)
+        self.assertEqual(response.status_code, 307)
+        return response.headers["location"]
+
+    def test_root_redirect_carries_the_param(self):
+        self.assertEqual(self._root_redirect_location("moq"), "/client/?transport=moq")
+
+    def test_root_redirect_without_a_param(self):
+        self.assertEqual(self._root_redirect_location(None), "/client/")
 
 
 if __name__ == "__main__":
