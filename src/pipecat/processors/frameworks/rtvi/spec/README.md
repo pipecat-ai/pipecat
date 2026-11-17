@@ -76,13 +76,13 @@ When a release is prepared, the changelog workflow (`.github/workflows/generate-
 
 `tests/test_rtvi_spec.py` checks the current version's document against the code: it fails when the document is out of date, when an example doesn't match its message's schema, when a field has no description, when a message model or a message `RTVIProcessor` handles isn't in `MESSAGES`, and when a released version's wire format has changed.
 
-`tests/test_rtvi_conformance.py` checks that Pipecat behaves as each version's document says. It runs Pipecat's real `RTVIProcessor` and `RTVIObserver`, holds a session with a client of each version that has a document, and checks every message the server sends:
+`tests/test_rtvi_conformance.py` checks that Pipecat behaves as each version's document says. It runs Pipecat's real `RTVIProcessor` and `RTVIObserver`, holds a session with a client of each version that has a document and that the server still serves (the current major version and `LEGACY_SUPPORTED_MAJOR`), and checks every message the server sends:
 
 - It is a message the document lists for the server to send.
 - Its payload matches the document's schema. The check reads the JSON document, not Pipecat's Python models.
 - The client's version is at least the message's `x-rtvi-min-client-version`. Sessions with clients just below each minimum check that those messages are left out.
 
-For the messages a client sends, the example of each must match its schema in the JSON document, and the server must accept it without an error. The server must also answer an `error-response` to each message the document forbids, built from the message's schema: one without `data` when `data` is required, one missing each required field, and one with each field of the wrong type. `_LENIENT` in the test lists the few the server accepts anyway, with the reason. Each behavior in a document has a test named after its `id` (`test_<id>`, with underscores) in `TestRTVIBehaviors`, and a behavior without a test fails.
+For the messages a client sends, the example of each must match its schema in the JSON document, and the server must accept it without an error, for each version it still serves. The server must also answer an `error-response` to each message the current version's document forbids, built from the message's schema: one without `data` when `data` is required, one missing each required field, and one with each field of the wrong type. `_LENIENT` in the test lists the few the server accepts anyway, with the reason. Each behavior in the document of a version the server still serves has a test named after its `id` (`test_<id>`, with underscores) in `TestRTVIBehaviors`, and a behavior without a test fails.
 
 The session must make the server send every message of the current version, so a message added to `MESSAGES` fails until `_run_session` in the test makes the server send it.
 

@@ -101,6 +101,16 @@ def _versions() -> list[str]:
     return sorted(folders, key=_parse)
 
 
+def _supported_versions() -> list[str]:
+    """The versions with a document whose clients the server still serves.
+
+    The processor accepts a client of the current major version or of
+    ``LEGACY_SUPPORTED_MAJOR``, and rejects any other.
+    """
+    majors = {_parse(RTVI.PROTOCOL_VERSION)[0], RTVI.LEGACY_SUPPORTED_MAJOR}
+    return [version for version in _versions() if _parse(version)[0] in majors]
+
+
 def _parse(version: str) -> list[int]:
     return [int(part) for part in version.split(".")]
 
@@ -443,7 +453,7 @@ class TestRTVIServerSends(unittest.IsolatedAsyncioTestCase):
     """What the server sends obeys each protocol version's document."""
 
     async def test_every_message_obeys_its_version(self):
-        for version in _versions():
+        for version in _supported_versions():
             with self.subTest(version=version):
                 spec = _Spec(version)
                 sent = await _run_session(version)
@@ -499,22 +509,24 @@ class TestRTVIServerReceives(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(errors, [])
 
     async def test_messages_the_document_forbids_get_an_error_response(self):
-        # What the document requires of a client message, the server enforces:
-        # it answers a message without required data, missing a required field,
-        # or with a field of the wrong type with an error-response.
-        for version in _versions():
-            spec = _Spec(version)
-            for type in sorted(spec.client_types):
-                for problem, data in spec.invalid_data(type):
-                    if (type, problem) in _LENIENT:
-                        continue
-                    with self.subTest(version=version, type=type, problem=problem):
-                        session = await self._receive(version, type, data)
-                        responses = [m["type"] for m in session.responses_to("under-test")]
-                        self.assertEqual(responses, ["error-response"])
+        # What the current document requires of a client message, the server
+        # enforces: it answers a message without required data, missing a
+        # required field, or with a field of the wrong type with an
+        # error-response. Older documents aren't checked: a later version may
+        # accept what they forbid, and their clients never send it.
+        version = RTVI.PROTOCOL_VERSION
+        spec = _Spec(version)
+        for type in sorted(spec.client_types):
+            for problem, data in spec.invalid_data(type):
+                if (type, problem) in _LENIENT:
+                    continue
+                with self.subTest(type=type, problem=problem):
+                    session = await self._receive(version, type, data)
+                    responses = [m["type"] for m in session.responses_to("under-test")]
+                    self.assertEqual(responses, ["error-response"])
 
     async def test_examples_are_accepted(self):
-        for version in _versions():
+        for version in _supported_versions():
             spec = _Spec(version)
             for type in sorted(spec.client_types):
                 example = spec.messages[type]["examples"][0]["payload"]
@@ -540,7 +552,7 @@ class TestRTVIBehaviors(unittest.IsolatedAsyncioTestCase):
         await session.processor.set_bot_ready()
 
     def test_every_behavior_has_a_test(self):
-        for version in _versions():
+        for version in _supported_versions():
             for behavior in _Spec(version).document["x-rtvi-behaviors"]:
                 with self.subTest(version=version, behavior=behavior["id"]):
                     self.assertTrue(hasattr(self, "test_" + behavior["id"].replace("-", "_")))
