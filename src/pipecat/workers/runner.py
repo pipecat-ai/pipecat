@@ -280,30 +280,32 @@ class WorkerRunner(BaseObject, BusSubscriber):
         if worker is not None:
             await self.add_workers(worker)
 
-        await self._setup_session()
-        await self._call_event_handler("on_ready")
-
-        # Wait for shutdown. With ``auto_end=True``, ``_run_worker`` sets
-        # ``_shutdown_event`` once the last root worker finishes.
+        # Inside the try so that a failed or cancelled setup still tears down what it started.
         try:
-            await self._shutdown_event.wait()
-        except asyncio.CancelledError:
-            pass
+            await self._setup_session()
+            await self._call_event_handler("on_ready")
 
-        try:
-            # Cancel any worker still going and wait for it to finish.
-            await self._cancel_spawned_workers()
-
-            # Cleanup base object.
-            await self.cleanup()
-
-            # If we are cancelling through a signal, make sure we wait for it so
-            # everything gets cleaned up nicely.
-            if self._sig_task:
-                await self._sig_task
+            # Wait for shutdown. With ``auto_end=True``, ``_run_worker`` sets
+            # ``_shutdown_event`` once the last root worker finishes.
+            try:
+                await self._shutdown_event.wait()
+            except asyncio.CancelledError:
+                pass
         finally:
-            await self._bus.stop()
-            self._running = False
+            try:
+                # Cancel any worker still going and wait for it to finish.
+                await self._cancel_spawned_workers()
+
+                # Cleanup base object.
+                await self.cleanup()
+
+                # If we are cancelling through a signal, make sure we wait for it so
+                # everything gets cleaned up nicely.
+                if self._sig_task:
+                    await self._sig_task
+            finally:
+                await self._bus.stop()
+                self._running = False
 
         if self._force_gc:
             await self._gc_collect()
