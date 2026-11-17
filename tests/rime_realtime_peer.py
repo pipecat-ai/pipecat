@@ -306,9 +306,8 @@ async def conversation(
     async with serve(peer.handler, "127.0.0.1", 0) as server:
         endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}/v1/realtime"
         async with Rime(api_key="local-peer") as client:
-            service = RimeRealtimeLLMService(
-                client=client, endpoint=endpoint, shutdown_timeout=0.4, **options
-            )
+            service = RimeRealtimeLLMService(client=client, endpoint=endpoint, **options)
+            service._shutdown_timeout = 0.4
             pair = LLMContextAggregatorPair(context)
             output = Output(enabled=enabled)
             pipeline = Pipeline(

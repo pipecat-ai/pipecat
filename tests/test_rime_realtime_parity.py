@@ -215,8 +215,8 @@ async def test_startup_http_refusal_policy(status):
                 client=client,
                 endpoint=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}/v1/realtime",
                 startup=RimeStartupParams(retry_interval=0, total_timeout=2),
-                shutdown_timeout=0.1,
             )
+            service._shutdown_timeout = 0.1
             _, upstream = await run_test(
                 service, frames_to_send=[LLMContextFrame(LLMContext()), SleepFrame(0.15)]
             )
@@ -474,8 +474,8 @@ async def test_startup_retry_exhaustion_and_diagnostics(retry_after):
                 client=client,
                 endpoint=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}/v1/realtime",
                 startup=RimeStartupParams(max_retries=1, retry_interval=0.01, total_timeout=0.4),
-                shutdown_timeout=0.1,
             )
+            service._shutdown_timeout = 0.1
             _, upstream = await run_test(
                 service, frames_to_send=[LLMContextFrame(LLMContext()), SleepFrame(0.12)]
             )

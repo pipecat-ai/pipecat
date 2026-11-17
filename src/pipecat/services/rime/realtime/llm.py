@@ -61,7 +61,6 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_service import AIService
 from pipecat.services.llm_service import LLMService
 from pipecat.services.rime.realtime._adapter import RimeRealtimeLLMAdapter
 from pipecat.services.rime.realtime._conversation import (
@@ -120,6 +119,12 @@ class RimeRealtimeSettings(LLMSettings):
 
 _INTERRUPTION_RULES = ("interrupt_min_words", "interrupt_phrases", "acknowledgment_phrases")
 
+# The SDK refuses more than 128 pending operations of its own.
+_MAX_PENDING_OPERATIONS = 128
+# 20 s of 48 kHz mono PCM16 waiting to be sent.
+_MAX_INPUT_AUDIO_BYTES = 1_920_000
+_SHUTDOWN_TIMEOUT_S = 5.0
+
 
 @dataclass
 class _Operation:
@@ -150,9 +155,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
     :class:`~pipecat.frames.frames.LLMMessagesAppendFrame` are added to Prism
     history as they arrive; with ``run_llm=True``, Prism replies when the
     assistant aggregator asks for a response, unless a Prism response that
-    started after the write already took them in. Prism history is
-    append-only: replacing or transforming context messages mid-conversation
-    does not change it, and an :class:`~pipecat.frames.frames.LLMRunFrame` or
+    started after the write already took them in. The service only appends
+    to Prism history: replacing or transforming context messages
+    mid-conversation does not change it, and an :class:`~pipecat.frames.frames.LLMRunFrame` or
     a replacement with ``run_llm=True`` after the opening starts no reply. Use
     ``LLMMessagesAppendFrame(run_llm=True)`` to ask for one. Rejected provider
     writes do not roll back the local context.
@@ -190,9 +195,6 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         request_id: str | None = None,
         startup: RimeStartupParams | None = None,
         playback: Literal["estimated", "discard"] = "estimated",
-        max_pending_operations: int = 256,
-        max_input_audio_bytes: int = 1920000,
-        shutdown_timeout: float = 5.0,
         **kwargs,
     ):
         """Configure the SDK connection and bounded background work.
@@ -209,15 +211,8 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             request_id: Requested provider correlation ID.
             startup: Bounded connection retry policy.
             playback: Estimated normal output or discard all audio with zero-played receipts.
-            max_pending_operations: Bound for pending operations and requests.
-            max_input_audio_bytes: Bound for buffered microphone PCM.
-            shutdown_timeout: Maximum time to drain requests during shutdown.
             **kwargs: Arguments for LLMService.
         """
-        if max_pending_operations < 1 or max_input_audio_bytes < 192000:
-            raise ValueError("Prism queue limits must be positive and hold one SDK audio chunk")
-        if not math.isfinite(shutdown_timeout) or shutdown_timeout <= 0:
-            raise ValueError("shutdown_timeout must be finite and positive")
         if turn_detection is not None and not isinstance(turn_detection, r.TurnDetection):
             raise ValueError("Prism requires SDK server turn detection")
         given = {"extra", "model", "filter_incomplete_user_turns", "use_provider_thinking_default"}
@@ -275,14 +270,13 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         self._turn_detection = turn_detection
         self._timeouts = timeouts or r.RealtimeTimeouts()
         self._request_id = request_id
-        self._shutdown_timeout = shutdown_timeout
-        self._pending_limit = max_pending_operations
-        self._audio_limit = max_input_audio_bytes
+        self._shutdown_timeout = _SHUTDOWN_TIMEOUT_S
         self._pending_audio_bytes = 0
         self._converted_input_rate: int | None = None
         self._input_resampler = create_stream_resampler(clear_after_secs=None)
-        self._controls: asyncio.Queue[_Operation] = asyncio.Queue(max_pending_operations)
-        self._audio: asyncio.Queue[InputAudioRawFrame] = asyncio.Queue(max_pending_operations)
+        self._controls: asyncio.Queue[_Operation] = asyncio.Queue(_MAX_PENDING_OPERATIONS)
+        # Bounded by _MAX_INPUT_AUDIO_BYTES.
+        self._audio: asyncio.Queue[InputAudioRawFrame] = asyncio.Queue()
         self._ready = asyncio.Event()
         self._closing = False
         self._failure: Exception | None = None
@@ -475,10 +469,7 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         """Queue network work without holding up audio and control frames."""
         try:
-            if isinstance(frame, (LLMContextFrame, LLMUpdateSettingsFrame)):
-                await AIService.process_frame(self, frame, direction)
-            else:
-                await super().process_frame(frame, direction)
+            await super().process_frame(frame, direction)
             if isinstance(frame, LLMContextFrame):
                 await self._handle_context(frame, direction)
             elif isinstance(frame, LLMMessagesAppendFrame):
@@ -499,23 +490,15 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 await self._enqueue(_Operation(tool_choice=frame.tool_choice))
                 await self.push_frame(frame, direction)
             elif isinstance(frame, LLMUpdateSettingsFrame):
-                if frame.service is not None and frame.service is not self:
-                    await self.push_frame(frame, direction)
-                else:
-                    await self._enqueue(
-                        _Operation(
-                            delta=copy.deepcopy(
-                                frame.delta or self.Settings.from_mapping(frame.settings)
-                            ),
-                        )
-                    )
+                # LLMService passes it to _update_settings or pushes it on.
+                pass
             elif isinstance(frame, LLMSetToolsFrame):
                 await self._enqueue(_Operation(delta=self.Settings(tools=frame.tools)))
                 await self.push_frame(frame, direction)
             elif isinstance(frame, InputAudioRawFrame):
                 if not self._closing and self.is_usable:
                     self._pending_audio_bytes += len(frame.audio)
-                    if self._pending_audio_bytes > self._audio_limit or self._audio.full():
+                    if self._pending_audio_bytes > _MAX_INPUT_AUDIO_BYTES:
                         self._pending_audio_bytes -= len(frame.audio)
                         await self._fail(RuntimeError("Prism microphone buffer limit exceeded"))
                     else:
@@ -689,7 +672,7 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         if self._closing or not self.is_usable:
             coroutine.close()
             return
-        if len(self._requests) >= self._pending_limit:
+        if len(self._requests) >= _MAX_PENDING_OPERATIONS:
             coroutine.close()
             self._tasks.append(
                 self.create_task(self._fail(RuntimeError("Prism request limit exceeded")))
@@ -822,6 +805,21 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         if self._responses[ref.response_id].stopped:
             await self._sdk.cancel(ref)
         return ref
+
+    async def _update_settings(self, delta: LLMSettings) -> dict[str, Any]:
+        """Queue a settings delta behind earlier operations.
+
+        Prism can refuse an update, so the delta changes ``_settings`` only once
+        Prism accepts it.
+
+        Args:
+            delta: An LLM settings delta.
+
+        Returns:
+            An empty dict, since nothing has changed yet.
+        """
+        await self._enqueue(_Operation(delta=copy.deepcopy(delta)))
+        return {}
 
     async def _settings_operation(self, delta: LLMSettings) -> None:
         async with self._conversation.settings_lock:

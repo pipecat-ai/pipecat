@@ -561,6 +561,25 @@ async def test_rejected_settings_preserve_acknowledged_provider_settings():
 
 
 @pytest.mark.asyncio
+async def test_settings_for_another_service_pass_through_unapplied():
+    async with conversation() as (peer, service, worker, _, __, ___, downstream):
+        updates = len(sent(peer, "session.update"))
+        other = RimeRealtimeLLMService()
+        await worker.queue_frame(
+            LLMUpdateSettingsFrame(
+                delta=service.Settings(system_instruction="Elsewhere"), service=other
+            )
+        )
+        await worker.queue_frame(
+            LLMUpdateSettingsFrame(delta=service.Settings(system_instruction="Here"))
+        )
+        await until(lambda: service._settings.system_instruction == "Here")
+        assert len(sent(peer, "session.update")) == updates + 1
+        passed = [f for f in downstream if isinstance(f, LLMUpdateSettingsFrame)]
+        assert [f.service for f in passed] == [other]
+
+
+@pytest.mark.asyncio
 async def test_audio_and_events_continue_while_settings_acknowledgment_waits():
     async with conversation() as (peer, service, worker, *_):
         peer.gates["session.update"] = asyncio.Event()
