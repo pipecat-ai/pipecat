@@ -514,6 +514,22 @@ class TestCrossFieldConstraints:
             for e in exc_info.value.errors
         )
 
+    def test_react_requires_client_server(self):
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_and_build_config(
+                name="bot",
+                bot_type="web",
+                transport=["daily"],
+                mode="cascade",
+                stt="deepgram_stt",
+                llm="openai_llm",
+                tts="cartesia_tts",
+                client_framework="react",
+            )
+        assert any(
+            "client-server" in e.lower() and "react" in e.lower() for e in exc_info.value.errors
+        )
+
     def test_multiple_errors_collected(self):
         """All errors should be collected, not just the first."""
         with pytest.raises(ConfigValidationError) as exc_info:
