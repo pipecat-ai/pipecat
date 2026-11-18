@@ -85,7 +85,7 @@ class CartesiaTurnsRequestError(Exception):
 class CartesiaTurnsSTTSettings(STTSettings):
     """Settings for CartesiaTurnsSTTService.
 
-    Runtime model and language switching are not supported.
+    Language hints can be updated at runtime. The model is set at construction.
 
     The four ``turn_*`` fields tune server-side turn detection. Cartesia binds
     them to a connection, so updating any of them at runtime triggers a
@@ -209,9 +209,8 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
                 including the ones the server withdraws.
             extra_headers: Optional additional HTTP headers to send with the
                 WebSocket handshake.
-            settings: Runtime-updatable settings. Runtime model and language
-                switching are not supported; attempts to update either field
-                will be reported as unhandled.
+            settings: Service settings, including language hints that can be
+                updated at runtime. The model is set at construction.
             **kwargs: Additional arguments passed to the parent
                 :class:`WebsocketSTTService`.
         """
@@ -328,8 +327,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
 
         Keyterms and the turn detection thresholds are bound to a connection,
         so a change to any of them is applied by reconnecting. Language hints
-        are replaced on the open connection. Runtime model and language
-        switching are not supported, so those changes are reported as
+        are replaced on the open connection. Model updates are reported as
         unhandled.
 
         Args:
