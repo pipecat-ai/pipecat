@@ -685,8 +685,8 @@ class AggregatedFrameSequencer:
         for slot in self._slots:
             if slot.spoken and not slot.complete and slot.context_id == context_id:
                 if slot.tracker:
-                    remaining_text = slot.tracker.get_remaining_tts_text()
-                    raw_remaining = slot.tracker.get_remaining_llm_text()
+                    remaining_text = slot.tracker.get_remaining_user_facing_text()
+                    raw_remaining = slot.tracker.get_unattributed_llm_text()
                     # The words left, not the markup the service was sent for its
                     # tags, are what the LLM's text has to hold, read without its
                     # own tags.
