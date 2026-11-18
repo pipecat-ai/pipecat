@@ -58,6 +58,28 @@ class TestSimpleTextAggregator(unittest.IsolatedAsyncioTestCase):
             results.append((await aggregator.flush()).text)
             assert results == ["1. The morning sun warmed the quiet street.", "\n2. Birds sang."]
 
+    async def test_emphasis_closer(self):
+        text = "**Great question!** Let me explain. I loved *Oklahoma!*. It was great. _Really?_"
+        for chunk_size in (1, 3, len(text)):
+            aggregator = SimpleTextAggregator()
+            results = []
+            for i in range(0, len(text), chunk_size):
+                results += [a.text async for a in aggregator.aggregate(text[i : i + chunk_size])]
+            assert results == [
+                "**Great question!**",
+                "Let me explain.",
+                "I loved *Oklahoma!*.",
+                "It was great.",
+            ]
+            assert (await aggregator.flush()).text == "_Really?_"
+        # A marker after a space, or with no opener before it, doesn't hold the sentence back.
+        for text, sentence in (
+            ("**Tip:** do it. **", "**Tip:** do it."),
+            ("Set my_var now!_", "Set my_var now!"),
+        ):
+            aggregator = SimpleTextAggregator()
+            assert [a.text async for a in aggregator.aggregate(text)] == [sentence]
+
     async def test_lookahead_decimal_number(self):
         """Test that $29.95 is not split at $29."""
         text = "Ask me for only $29.95/month."
