@@ -88,6 +88,7 @@ from pipecat.processors.frameworks.rtvi.models import BotOutputTransformResult
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.string import match_endofsentence
+from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 from pipecat.utils.time import time_now_iso8601
 
 if TYPE_CHECKING:
@@ -322,6 +323,9 @@ class RTVIObserver(BaseObserver):
         self._skipped_segment_ids: set[int] = set()
         # Whether an interruption cut off the skipped segments still remembered
         self._skipped_segments_interrupted = False
+        # Gathers a speech-to-speech service's transcript deltas into sentences
+        # (see _send_transcript_delta)
+        self._transcript_aggregator = SimpleTextAggregator()
         # Processors that read how the user spoke, from their
         # PerceptionMetadataFrame, and the transcriptions pushed to one that
         # haven't been read yet (see _handle_transcription_push)
@@ -861,6 +865,7 @@ class RTVIObserver(BaseObserver):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             if self._params.bot_speaking_enabled:
                 await self.send_rtvi_message(RTVI.BotStoppedSpeakingMessage())
+            await self._flush_transcript()
             self._forget_interrupted_segments()
             self._bot_is_speaking = False
 
@@ -870,6 +875,7 @@ class RTVIObserver(BaseObserver):
         # run_immediately interrupt). Let clients drop what it was mid-saying.
         if self._params.bot_speaking_enabled:
             await self.send_rtvi_message(RTVI.BotInterruptedMessage())
+        await self._flush_transcript()
         self._skipped_segments_interrupted = True
         # Queued text whose speech was cut off would otherwise go out with the
         # next speech, and hold back text that won't be spoken.
@@ -987,8 +993,65 @@ class RTVIObserver(BaseObserver):
         # A word is skipped with the segment it was spoken in.
         return segment_id in self._skipped_segment_ids
 
-    async def _send_aggregated_llm_text(self, frame: AggregatedTextFrame):
-        """Send aggregated LLM text messages."""
+    def _is_transcript_delta(self, frame: AggregatedTextFrame) -> bool:
+        """Whether the frame is a piece of a speech-to-speech service's transcript.
+
+        A speech-to-speech service has no TTS to build sentences, so it pushes each
+        transcript delta as a spoken-text frame of its own, with the spaces between
+        deltas inside the text and no segment.
+        """
+        return (
+            isinstance(frame, TTSTextFrame)
+            and frame.segment_id is None
+            and frame.text_type == TextType.SENTENCE
+            and frame.includes_inter_frame_spaces
+            and not frame.will_be_spoken
+            and not self._is_legacy_client
+        )
+
+    async def _send_transcript_delta(self, frame: TTSTextFrame):
+        """Send a transcript delta as it is, and its bot output once its sentence is whole.
+
+        Clients put a separator between the segments of bot output, as between
+        sentences, so a delta such as "'s" can't be a segment of its own.
+        """
+        if self._is_skipped(frame):
+            return
+        await self._send_aggregated_llm_text(frame, bot_output=False)
+        async for sentence in self._transcript_aggregator.aggregate(frame.text):
+            await self._send_transcript_sentence(sentence.text)
+
+    async def _flush_transcript(self):
+        """Send the transcript text that no end of sentence has closed."""
+        remainder = await self._transcript_aggregator.flush()
+        if remainder:
+            await self._send_transcript_sentence(remainder.text)
+
+    async def _send_transcript_sentence(self, text: str):
+        """Send a transcript sentence as bot output."""
+        if not text.strip():
+            return
+        sentence = TTSTextFrame(text, text_type=TextType.SENTENCE)
+        sentence.includes_inter_frame_spaces = True
+        await self._send_aggregated_llm_text(sentence, tts_messages=False)
+
+    async def _send_aggregated_llm_text(
+        self,
+        frame: AggregatedTextFrame,
+        *,
+        bot_output: bool = True,
+        tts_messages: bool = True,
+    ):
+        """Send aggregated LLM text messages.
+
+        Args:
+            frame: The text to send.
+            bot_output: Whether to send the bot output message.
+            tts_messages: Whether to send the messages that carry the spoken text as it is.
+        """
+        if bot_output and tts_messages and self._is_transcript_delta(frame):
+            await self._send_transcript_delta(cast(TTSTextFrame, frame))
+            return
         if self._is_skipped(frame):
             return
         # A unit that is only tags reaches the context, with no words to show.
@@ -1020,7 +1083,7 @@ class RTVIObserver(BaseObserver):
         segment_id = frame.id
         if isinstance(frame, TTSTextFrame) and frame.segment_id is not None:
             segment_id = frame.segment_id
-        if self._params.bot_output_enabled and not suppress_bot_output:
+        if bot_output and self._params.bot_output_enabled and not suppress_bot_output:
             if will_be_spoken:
                 if isTTS:
                     # push_text_frames path: TTSTextFrame arrives after synthesis completes
@@ -1058,6 +1121,7 @@ class RTVIObserver(BaseObserver):
             TextType.EXPRESSION_PAUSE,
         )
 
+        spoken_words = spoken_words and tts_messages
         if spoken_words and self._params.tts_raw_text_enabled and self._client_supports_raw_text:
             await self.send_rtvi_message(
                 RTVI.TTSRawTextMessage(data=RTVI.TextMessageData(text=text))
