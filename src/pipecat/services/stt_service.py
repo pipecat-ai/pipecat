@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     STTMetadataFrame,
     STTMuteFrame,
     STTUpdateSettingsFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     TranscriptionSpeaker,
     UserAudioRawFrame,
@@ -244,7 +245,8 @@ class STTService(AIService):
 
         Call this when the server response confirms finalization (e.g., Deepgram's
         from_finalize=True). The next TranscriptionFrame pushed will be marked
-        as finalized.
+        as finalized. When the confirmation comes with no text to push, follow
+        it with :meth:`_push_transcription_finalized`.
 
         Only has effect if request_finalize() was previously called.
         """
@@ -517,6 +519,27 @@ class STTService(AIService):
                 )
             )
 
+    async def _push_transcription_finalized(self) -> None:
+        """Push a confirmed finalization that has no transcript to carry it.
+
+        A service's own endpointing can deliver the last of the text before the
+        service is asked to finalize, so its confirmation arrives empty. Call
+        this after :meth:`confirm_finalize` in that case: the transcripts
+        already pushed are confirmed with a
+        :class:`~pipecat.frames.frames.TranscriptionFinalizedFrame`, which the
+        pipeline treats as it does a finalized transcript.
+
+        Only has effect while a confirmed finalization is waiting for a
+        transcript, so a confirmation that arrives after the user started
+        speaking again finalizes nothing.
+        """
+        if not self._finalize_pending:
+            return
+        self._finalize_pending = False
+        await self.push_frame(
+            TranscriptionFinalizedFrame(user_id=self._user_id, timestamp=time_now_iso8601())
+        )
+
     async def _process_assistant_turn(self, text: str) -> None:
         """Called when the assistant's turn completes with the aggregated reply text.
 
@@ -720,7 +743,8 @@ class STTService(AIService):
         Stores the timestamp of each TranscriptionFrame for TTFB calculation.
         If the frame is marked as finalized (via request_finalize/confirm_finalize),
         reports TTFB immediately and cancels any pending timeout. Otherwise, TTFB is
-        reported after a timeout.
+        reported after a timeout. A TranscriptionFinalizedFrame reports TTFB the
+        same way a finalized transcript does.
 
         Args:
             frame: The frame to push.
@@ -740,6 +764,11 @@ class STTService(AIService):
                 await self.stop_ttfb_metrics()
                 # Cancel the timeout since we've already reported
                 await self._cancel_ttfb_timeout()
+        elif isinstance(frame, TranscriptionFinalizedFrame):
+            # The service has confirmed nothing more is coming, so the wait
+            # for the final transcript ends here.
+            await self.stop_ttfb_metrics()
+            await self._cancel_ttfb_timeout()
 
         await super().push_frame(frame, direction)
 

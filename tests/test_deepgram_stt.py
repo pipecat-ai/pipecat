@@ -306,12 +306,15 @@ async def test_connection_handler_backs_off_after_non_quick_failure(monkeypatch)
     assert sleep_calls == [4, 4]  # exponential_backoff_time's min_wait, not skipped
 
 
-def _results_message(transcript: str, is_final: bool, words: list | None = None):
+def _results_message(
+    transcript: str, is_final: bool, words: list | None = None, from_finalize: bool = False
+):
     from deepgram.listen.v1.types import ListenV1Results
 
     return ListenV1Results.model_validate(
         {
             "type": "Results",
+            "from_finalize": from_finalize,
             "channel_index": [0, 1],
             "duration": 1.2,
             "start": 0.0,
@@ -516,6 +519,70 @@ async def test_diarized_final_result_emits_one_frame_per_speaker_run():
         (TranscriptionSpeaker("1", 2), "1: Hello."),
     ]
     assert all(f.user_id == "session-user" for f in frames)
+
+
+async def _frames_pushed_below_the_stt_service(monkeypatch) -> list:
+    """Capture frames below STTService.push_frame, so its finalize handling still runs."""
+    from pipecat.services.ai_service import AIService
+
+    pushed: list = []
+
+    async def fake_push_frame(self, frame, direction=None):
+        pushed.append(frame)
+
+    monkeypatch.setattr(AIService, "push_frame", fake_push_frame)
+    return pushed
+
+
+@pytest.mark.asyncio
+async def test_empty_finalize_response_finalizes_the_transcript_before_it(monkeypatch):
+    """Deepgram's endpointing can send the transcript before it is asked to finalize.
+
+    The finalize response then has no text. The transcript already pushed
+    cannot be marked finalized any more, so the confirmation is pushed as a
+    frame of its own.
+    """
+    from pipecat.frames.frames import TranscriptionFinalizedFrame
+
+    pushed = await _frames_pushed_below_the_stt_service(monkeypatch)
+    service = DeepgramSTTService(api_key="test-key")
+    service._user_id = "session-user"
+
+    await service._on_message(_results_message("Hello there.", is_final=True))
+    # The VAD stop asks Deepgram to finalize.
+    service.request_finalize()
+    await service._on_message(_results_message("", is_final=True, from_finalize=True))
+
+    transcript, confirmation = pushed
+    assert (transcript.text, transcript.finalized) == ("Hello there.", False)
+    assert isinstance(confirmation, TranscriptionFinalizedFrame)
+    assert confirmation.user_id == "session-user"
+
+
+@pytest.mark.asyncio
+async def test_finalize_response_with_text_finalizes_its_own_transcript(monkeypatch):
+    from pipecat.frames.frames import TranscriptionFrame
+
+    pushed = await _frames_pushed_below_the_stt_service(monkeypatch)
+    service = DeepgramSTTService(api_key="test-key")
+
+    service.request_finalize()
+    await service._on_message(_results_message("Hello there.", is_final=True, from_finalize=True))
+
+    assert [(type(f), f.text, f.finalized) for f in pushed] == [
+        (TranscriptionFrame, "Hello there.", True)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_empty_finalize_response_nobody_asked_for_finalizes_nothing(monkeypatch):
+    """A confirmation that arrives after the user spoke again belongs to no utterance."""
+    pushed = await _frames_pushed_below_the_stt_service(monkeypatch)
+    service = DeepgramSTTService(api_key="test-key")
+
+    await service._on_message(_results_message("", is_final=True, from_finalize=True))
+
+    assert pushed == []
 
 
 @pytest.mark.asyncio

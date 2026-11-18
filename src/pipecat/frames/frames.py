@@ -732,6 +732,33 @@ class EagerTranscriptionFrame(TextFrame):
 
 
 @dataclass
+class TranscriptionFinalizedFrame(DataFrame):
+    """Confirmation that the transcription of an utterance is complete.
+
+    An STT service asked to finalize may have delivered the last of the text
+    already, before it could tell that nothing more was coming. Its
+    confirmation then has no text to carry, and this frame is how it reaches
+    the pipeline. It means what ``finalized=True`` means on a
+    :class:`TranscriptionFrame`, for the transcripts pushed before it.
+
+    An utterance is finalized by one or the other, never both: by its last
+    :class:`TranscriptionFrame` when the confirmation arrives with text, and by
+    this frame when it arrives without.
+
+    Parameters:
+        user_id: Identifier of the participant whose audio was transcribed, as
+            on the transcripts this confirms.
+        timestamp: When the confirmation arrived.
+    """
+
+    user_id: str = ""
+    timestamp: str = ""
+
+    def __str__(self):
+        return f"{self.name}(user: {self.user_id}, timestamp: {self.timestamp})"
+
+
+@dataclass
 class TranslationFrame(TextFrame):
     """Text frame containing translated transcription data.
 

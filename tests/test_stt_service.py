@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     STTMetadataFrame,
     STTMuteFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     TranscriptionSpeaker,
 )
@@ -288,6 +289,60 @@ async def test_push_transcription_runs_finalizes_only_the_last_run(pushed_frames
         (TranscriptionSpeaker("1", 2), "Hello.", True),
     ]
     assert all(f.user_id == "session-user" for f in pushed_frames)
+
+
+@pytest.mark.asyncio
+async def test_a_confirmation_without_text_is_pushed_as_a_frame_of_its_own(pushed_frames):
+    """The transcript arrived before the service confirmed it was the last."""
+    service = _make_capturing_service()
+    service._user_id = "session-user"
+    stopped: list[bool] = []
+
+    async def stop_ttfb_metrics(**kwargs):
+        stopped.append(True)
+
+    service.stop_ttfb_metrics = stop_ttfb_metrics
+
+    await service._push_transcription_runs([(None, "Hi.")])
+    service.request_finalize()
+    service.confirm_finalize()
+    await service._push_transcription_finalized()
+
+    transcript, confirmation = pushed_frames
+    assert (transcript.text, transcript.finalized) == ("Hi.", False)
+    assert isinstance(confirmation, TranscriptionFinalizedFrame)
+    assert confirmation.user_id == "session-user"
+    # The wait for the final transcript ends at the confirmation.
+    assert stopped == [True]
+
+    # One confirmation finalizes once.
+    await service._push_transcription_finalized()
+    assert len(pushed_frames) == 2
+
+
+@pytest.mark.asyncio
+async def test_no_finalized_frame_without_a_confirmed_finalization(pushed_frames):
+    """Nothing is finalized unless the service asked and the server confirmed."""
+    service = _make_capturing_service()
+
+    await service._push_transcription_finalized()
+    service.request_finalize()
+    await service._push_transcription_finalized()
+
+    assert pushed_frames == []
+
+
+@pytest.mark.asyncio
+async def test_a_confirmation_with_text_finalizes_its_transcript_only(pushed_frames):
+    """An utterance is finalized by its transcript or by the frame, never both."""
+    service = _make_capturing_service()
+
+    service.request_finalize()
+    service.confirm_finalize()
+    await service._push_transcription_runs([(None, "Hi.")])
+    await service._push_transcription_finalized()
+
+    assert [(type(f), f.finalized) for f in pushed_frames] == [(TranscriptionFrame, True)]
 
 
 def _make_segmented_service(frames: list[Frame]) -> SegmentedSTTService:

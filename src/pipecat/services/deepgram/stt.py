@@ -814,11 +814,12 @@ class DeepgramSTTService(STTService):
                     await self._push_transcription_runs(runs, language=language, result=message)
                     await self._handle_transcription(transcript, is_final, language)
                 elif from_finalize:
-                    # Deepgram already sent the transcript via a regular is_final
-                    # before the finalize response arrived (empty). Report STT TTFB
-                    # immediately instead of falling to the timeout.
-                    await self.stop_ttfb_metrics()
-                    await self._cancel_ttfb_timeout()
+                    # Deepgram's own endpointing already sent the transcript in
+                    # a regular is_final, before it was asked to finalize, so
+                    # the confirmation has no text to mark as finalized. Push it
+                    # on its own: that finalizes those transcripts for the
+                    # pipeline and reports the STT TTFB.
+                    await self._push_transcription_finalized()
             elif len(transcript) > 0:
                 # For interim transcriptions, just push the frame without tracing
                 await self.push_frame(
