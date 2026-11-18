@@ -672,7 +672,7 @@ class TextSegmentMap:
         This is where the "keep pace or wait" rule from the class docstring is
         applied, and the only place the cursors into the other two texts move.
 
-        **Unchanged segment** -- both sides hold the same text, so the other two
+        **Unchanged segment** -- both sides hold the same words, so the other two
         cursors keep pace. They move by a count, not a position: however many
         letters and digits this step used up in the spoken text is how many they
         move past. :func:`advance_by_alnums` does that, crossing tags for free
@@ -720,20 +720,56 @@ class TextSegmentMap:
             # off by a space, as French writes it ("va ?", "Attention :").
             # There is no budget to advance by, so step straight to where the
             # raw cursor got to, and the mark leaves the remaining text now
-            # rather than a word later. Both sides are identical here, so that
-            # offset is exact.
-            self._user_facing_pos = seg.original_start + len(seg.tts[:new_pos].rstrip())
-        self._advance_llm_cursors(crossed, n_alnum)
+            # rather than a word later.
+            self._user_facing_pos = advance_by_chars(
+                self._original_text,
+                seg.original_start,
+                self._original_chars(seg, len(seg.tts[:new_pos].rstrip())),
+            )
+        n_chars = self._original_chars(seg, new_pos) - self._original_chars(seg, self._seg_raw_pos)
+        self._advance_llm_cursors(n_chars, n_alnum)
 
-    def _advance_llm_cursors(self, crossed: str, n_alnum: int) -> None:
-        """Move both LLM cursors for a step that just spoke *crossed*.
+    @staticmethod
+    def _original_chars(seg: TextSegment, tts_pos: int) -> int:
+        """Count the characters of *seg*'s original side that *tts_pos* has spoken.
 
-        The two answer different questions and so stop in different places, which
-        is the whole reason there are two of them:
+        Tags on the original side are not counted, as :func:`advance_by_chars`
+        does not count them. A segment that is not transformed has the same
+        letters and digits on both sides, in the same order, but may punctuate
+        them differently (``"Okay."`` sent as ``"Okay..."``). Its letters and
+        digits are matched one for one, and the marks after the last one spoken
+        as far as the original has marks there, so the cursors into the other
+        texts never run ahead of what the original holds.
+        """
+        original = strip_complete_markup(seg.original)
+        if len(original) == len(seg.tts):
+            return tts_pos
+
+        spoken = seg.tts[:tts_pos]
+        last_alnum = max((i for i, char in enumerate(spoken) if char.isalnum()), default=-1)
+        n_alnum = sum(char.isalnum() for char in spoken)
+        n_marks = len(spoken) - last_alnum - 1
+
+        pos = 0
+        while n_alnum and pos < len(original):
+            if original[pos].isalnum():
+                n_alnum -= 1
+            pos += 1
+        end = pos
+        while end < len(original) and end - pos < n_marks and not original[end].isalnum():
+            end += 1
+        return end
+
+    def _advance_llm_cursors(self, n_chars: int, n_alnum: int) -> None:
+        """Move both LLM cursors for a step that spoke *n_chars* original characters.
+
+        *n_alnum* of those characters are letters or digits. The two cursors
+        answer different questions and so stop in different places, which is
+        the whole reason there are two of them:
 
         - :attr:`llm_spoken_pos` -- what has been **reported spoken**. It crosses
-          exactly the characters the raw cursor did, so it stops in front of a
-          mark no event has arrived for.
+          exactly the characters the raw cursor did, counted on the original
+          side, so it stops in front of a mark no event has arrived for.
         - :attr:`llm_pos` -- what has been **attributed**. It also takes a mark
           stuck to the end of the word, since the conversation context is rebuilt
           by joining the attributed spans and every character has to belong to
@@ -745,7 +781,7 @@ class TextSegmentMap:
         the source spells differently -- is still credited to the word that
         crossed it.
         """
-        self._llm_spoken_pos = advance_by_chars(self._llm_scan, self._llm_spoken_pos, len(crossed))
+        self._llm_spoken_pos = advance_by_chars(self._llm_scan, self._llm_spoken_pos, n_chars)
         self._llm_pos = max(
             advance_by_alnums(self._llm_scan, self._llm_pos, n_alnum), self._llm_spoken_pos
         )

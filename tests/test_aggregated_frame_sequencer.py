@@ -2473,5 +2473,65 @@ class TestUnmatchedSymbolDoesNotDesyncTheTurn(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class TestPunctuationOnlyRewritesKeepWordsWhole(unittest.IsolatedAsyncioTestCase):
+    """A TTS text transform that only changes punctuation (``","`` sent as ``".."``)
+    leaves every word whole in the context and in the progress text.
+
+    Each case is the sentence, the text sent to the TTS, and the words the provider
+    reports: with the marks attached, without them, or after another rewrite in
+    the same sentence.
+    """
+
+    CASES = {
+        "english": (
+            "Sure, I can help. Please, share it with me, okay?",
+            "Sure.. I can help. Please.. share it with me.. okay?",
+            ["Sure..", "I", "can", "help.", "Please..", "share", "it", "with", "me..", "okay?"],
+        ),
+        "english-marks-not-reported": (
+            "Okay. I can help you today.",
+            "Okay... I can help you today.",
+            ["Okay", "I", "can", "help", "you", "today"],
+        ),
+        "hindi": (
+            "मैं समझ सकती हूँ, आप परेशान हैं। मैं पूरी कोशिश कर रही हूँ कि आपका काम जल्दी हो जाए।",
+            "मैं समझ सकती हूँ.. आप परेशान हैं. मैं पूरी कोशिश कर रही हूँ कि आपका काम जल्दी हो जाए.",
+            "मैं समझ सकती हूँ.. आप परेशान हैं. मैं पूरी कोशिश कर रही हूँ कि आपका काम जल्दी हो जाए.".split(),
+        ),
+        "then-a-phoneme": (
+            "Good evening, Siobhan will help you today.",
+            'Good evening.. <phoneme alphabet="ipa" ph="ʃɪˈvɔːn">Siobhan</phoneme> will help you today.',
+            ["Good", "evening..", "Siobhan", "will", "help", "you", "today."],
+        ),
+    }
+
+    async def test_context_and_progress_keep_every_word_whole(self):
+        for name, (sentence, tts_text, words) in self.CASES.items():
+            with self.subTest(name):
+                seq = _seq()
+                await seq.register_spoken(
+                    _spoken_frame(sentence, raw_text=sentence), "ctx1", tts_text, True
+                )
+                frames = []
+                for pts, word in enumerate(words, start=1):
+                    frames += seq.process_word(word, pts=pts * 10, context_id="ctx1")
+
+                context = concatenate_aggregated_text(
+                    [
+                        TextPartForConcatenation(
+                            f.raw_text or f.text,
+                            includes_inter_part_spaces=f.includes_inter_frame_spaces,
+                        )
+                        for f in frames
+                        if isinstance(f, TTSTextFrame) and f.append_to_context
+                    ]
+                )
+                progress = [
+                    f.accumulated_text for f in frames if isinstance(f, AggregatedTextProgressFrame)
+                ]
+                self.assertEqual(context, sentence)
+                self.assertEqual(progress[-1], sentence)
+
+
 if __name__ == "__main__":
     unittest.main()
