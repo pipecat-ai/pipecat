@@ -2090,3 +2090,95 @@ async def test_http_segment_pipeline_emits_finalized_transcription():
     ]
     assert len(usage_indexes) == 1
     assert usage_indexes[0] < received_down.index(transcripts[0])
+
+
+def _timed_response(transcript: str, words, starts, ends, granularity: str = "word"):
+    from sarvamai.types.speech_to_text_response import SpeechToTextResponse
+
+    return SpeechToTextResponse(
+        transcript=transcript,
+        language_code="en-IN",
+        timestamps={
+            "words": words,
+            "start_time_seconds": starts,
+            "end_time_seconds": ends,
+            "granularity": granularity,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_requests_word_timestamps():
+    service = _http_service(settings=SarvamHttpSTTService.Settings(timestamp_granularity="word"))
+    # From a live saaras:v4 response (trimmed).
+    transcribe = _mock_rest_client(
+        service,
+        _timed_response("Namaskar and I", ["Namaskar", "and", "I"], [1.97, 4.14, 4.43],
+                        [2.77, 4.43, 4.586]),
+    )  # fmt: skip
+
+    frames = await _run_stt(service, _wav(5))
+
+    body = transcribe.await_args.kwargs["request_options"]["additional_body_parameters"]
+    assert body == {"timestamp_granularity": "word"}
+    timestamps = frames[0].result["timestamps"]
+    assert timestamps["words"] == ["Namaskar", "and", "I"]
+    assert timestamps["start_time_seconds"] == [1.97, 4.14, 4.43]
+    assert timestamps["end_time_seconds"] == [2.77, 4.43, 4.586]
+    assert timestamps["granularity"] == "word"
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_sends_timestamp_granularity_with_keyterms():
+    service = _http_service(
+        keyterms=["Sarvam"],
+        settings=SarvamHttpSTTService.Settings(timestamp_granularity="segment"),
+    )
+    transcribe = _mock_rest_client(service, _rest_response("hello"))
+
+    await _run_stt(service)
+
+    body = transcribe.await_args.kwargs["request_options"]["additional_body_parameters"]
+    assert body["timestamp_granularity"] == "segment"
+    assert json.loads(body["keyterms"]) == ["Sarvam"]
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_requests_no_timestamps_by_default():
+    service = _http_service()
+    transcribe = _mock_rest_client(service, _rest_response("hello"))
+
+    await _run_stt(service)
+
+    assert "request_options" not in transcribe.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_http_run_stt_shifts_timestamps_of_later_pieces():
+    service = _http_service(settings=SarvamHttpSTTService.Settings(timestamp_granularity="word"))
+    _mock_rest_client(
+        service,
+        responses=[
+            _timed_response("one", ["one"], [0.5], [0.9]),
+            _timed_response("two", ["two"], [1.25], [1.5]),
+            _timed_response("three", ["three"], [0.1], [0.4]),
+        ],
+    )
+
+    frames = await _run_stt(service, _wav(65))
+
+    results = frames[0].result
+    assert [r["timestamps"]["start_time_seconds"] for r in results] == [[0.5], [31.25], [60.1]]
+    assert [r["timestamps"]["end_time_seconds"] for r in results] == [[0.9], [31.5], [60.4]]
+
+
+@pytest.mark.asyncio
+async def test_http_timestamp_granularity_update_applies_to_the_next_request():
+    service = _http_service()
+    transcribe = _mock_rest_client(service, _rest_response("hello"))
+
+    await service._update_settings(SarvamHttpSTTService.Settings(timestamp_granularity="word"))
+    await _run_stt(service)
+
+    body = transcribe.await_args.kwargs["request_options"]["additional_body_parameters"]
+    assert body == {"timestamp_granularity": "word"}
