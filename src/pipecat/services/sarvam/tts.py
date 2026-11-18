@@ -11,7 +11,7 @@ Indian languages:
 
 **Model Variants:**
 
-- **bulbul:v3** (default): Sarvam's current TTS model, with temperature control
+- **bulbul:v3**: Sarvam's current TTS model, with temperature control
     - Does NOT support: pitch, loudness
     - Supports: pace (0.5-2.0), temperature (0.01-1.0)
     - Default sample rate: 24000 Hz
@@ -20,7 +20,7 @@ Indian languages:
       simran, kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
       kabir, aayan, ashutosh, advait
 
-- **bulbul:v4-flash**: Low-latency TTS model
+- **bulbul:v4-flash** (default): Low-latency TTS model
     - Supports: pitch, loudness, pace (0.5-2.0)
     - Does NOT support: temperature
     - Default sample rate: 24000 Hz
@@ -324,7 +324,7 @@ class SarvamHttpTTSService(TTSService):
 
     **Models:**
 
-    - **bulbul:v3** (default):
+    - **bulbul:v3**:
         - Does NOT support: pitch, loudness (will be ignored)
         - Supports: pace (0.5 to 2.0), temperature (0.01 to 1.0)
         - Default sample rate: 24000 Hz
@@ -333,7 +333,7 @@ class SarvamHttpTTSService(TTSService):
           kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
           kabir, aayan, ashutosh, advait
 
-    - **bulbul:v4-flash**:
+    - **bulbul:v4-flash** (default):
         - Supports: pitch, loudness, pace (0.5 to 2.0)
         - Does NOT support: temperature (will be ignored)
         - Default sample rate: 24000 Hz
@@ -345,7 +345,7 @@ class SarvamHttpTTSService(TTSService):
 
     Example::
 
-        # Using bulbul:v3 (default) with temperature control
+        # Using bulbul:v3 with temperature control
         tts = SarvamHttpTTSService(
             api_key="your-api-key",
             aiohttp_session=session,
@@ -443,8 +443,9 @@ class SarvamHttpTTSService(TTSService):
                     Use ``settings=SarvamHttpTTSService.Settings(voice=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model: TTS model to use. Defaults to "bulbul:v3", Sarvam's current
-                model; "bulbul:v4-flash" is also available.
+            model: TTS model to use. Defaults to "bulbul:v4-flash", Sarvam's
+                low-latency model; use "bulbul:v3" for the extension languages
+                v4-flash doesn't serve.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamHttpTTSService.Settings(model=...)`` instead.
@@ -466,8 +467,8 @@ class SarvamHttpTTSService(TTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="bulbul:v3",
-            voice="shubh",
+            model="bulbul:v4-flash",
+            voice="shubh_en_narration_gentle",
             language="en-IN",
             enable_preprocessing=False,
             pace=1.0,
@@ -691,7 +692,7 @@ class SarvamTTSService(InterruptibleTTSService):
 
     **Models:**
 
-    - **bulbul:v3** (default):
+    - **bulbul:v3**:
         - Does NOT support: pitch, loudness (will be ignored)
         - Supports: pace (0.5 to 2.0), temperature (0.01 to 1.0)
         - Default sample rate: 24000 Hz
@@ -700,7 +701,7 @@ class SarvamTTSService(InterruptibleTTSService):
           kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
           kabir, aayan, ashutosh, advait
 
-    - **bulbul:v4-flash**:
+    - **bulbul:v4-flash** (default):
         - Supports: pitch, loudness, pace (0.5 to 2.0)
         - Does NOT support: temperature (will be ignored)
         - Default sample rate: 24000 Hz
@@ -719,7 +720,7 @@ class SarvamTTSService(InterruptibleTTSService):
 
     Example::
 
-        # Using bulbul:v3 (default) with temperature control
+        # Using bulbul:v3 with temperature control
         tts = SarvamTTSService(
             api_key="your-api-key",
             settings=SarvamTTSService.Settings(
@@ -847,8 +848,9 @@ class SarvamTTSService(InterruptibleTTSService):
 
         Args:
             api_key: Sarvam API key for authenticating TTS requests.
-            model: TTS model to use. Defaults to "bulbul:v3", Sarvam's current
-                model; "bulbul:v4-flash" is also available.
+            model: TTS model to use. Defaults to "bulbul:v4-flash", Sarvam's
+                low-latency model; use "bulbul:v3" for the extension languages
+                v4-flash doesn't serve.
 
                 .. deprecated:: 0.0.105
                     Use ``settings=SarvamTTSService.Settings(model=...)`` instead.
@@ -884,8 +886,8 @@ class SarvamTTSService(InterruptibleTTSService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="bulbul:v3",
-            voice="shubh",
+            model="bulbul:v4-flash",
+            voice="shubh_en_narration_gentle",
             language="en-IN",
             enable_preprocessing=False,
             min_buffer_size=50,
