@@ -721,10 +721,8 @@ class TextSegmentMap:
             # There is no budget to advance by, so step straight to where the
             # raw cursor got to, and the mark leaves the remaining text now
             # rather than a word later.
-            self._user_facing_pos = advance_by_chars(
-                self._original_text,
-                seg.original_start,
-                self._original_chars(seg, len(seg.tts[:new_pos].rstrip())),
+            self._user_facing_pos = seg.original_start + self._original_chars(
+                seg, len(seg.tts[:new_pos].rstrip())
             )
         n_chars = self._original_chars(seg, new_pos) - self._original_chars(seg, self._seg_raw_pos)
         self._advance_llm_cursors(n_chars, n_alnum)
@@ -733,17 +731,20 @@ class TextSegmentMap:
     def _original_chars(seg: TextSegment, tts_pos: int) -> int:
         """Count the characters of *seg*'s original side that *tts_pos* has spoken.
 
-        Tags on the original side are not counted, as :func:`advance_by_chars`
-        does not count them. A segment that is not transformed has the same
-        letters and digits on both sides, in the same order, but may punctuate
-        them differently (``"Okay."`` sent as ``"Okay..."``). Its letters and
-        digits are matched one for one, and the marks after the last one spoken
-        as far as the original has marks there, so the cursors into the other
-        texts never run ahead of what the original holds.
+        Complete tags on the original side are not counted. A segment that is
+        not transformed has the same letters and digits on both sides, in the
+        same order, but may punctuate them differently (``"Okay."`` sent as
+        ``"Okay..."``, or ``"Sure,"`` as ``"Sure"``). Its letters and digits are
+        matched one for one, and the marks after the last one spoken as far as
+        the original has marks there, so the cursors into the other texts never
+        run ahead of what the original holds. Once the TTS side is spoken in
+        full, so is the original, marks the TTS side dropped included.
         """
         original = strip_complete_markup(seg.original)
         if len(original) == len(seg.tts):
             return tts_pos
+        if tts_pos >= len(seg.tts):
+            return len(original)
 
         spoken = seg.tts[:tts_pos]
         last_alnum = max((i for i, char in enumerate(spoken) if char.isalnum()), default=-1)

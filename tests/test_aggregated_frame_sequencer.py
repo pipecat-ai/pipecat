@@ -2474,12 +2474,13 @@ class TestUnmatchedSymbolDoesNotDesyncTheTurn(unittest.IsolatedAsyncioTestCase):
 
 
 class TestPunctuationOnlyRewritesKeepWordsWhole(unittest.IsolatedAsyncioTestCase):
-    """A TTS text transform that only changes punctuation (``","`` sent as ``".."``)
-    leaves every word whole in the context and in the progress text.
+    """A TTS text transform that only changes punctuation (``","`` sent as ``".."``,
+    or dropped) leaves every word whole in the context and in the progress text.
 
-    Each case is the sentence, the text sent to the TTS, and the words the provider
-    reports: with the marks attached, without them, or after another rewrite in
-    the same sentence.
+    Each case is the sentence, the text sent to the TTS, the words the provider
+    reports, and whether the frame is force-completed after them. The words come
+    with the marks attached, without them, one mark at a time, or after another
+    rewrite in the same sentence.
     """
 
     CASES = {
@@ -2487,26 +2488,42 @@ class TestPunctuationOnlyRewritesKeepWordsWhole(unittest.IsolatedAsyncioTestCase
             "Sure, I can help. Please, share it with me, okay?",
             "Sure.. I can help. Please.. share it with me.. okay?",
             ["Sure..", "I", "can", "help.", "Please..", "share", "it", "with", "me..", "okay?"],
+            False,
         ),
         "english-marks-not-reported": (
             "Okay. I can help you today.",
             "Okay... I can help you today.",
             ["Okay", "I", "can", "help", "you", "today"],
+            False,
+        ),
+        "marks-reported-one-by-one": (
+            "Okay. I can.",
+            "Okay... I can.",
+            ["Okay", ".", ".", ".", "I", "can."],
+            False,
+        ),
+        "marks-dropped-then-force-completed": (
+            "Sure, I can help.",
+            "Sure I can help.",
+            ["Sure", "I"],
+            True,
         ),
         "hindi": (
             "मैं समझ सकती हूँ, आप परेशान हैं। मैं पूरी कोशिश कर रही हूँ कि आपका काम जल्दी हो जाए।",
             "मैं समझ सकती हूँ.. आप परेशान हैं. मैं पूरी कोशिश कर रही हूँ कि आपका काम जल्दी हो जाए.",
             "मैं समझ सकती हूँ.. आप परेशान हैं. मैं पूरी कोशिश कर रही हूँ कि आपका काम जल्दी हो जाए.".split(),
+            False,
         ),
         "then-a-phoneme": (
             "Good evening, Siobhan will help you today.",
             'Good evening.. <phoneme alphabet="ipa" ph="ʃɪˈvɔːn">Siobhan</phoneme> will help you today.',
             ["Good", "evening..", "Siobhan", "will", "help", "you", "today."],
+            False,
         ),
     }
 
     async def test_context_and_progress_keep_every_word_whole(self):
-        for name, (sentence, tts_text, words) in self.CASES.items():
+        for name, (sentence, tts_text, words, force_complete) in self.CASES.items():
             with self.subTest(name):
                 seq = _seq()
                 await seq.register_spoken(
@@ -2515,6 +2532,8 @@ class TestPunctuationOnlyRewritesKeepWordsWhole(unittest.IsolatedAsyncioTestCase
                 frames = []
                 for pts, word in enumerate(words, start=1):
                     frames += seq.process_word(word, pts=pts * 10, context_id="ctx1")
+                if force_complete:
+                    frames += seq.force_complete("ctx1", last_word_pts=999)
 
                 context = concatenate_aggregated_text(
                     [
@@ -2530,6 +2549,12 @@ class TestPunctuationOnlyRewritesKeepWordsWhole(unittest.IsolatedAsyncioTestCase
                     f.accumulated_text for f in frames if isinstance(f, AggregatedTextProgressFrame)
                 ]
                 self.assertEqual(context, sentence)
+                for text in progress:
+                    self.assertTrue(
+                        sentence.startswith(text)
+                        and sentence[len(text) : len(text) + 1] in ("", " "),
+                        f"progress {text!r} does not end at a word",
+                    )
                 self.assertEqual(progress[-1], sentence)
 
 
