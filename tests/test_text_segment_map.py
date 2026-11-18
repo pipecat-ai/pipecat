@@ -627,6 +627,13 @@ class TestPunctuationOnlyRewrite(unittest.TestCase):
             ],
         )
 
+    def test_a_lone_angle_bracket_reported_as_a_word_is_not_a_tag(self):
+        original = "Is 3 < 5? Yes. Good."
+        smap = TextSegmentMap("Is 3 < 5? Yes... Good.", original, original)
+        for word in ["Is", "3", "<"]:
+            smap.advance_word(word)
+        self.assertEqual(original[: smap.user_facing_pos], "Is 3 <")
+
 
 if __name__ == "__main__":
     unittest.main()
