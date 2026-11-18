@@ -363,7 +363,7 @@ is what makes the sequencer straightforward to test.
 
 ## Tests
 
-`tests/test_aggregated_frame_sequencer.py` — 134 tests.
+`tests/test_aggregated_frame_sequencer.py` — 166 tests.
 
 | Group | Classes |
 | --- | --- |
@@ -371,7 +371,7 @@ is what makes the sequencer straightforward to test.
 | Word routing | `ProcessWordBasic`, `ProcessWordRawText`, `ProcessWordOverflow`, `ProcessWordForcesComplete`, `WordsAfterUnrepeatedPunctuation`, `TokenizationShapeResilience` |
 | Streaming | `RegisterSpokenStreaming`, `RegisterSpokenBufferedWords`, `RegisterSkippedForcesFinalize`, `FinalizeEndOfTurn`, `FinalizeRescuesMidSentencePrefix`, `ClearResetsStreamingState`, `ParallelSentenceAggregator` |
 | Concurrency | `ConcurrentContexts` |
-| Language / RTVI | `CJKLanguages`, `CJKContextAssembly`, `CJKProcessWordFlagPropagation`, `AggregatedTextProgressFrame`, `VoiceFormattingTransforms` |
+| Language / RTVI | `CJKLanguages`, `CJKContextAssembly`, `CJKProcessWordFlagPropagation`, `AggregatedTextProgressFrame`, `VoiceFormattingTransforms`, `PunctuationOnlyRewritesKeepWordsWhole` |
 
 End-to-end coverage lives in `tests/test_tts_frame_ordering.py`, which drives all three
 layers through mock HTTP, websocket, paused-websocket, and token-streaming services.
