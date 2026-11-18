@@ -46,6 +46,7 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    ManuallySwitchServiceFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     SpeechControlParamsFrame,
@@ -68,6 +69,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.service_switcher import ServiceSwitcher
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -85,6 +87,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     _AssistantTurnInterruptedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.stt_service import STTService
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.empty_user_turn import DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT
 from pipecat.turns.user_mute import (
@@ -449,6 +452,71 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             [ExternalUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy],
         )
         self.assertIs((strategies.stop or [])[-1], existing_stop)
+
+    async def test_a_switch_to_an_stt_without_a_recommendation_restores_the_defaults(self):
+        """A turn-detecting STT's strategies hold until its ServiceSwitcher leaves it.
+
+        STT metadata from outside the switcher, such as Daily's transcription,
+        changes nothing.
+        """
+
+        class PlainSTT(STTService):
+            async def run_stt(self, audio):
+                if False:
+                    yield audio
+
+        class TurnDetectingSTT(PlainSTT):
+            def service_metadata_frame(self) -> STTMetadataFrame:
+                frame = super().service_metadata_frame()
+                frame.user_turn_strategies = ExternalUserTurnStrategies()
+                return frame
+
+        plain_stt = PlainSTT()
+        switcher = ServiceSwitcher(services=[TurnDetectingSTT(), plain_stt])
+        user_aggregator = LLMUserAggregator(LLMContext())
+
+        frames_to_send = [
+            SleepFrame(),
+            STTMetadataFrame(service_name="transport-transcription", ttfs_p99_latency=0.0),
+            ProposedUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now", finalized=True),
+            ProposedUserStoppedSpeakingFrame(),
+            SleepFrame(),
+            ManuallySwitchServiceFrame(service=plain_stt),
+            SleepFrame(),
+            TranscriptionFrame(text="Are you there?", user_id="", timestamp="now"),
+            SleepFrame(),
+        ]
+        down_frames, _ = await run_test(
+            Pipeline([switcher, user_aggregator]), frames_to_send=frames_to_send
+        )
+
+        started = [f for f in down_frames if isinstance(f, UserStartedSpeakingFrame)]
+        self.assertEqual(len(started), 2)
+
+    async def test_a_switch_to_an_stt_without_a_recommendation_keeps_realtime_mode(self):
+        """In realtime mode the defaults come back without transcript dependence."""
+        user_aggregator = LLMUserAggregator(LLMContext())
+
+        frames_to_send = [
+            STTMetadataFrame(
+                service_name="turn-detecting-stt",
+                ttfs_p99_latency=0.0,
+                user_turn_strategies=ExternalUserTurnStrategies(),
+                switcher_name="stt-switcher",
+            ),
+            LLMServiceMetadataFrame(service_name="realtime-llm", is_realtime_service=True),
+            STTMetadataFrame(
+                service_name="plain-stt", ttfs_p99_latency=0.0, switcher_name="stt-switcher"
+            ),
+        ]
+        await run_test(Pipeline([user_aggregator]), frames_to_send=frames_to_send)
+
+        strategies = user_aggregator._user_turn_controller._user_turn_strategies
+        self.assertEqual([type(s) for s in strategies.start or []], [VADUserTurnStartStrategy])
+        stop = (strategies.stop or [])[0]
+        assert isinstance(stop, TurnAnalyzerUserTurnStopStrategy)
+        self.assertFalse(stop.wait_for_transcript)
 
     async def test_an_extending_list_joins_the_defaults_without_a_service(self):
         """With no service recommending strategies, an extending stop list joins the defaults."""

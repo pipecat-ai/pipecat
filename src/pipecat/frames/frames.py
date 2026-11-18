@@ -2201,10 +2201,13 @@ class ServiceMetadataFrame(SystemFrame):
             server-side end-of-turn detection. The user aggregator applies them
             unless the user passed their own ``user_turn_strategies``, which always
             wins. ``None`` leaves the defaults in place.
+        switcher_name: The name of the ``ServiceSwitcher`` whose active service
+            broadcast this, set by the switcher.
     """
 
     service_name: str
     user_turn_strategies: UserTurnStrategies | None = field(default=None, kw_only=True)
+    switcher_name: str | None = field(default=None, kw_only=True)
 
 
 @dataclass

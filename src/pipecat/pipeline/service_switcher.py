@@ -448,6 +448,8 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
                 frame.service_name == service.name for service in self._services
             ):
                 return
+            if frame.service_name == self.strategy.active_service.name:
+                frame.switcher_name = self.name
 
         # Consume the settings updates handed to the inactive services: they have
         # been delivered, and only the active service's copy travels on.
