@@ -88,6 +88,29 @@ async def _synthesize(service: SarvamHttpTTSService) -> dict:
     return service._session.payloads[-1]
 
 
+def test_websocket_service_defaults_to_v4_flash():
+    service = SarvamTTSService(api_key="test-key")
+
+    assert service._settings.model == V4_FLASH
+    assert _url_model(service) == V4_FLASH
+    assert service._settings.voice == "shubh_en_narration_gentle"
+
+
+def test_http_service_defaults_to_v4_flash():
+    service = SarvamHttpTTSService(api_key="test-key", aiohttp_session=_FakeSession())  # type: ignore[arg-type]
+
+    assert service._settings.model == V4_FLASH
+    assert service._settings.voice == "shubh_en_narration_gentle"
+
+
+def test_bulbul_v3_keeps_its_own_default_voice():
+    service = SarvamTTSService(
+        api_key="test-key", settings=SarvamTTSService.Settings(model="bulbul:v3")
+    )
+
+    assert service._settings.voice == "shubh"
+
+
 def test_v4_flash_defaults():
     """The service has to land on the same speaker and rate the API defaults to."""
     service = _service()
