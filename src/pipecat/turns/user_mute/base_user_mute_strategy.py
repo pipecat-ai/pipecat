@@ -25,6 +25,12 @@ class BaseUserMuteStrategy(BaseObject):
     The strategy is evaluated per frame and returns a boolean indicating whether
     the user should be muted.
 
+    A strategy that mutes the user at a turn boundary, such as from the moment
+    the user's turn ends, overrides :meth:`handle_user_turn_started` or
+    :meth:`handle_user_turn_stopped`. The user aggregator calls them when the
+    turn starts or stops and applies the result before the next frame, which a
+    decision made in :meth:`process_frame` can't do: it takes effect from the
+    frame after the one that triggered it.
     """
 
     def __init__(self, **kwargs):
@@ -53,3 +59,21 @@ class BaseUserMuteStrategy(BaseObject):
             Whether the strategy is muted.
         """
         return False
+
+    async def handle_user_turn_started(self) -> bool | None:
+        """Handle the start of a user turn.
+
+        Returns:
+            Whether the strategy is muted now, or None to keep the decision it
+            made on the last frame.
+        """
+        return None
+
+    async def handle_user_turn_stopped(self) -> bool | None:
+        """Handle the end of a user turn.
+
+        Returns:
+            Whether the strategy is muted now, or None to keep the decision it
+            made on the last frame.
+        """
+        return None
