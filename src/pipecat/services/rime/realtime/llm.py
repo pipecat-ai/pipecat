@@ -118,6 +118,19 @@ class RimeRealtimeSettings(LLMSettings):
 
 
 _INTERRUPTION_RULES = ("interrupt_min_words", "interrupt_phrases", "acknowledgment_phrases")
+# Settings sent to Prism under the same value, by their SDK names.
+_SESSION_FIELDS = (
+    ("voice", "voice"),
+    ("interrupt_on_speech", "interrupt_on_speech"),
+    ("truncation", "truncation"),
+    ("speed", "speed"),
+)
+# Settings an update can't set to None, which the SDK reads as keeping the value.
+_REQUIRED_FIELDS = (
+    "system_instruction",
+    *(name for name, _ in _SESSION_FIELDS),
+    *_INTERRUPTION_RULES,
+)
 
 # The SDK refuses more than 128 pending operations of its own.
 _MAX_PENDING_OPERATIONS = 128
@@ -286,6 +299,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         self._tasks: list[asyncio.Task] = []
         self._requests: set[asyncio.Task] = set()
         self._context: LLMContext | None = None
+        # The instructions and tools Prism last accepted.
+        self._prism_instructions: str | None = None
+        self._prism_tools: list[r.ToolDefinition] = []
         self._history: History | None = None
         self._transcripts: dict[str, str] = {}
         self._reply_lock = asyncio.Lock()
@@ -432,13 +448,14 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             if self._client is None:
                 self._client = Rime()
             self._sync_registered_tool_handlers(self._settings.tools)
+            instructions, tools = self._prism_view()
             self._connection = connect(
                 self._client,
                 self._startup,
                 endpoint=self._endpoint,
-                instructions=assert_given(self._settings.system_instruction),
+                instructions=instructions,
                 voice=assert_given(self._settings.voice),
-                tools=self._sdk_tools(self._settings),
+                tools=tools,
                 interrupt_on_speech=assert_given(self._settings.interrupt_on_speech),
                 turn_detection=self._opening_turn_detection(),
                 speed=assert_given(self._settings.speed),
@@ -448,6 +465,7 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 truncation=assert_given(self._settings.truncation),
             )
             self._session = await self._connection.__aenter__()
+            self._prism_instructions, self._prism_tools = instructions, tools
             self._history = History(self._session)
             if self._playback_mode == "discard":
                 self._playback = DiscardPlayback(self._session)
@@ -756,7 +774,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
                 finally:
                     if not self._closing and self._failure is None:
                         try:
-                            await self._sdk.update(tools=self._sdk_tools(self._settings))
+                            tools = self._sdk_tools(self._settings)
+                            await self._sdk.update(tools=tools)
+                            self._prism_tools = tools
                         except Exception as error:
                             await self._fail(error)
                     self._conversation.suppressing_tools = False
@@ -809,8 +829,8 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
     async def _update_settings(self, delta: LLMSettings) -> dict[str, Any]:
         """Queue a settings delta behind earlier operations.
 
-        Prism can refuse an update, so the delta changes ``_settings`` only once
-        Prism accepts it.
+        The delta is applied by :meth:`_apply_settings` once earlier operations
+        have been written.
 
         Args:
             delta: An LLM settings delta.
@@ -825,43 +845,82 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         async with self._conversation.settings_lock:
             await self._apply_settings(delta)
 
+    def _copy_settings(self) -> Settings:
+        """Copy the settings for a delta to change without touching them.
+
+        ``apply_update`` replaces fields and merges ``extra`` in place, so a
+        shallow copy with its own ``extra`` is enough. A deep copy would also
+        copy tools, and with them the objects their bound methods belong to.
+        """
+        settings = copy.copy(self._settings)
+        settings.extra = dict(self._settings.extra)
+        return settings
+
+    def _prism_view(self) -> tuple[str | None, list[r.ToolDefinition]]:
+        """The instructions and tools Prism should hold.
+
+        The instructions are the full system instruction ``LLMService`` composes,
+        and the tools include the built-in ones, such as cancel tools.
+        """
+        return assert_given(self._settings.system_instruction), self._sdk_tools(self._settings)
+
     async def _apply_settings(self, delta: LLMSettings) -> None:
-        proposal = copy.deepcopy(self._settings)
-        proposal.apply_update(self.Settings.from_mapping(delta.given_fields()))
+        """Apply a settings delta, keeping local settings matched to Prism's.
+
+        ``LLMService`` applies the delta and recomposes the system instruction
+        and tools, and Prism receives whatever then differs from what it holds.
+        Prism can refuse an update, so a refusal restores the previous settings.
+        """
         supplied = delta.given_fields()
+        proposal = self._copy_settings()
+        proposal.apply_update(self.Settings.from_mapping(supplied))
         self._validate_settings(proposal)
-        tools = self._sdk_tools(proposal)
-        update = {}
-        for field_name, sdk_name in (
-            ("system_instruction", "instructions"),
-            ("voice", "voice"),
-            ("interrupt_on_speech", "interrupt_on_speech"),
-            ("truncation", "truncation"),
-            ("speed", "speed"),
-            *((name, name) for name in _INTERRUPTION_RULES),
-        ):
-            if field_name in supplied:
-                value = getattr(proposal, field_name)
-                if value is None:
-                    raise ValueError(f"Prism cannot reset {field_name} to None")
-                update[sdk_name] = value
-        if "tools" in supplied or "tool_fillers" in supplied:
-            update["tools"] = tools
-        rules = [name for name in _INTERRUPTION_RULES if name in update]
-        if rules:
-            update["turn_detection"] = self._interruption_rules(proposal, rules)
-            for name in rules:
-                del update[name]
+        self._sdk_tools(proposal)  # Raises for invalid tools or fillers.
+        for name in _REQUIRED_FIELDS:
+            if name in supplied and getattr(proposal, name) is None:
+                raise ValueError(f"Prism cannot reset {name} to None")
+
+        # Response metadata is sent apart from the session update, below.
+        session_delta = self.Settings.from_mapping(
+            {name: value for name, value in supplied.items() if name != "response_metadata"}
+        )
+        previous_settings = self._copy_settings()
+        previous_base = self._base_system_instruction
+        previous_unregistered = set(self._explicitly_unregistered_function_names)
+        changed: dict[str, Any] = {}
+        try:
+            changed = await super()._update_settings(session_delta)
+            # The base service syncs handlers to the context's tools on every
+            # context frame, so the context changes with the handlers.
+            if self._context is not None and "tools" in changed:
+                self._context.set_tools(self._settings.tools or [])
+            self._sync_registered_tool_handlers(self._settings.tools)
+            instructions, tools = self._prism_view()
+            update: dict[str, Any] = {
+                sdk_name: getattr(self._settings, name)
+                for name, sdk_name in _SESSION_FIELDS
+                if name in changed
+            }
+            if instructions != self._prism_instructions:
+                update["instructions"] = instructions or ""
+            if tools != self._prism_tools:
+                update["tools"] = tools
+            rules = [name for name in _INTERRUPTION_RULES if name in changed]
+            if rules:
+                update["turn_detection"] = self._interruption_rules(self._settings, rules)
+            if update:
+                await self._sdk.update(**update)
+        except Exception:
+            self._settings = previous_settings
+            self._base_system_instruction = previous_base
+            self._explicitly_unregistered_function_names = previous_unregistered
+            # The user aggregator may have set the refused tools on the context.
+            if self._context is not None and "tools" in changed:
+                self._context.set_tools(self._settings.tools or [])
+            self._sync_registered_tool_handlers(self._settings.tools)
+            raise
         if update:
-            await self._sdk.update(**update)
-            metadata = self._settings.response_metadata
-            self._settings = proposal
-            self._settings.response_metadata = metadata
-            if "system_instruction" in supplied:
-                self._base_system_instruction = assert_given(proposal.system_instruction)
-            self._sync_registered_tool_handlers(proposal.tools)
-            if self._context is not None and "tools" in supplied:
-                self._context.set_tools(proposal.tools or [])
+            self._prism_instructions, self._prism_tools = instructions, tools
             await self._call_event_handler("on_session_updated", self._sdk.info)
         if "response_metadata" in supplied:
             await self._sdk.set_response_metadata(supplied["response_metadata"] or {})

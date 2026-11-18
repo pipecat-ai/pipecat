@@ -15,6 +15,7 @@ pytest.importorskip("rimelabs_sdk")
 
 from rimelabs_sdk import realtime as r
 
+from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -31,9 +32,14 @@ from pipecat.frames.frames import (
     LLMUpdateSettingsFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.aggregators.async_tool_messages import ASYNC_TOOL_INSTRUCTIONS
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.rime.realtime.llm import RimeRealtimeLLMService
+from pipecat.utils.async_tool_cancellation import (
+    ASYNC_TOOL_CANCELLATION_INSTRUCTIONS,
+    cancel_tool_name,
+)
 from tests.rime_realtime_peer import conversation, until
 
 
@@ -558,6 +564,107 @@ async def test_rejected_settings_preserve_acknowledged_provider_settings():
         await until(lambda: any(isinstance(f, ErrorFrame) for f in upstream))
         assert service._settings.system_instruction is None
         assert service.is_usable
+
+
+@tool_options(cancel_on_interruption=False)
+async def slow_lookup(params):
+    """Look up an order in the background."""
+    await params.result_callback({"status": "paid"})
+
+
+@tool_options(cancel_on_interruption=False, cancellable_by_llm=True)
+async def stoppable_lookup(params):
+    """Look up an order the model may stop."""
+    await params.result_callback({"status": "paid"})
+
+
+def tool_names(peer):
+    return [tool["function"]["name"] for tool in peer.settings.get("tools", [])]
+
+
+@pytest.mark.asyncio
+async def test_runtime_instruction_keeps_the_composed_guidance():
+    settings = RimeRealtimeLLMService.Settings(system_instruction="Support", tools=[slow_lookup])
+    async with conversation(settings=settings) as (peer, service, worker, *_):
+        assert peer.settings["instructions"] == f"Support\n\n{ASYNC_TOOL_INSTRUCTIONS}"
+        await worker.queue_frame(
+            LLMUpdateSettingsFrame(delta=service.Settings(system_instruction="Billing"))
+        )
+        await until(lambda: peer.settings["instructions"].startswith("Billing"))
+        assert peer.settings["instructions"] == f"Billing\n\n{ASYNC_TOOL_INSTRUCTIONS}"
+        assert service._settings.system_instruction == peer.settings["instructions"]
+
+
+@pytest.mark.asyncio
+async def test_tools_update_sends_cancel_tools_and_their_guidance():
+    settings = RimeRealtimeLLMService.Settings(system_instruction="Support")
+    async with conversation(settings=settings) as (peer, service, worker, context, *_):
+        await worker.queue_frame(LLMSetToolsFrame(tools=[stoppable_lookup]))
+        await until(lambda: "stoppable_lookup" in tool_names(peer))
+        assert tool_names(peer) == ["stoppable_lookup", cancel_tool_name("stoppable_lookup")]
+        assert ASYNC_TOOL_CANCELLATION_INSTRUCTIONS in peer.settings["instructions"]
+        assert ASYNC_TOOL_INSTRUCTIONS in peer.settings["instructions"]
+
+        await worker.queue_frame(LLMSetToolsFrame(tools=[]))
+        await until(lambda: peer.settings["tools"] == [])
+        assert peer.settings["instructions"] == "Support"
+        assert not context.tools
+
+
+@pytest.mark.asyncio
+async def test_refused_tools_update_restores_tools_and_instruction():
+    settings = RimeRealtimeLLMService.Settings(system_instruction="Support")
+    async with conversation(settings=settings) as (peer, service, worker, context, _, upstream, __):
+        peer.refuse["session.update"] = "invalid_request"
+        await worker.queue_frame(LLMSetToolsFrame(tools=[stoppable_lookup]))
+        await until(lambda: any(isinstance(f, ErrorFrame) for f in upstream))
+        assert not service.has_function("stoppable_lookup")
+        assert not service.has_function(cancel_tool_name("stoppable_lookup"))
+        assert service._settings.system_instruction == "Support"
+        # The user aggregator set the refused tools on the context; they're cleared.
+        assert not context.tools
+        assert service.is_usable
+
+        # The next update compares against what Prism holds, so it sends nothing stale.
+        await worker.queue_frame(LLMUpdateSettingsFrame(delta=service.Settings(speed=1.1)))
+        await until(lambda: peer.settings.get("speed") == 1.1)
+        assert "tools" not in sent(peer, "session.update")[-1]["session"]
+        assert "instructions" not in sent(peer, "session.update")[-1]["session"]
+
+
+@pytest.mark.asyncio
+async def test_context_frame_during_tools_update_keeps_the_new_handlers():
+    settings = RimeRealtimeLLMService.Settings(system_instruction="Support")
+    context = LLMContext(tools=[slow_lookup])
+    async with conversation(settings=settings, context=context) as (peer, service, worker, *_):
+        assert tool_names(peer) == ["slow_lookup"]
+        peer.gates["session.update"] = asyncio.Event()
+        updates = len(sent(peer, "session.update"))
+        await worker.queue_frame(
+            LLMUpdateSettingsFrame(delta=service.Settings(tools=[stoppable_lookup]))
+        )
+        await until(lambda: len(sent(peer, "session.update")) > updates)
+        # The base service syncs handlers to the context's tools on this frame.
+        await worker.queue_frame(LLMContextFrame(context))
+        await asyncio.sleep(0.1)
+        peer.gates["session.update"].set()
+        await until(lambda: "stoppable_lookup" in tool_names(peer))
+        await asyncio.sleep(0.1)
+        assert service.has_function("stoppable_lookup")
+        assert service.has_function(cancel_tool_name("stoppable_lookup"))
+        assert service._settings.system_instruction == peer.settings["instructions"]
+
+
+@pytest.mark.asyncio
+async def test_update_without_instruction_or_tool_changes_sends_neither():
+    settings = RimeRealtimeLLMService.Settings(system_instruction="Support", tools=[slow_lookup])
+    async with conversation(settings=settings) as (peer, service, worker, *_):
+        await worker.queue_frame(
+            LLMUpdateSettingsFrame(delta=service.Settings(system_instruction="Support", speed=0.9))
+        )
+        await until(lambda: service._settings.speed == 0.9)
+        update = sent(peer, "session.update")[-1]["session"]
+        assert update == {"speed": 0.9}
 
 
 @pytest.mark.asyncio
