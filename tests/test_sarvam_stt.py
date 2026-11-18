@@ -339,6 +339,16 @@ def test_settings_values_are_applied_via_settings():
     assert query["mode"] == ["translate"]
 
 
+def test_saaras_v3_realtime_can_still_be_selected():
+    """v4 is the default, but accounts enrolled in v3's beta can keep using it."""
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        settings=SarvamRealtimeSTTService.Settings(model="saaras:v3-realtime"),
+    )
+
+    assert _query(service)["model"] == ["saaras:v3-realtime"]
+
+
 def test_connection_only_values_are_applied_via_constructor_arguments():
     service = SarvamRealtimeSTTService(
         api_key="test-key",
@@ -369,7 +379,7 @@ def test_default_url_uses_realtime_contract_params():
     assert query["endpointing"] == ["vad"]
     assert query["encoding"] == ["linear16"]
     assert query["sample_rate"] == ["16000"]
-    assert query["model"] == ["saaras:v3-realtime"]
+    assert query["model"] == ["saaras:v4"]
     assert query["mode"] == ["transcribe"]
     assert query["return_timestamps"] == ["false"]
 
