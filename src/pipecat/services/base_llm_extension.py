@@ -73,13 +73,6 @@ class BaseLLMExtension(BaseObject):
       - `on_broadcast_frame`: Indicates the extension wants to broadcast a frame.
     """
 
-    installed_by: str | None = None
-    """The name of the one component allowed to install the extension, when
-    the extension is half of a feature that component owns, such as a user
-    turn strategy. ``None`` for an extension an application attaches itself.
-    ``LLMService(extensions=[...])`` refuses an extension that names an
-    installer, since on its own it would be half the feature."""
-
     order: int = 0
     """Where the extension runs among a service's extensions, lower first,
     both in filtering what the service pushes and in composing instructions.

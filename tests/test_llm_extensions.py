@@ -94,10 +94,6 @@ class _Recorder(BaseLLMExtension):
         return self._filter(frame) if self._filter else [frame]
 
 
-class _Installed(BaseLLMExtension):
-    installed_by = "SomeStrategy"
-
-
 def _append(suffix: str) -> Callable[[Frame], list[Frame]]:
     """A filter that appends ``suffix`` to the text of every LLMTextFrame."""
 
@@ -349,11 +345,6 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(set(service.get_llm_adapter().builtin_tools), set())
         self.assertIs(service._functions["helper"].handler, handler)
-
-    async def test_the_constructor_refuses_an_extension_another_component_installs(self):
-        with self.assertRaises(ValueError) as ctx:
-            _MockLLMService(extensions=[_Installed()])
-        self.assertIn("SomeStrategy", str(ctx.exception))
 
     async def test_a_settings_update_builds_and_adds_extensions(self):
         first = _Recorder(instruction="FIRST")

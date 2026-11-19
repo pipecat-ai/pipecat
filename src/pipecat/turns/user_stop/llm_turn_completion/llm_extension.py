@@ -57,12 +57,12 @@ class LLMTurnCompletionLLMExtension(BaseLLMExtension):
     instruction, with a note that a reading of how the user spoke doesn't
     decide the turn when the LLM is taught one (expressive conversation).
 
-    Installed by the strategy, which acts on its reports and sends the
-    re-prompts: ``user_turn_strategies=FilterIncompleteUserTurnStrategies()``
+    NOT for an application to attach: on its own, the extension is half the
+    feature. The strategy installs it, acts on its reports and sends the
+    re-prompts, and ``user_turn_strategies=FilterIncompleteUserTurnStrategies()``
     on the user aggregator is how an application turns turn completion on.
     """
 
-    installed_by = "LLMTurnCompletionUserTurnStopStrategy"
     # Before any other reader of the model's output: the marker opens the
     # response, and what follows it reads differently once it is stripped.
     order = -1

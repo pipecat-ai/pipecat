@@ -423,16 +423,12 @@ class LLMService(AIService, Generic[TAdapter]):
                 Defaults to a resolver that
                 handles ``data:`` and ``http(s)`` URLs only.
             extensions: The LLM extensions to attach, besides any the settings
-                hold. An extension another component installs (one with an
-                ``installed_by``) is refused here: on its own it would be half
-                its feature.
+                hold.
             **kwargs: Additional arguments passed to the parent AIService.
 
         Raises:
             InvalidEnvVarValueError: If ``PIPECAT_LOG_LLM_CONTEXT`` is set to an
                 unknown mode.
-            ValueError: If an extension in ``extensions`` is installed by
-                another component.
         """
         super().__init__(
             settings=settings
@@ -539,11 +535,6 @@ class LLMService(AIService, Generic[TAdapter]):
         self._metadata_frames: dict[type[Frame], ServiceMetadataFrame] = {}
         self._sort_extensions()
         for extension in extensions or ():
-            if extension.installed_by:
-                raise ValueError(
-                    f"{type(extension).__name__} is installed by {extension.installed_by}, "
-                    "which does the rest of its work. Use that instead of extensions=."
-                )
             self._attach_extension(extension)
         # Whether the one-time realtime-service "no turn frames" warning has
         # fired (see _warn_if_realtime_service_emits_no_turn_frames).
