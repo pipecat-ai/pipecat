@@ -979,7 +979,12 @@ class PipelineWorker(BaseWorker):
                 await self.queue_frame(frame, direction)
 
     async def flush_pipeline(
-        self, timeout: float = 5.0, *, probe: PipelineFlushFrame | None = None
+        self,
+        positional_timeout: float | None = None,
+        /,
+        *,
+        probe: PipelineFlushFrame | None = None,
+        timeout: float = 5.0,
     ) -> bool:
         """Flush all in-flight frames from the pipeline and wait for it to drain.
 
@@ -992,6 +997,14 @@ class PipelineWorker(BaseWorker):
         bypasses any ``queue_frame`` override (e.g. tool-call deferral).
 
         Args:
+            positional_timeout: ``timeout`` passed positionally.
+
+                .. deprecated:: 1.17.0
+                    Use ``timeout=`` instead. Will be removed in 2.0.0.
+
+            probe: The probe to push, so the caller knows its ``flush_id`` (e.g. to
+                match it in ``on_pipeline_flushed``). Its ``event`` and ``origin``
+                are set here. A new probe is made if not given.
             timeout: Seconds of no progress before giving up. Progress is a
                 frame reaching this worker's sink, or a report from the
                 pipeline answering the probe when it crossed into another
@@ -999,13 +1012,18 @@ class PipelineWorker(BaseWorker):
                 long it takes; one that is stuck, or that nobody will answer,
                 gives up after this much quiet. On giving up a warning is
                 logged and ``False`` is returned rather than blocking forever.
-            probe: The probe to push, so the caller knows its ``flush_id`` (e.g. to
-                match it in ``on_pipeline_flushed``). Its ``event`` and ``origin``
-                are set here. A new probe is made if not given.
 
         Returns:
             True if the pipeline drained, False if it went quiet first.
         """
+        if positional_timeout is not None:
+            warn_deprecated(
+                "`flush_pipeline(timeout)` is deprecated since 1.17.0 and will be removed in "
+                "2.0.0. Use `flush_pipeline(timeout=...)` instead.",
+                stacklevel=2,
+            )
+            timeout = positional_timeout
+
         probe = probe if probe else PipelineFlushFrame()
         event = asyncio.Event()
         probe.event = event

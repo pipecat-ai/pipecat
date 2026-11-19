@@ -309,7 +309,7 @@ class TestDrainBeforeTransition(unittest.IsolatedAsyncioTestCase):
         # A short wait rather than the production default: a test that stops
         # draining should fail in a second, not a minute.
         async def spy(timeout: float = 1.0):
-            result = await real(timeout)
+            result = await real(timeout=timeout)
             flushed.append(result)
             return result
 
