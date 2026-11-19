@@ -55,7 +55,7 @@ async def _run(aiohttp_client, fake, text="Hello from Zoom.", **kwargs):
         tts = ZoomAIHttpTTSService(
             api_key="test-key",
             aiohttp_session=session,
-            url=str(client.make_url("/v2/aiservices/tts/synthesize")),
+            base_url=str(client.make_url("/v2/aiservices/tts/synthesize")),
             sample_rate=44100,
             **kwargs,
         )
@@ -222,7 +222,7 @@ async def test_interruption_closes_the_request(aiohttp_client):
         tts = ZoomAIHttpTTSService(
             api_key="test-key",
             aiohttp_session=session,
-            url=str(client.make_url("/v2/aiservices/tts/synthesize")),
+            base_url=str(client.make_url("/v2/aiservices/tts/synthesize")),
             sample_rate=44100,
         )
         await run_test(
@@ -234,5 +234,5 @@ async def test_interruption_closes_the_request(aiohttp_client):
                 SleepFrame(sleep=0.3),
             ],
         )
-
-    await asyncio.wait_for(closed.wait(), 2)
+        # Checked while the session is open, since closing it closes every request.
+        await asyncio.wait_for(closed.wait(), 1)
