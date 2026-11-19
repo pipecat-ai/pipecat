@@ -18,6 +18,7 @@ import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from pipecat.frames.frames import PlaybackMarkFrame
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -68,6 +69,42 @@ class TestTwilioDeserializeRobustness(unittest.IsolatedAsyncioTestCase):
     async def test_message_missing_event_key_is_ignored_not_raised(self):
         frame = await self.serializer.deserialize(json.dumps({"foo": "bar"}))
         self.assertIsNone(frame)
+
+
+class TestTwilioPlaybackMarks(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.serializer = TwilioFrameSerializer(
+            stream_sid=STREAM_SID, params=TwilioFrameSerializer.InputParams(auto_hang_up=False)
+        )
+
+    async def test_a_mark_is_sent_by_the_frames_name(self):
+        frame = PlaybackMarkFrame()
+
+        message = json.loads(await self.serializer.serialize(frame))
+
+        self.assertTrue(self.serializer.supports_playback_marks)
+        self.assertEqual(
+            message, {"event": "mark", "streamSid": STREAM_SID, "mark": {"name": frame.name}}
+        )
+
+    async def test_twilio_echoing_a_mark_reports_it_played(self):
+        reached = self.serializer.expect_playback_mark("PlaybackMarkFrame#1")
+        echo = {
+            "event": "mark",
+            "sequenceNumber": "4",
+            "streamSid": STREAM_SID,
+            "mark": {"name": "PlaybackMarkFrame#1"},
+        }
+
+        self.assertIsNone(await self.serializer.deserialize(json.dumps(echo)))
+        self.assertTrue(reached.done())
+
+    async def test_an_unknown_or_malformed_mark_is_ignored(self):
+        reached = self.serializer.expect_playback_mark("PlaybackMarkFrame#1")
+
+        for message in ({"event": "mark", "mark": {"name": "other"}}, {"event": "mark"}):
+            self.assertIsNone(await self.serializer.deserialize(json.dumps(message)))
+        self.assertFalse(reached.done())
 
 
 class TestConstructorCredentialValidation(unittest.TestCase):

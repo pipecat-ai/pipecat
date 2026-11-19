@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
+    PlaybackMarkFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.utils.deprecation import warn_deprecated
@@ -211,6 +212,11 @@ class TwilioFrameSerializer(FrameSerializer):
 
         self._hangup_attempted = False
 
+    @property
+    def supports_playback_marks(self) -> bool:
+        """Twilio echoes a mark once it has played the audio sent before it."""
+        return True
+
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serializes a Pipecat frame to Twilio WebSocket format.
 
@@ -234,6 +240,11 @@ class TwilioFrameSerializer(FrameSerializer):
         elif isinstance(frame, InterruptionFrame):
             await self._reset_audio_out()
             answer = {"event": "clear", "streamSid": self._stream_sid}
+            return json.dumps(answer)
+        elif isinstance(frame, PlaybackMarkFrame):
+            # Twilio echoes the mark once it has played the audio sent before
+            # it, or right away if a clear empties its buffer first.
+            answer = {"event": "mark", "streamSid": self._stream_sid, "mark": {"name": frame.name}}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
             data = await self._resample_audio_out(frame)
@@ -350,6 +361,11 @@ class TwilioFrameSerializer(FrameSerializer):
                 return None
 
             return InputAudioRawFrame(audio=audio, num_channels=1, sample_rate=self._sample_rate)
+        elif message.get("event") == "mark":
+            name = message.get("mark", {}).get("name")
+            if name:
+                self._playback_mark_reached(name)
+            return None
         elif message.get("event") == "dtmf":
             digit = message.get("dtmf", {}).get("digit")
 
