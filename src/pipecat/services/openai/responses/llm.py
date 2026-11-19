@@ -1364,7 +1364,8 @@ class OpenAIResponsesLLMService(
                 elif code == "unsupported_native_response_reference":
                     # The server may still run a response on this lane, so it
                     # drains like an abandoned one until that response ends.
-                    self._draining_lanes.add(lane)
+                    if lane:
+                        self._draining_lanes.add(lane)
                     raise _UnchainableResponseError(message)
                 else:
                     await self.push_error(error_msg=f"WebSocket API error: {message}")
