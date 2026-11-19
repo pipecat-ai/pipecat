@@ -18,7 +18,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.utils.base_object import BaseObject
 
 if TYPE_CHECKING:
-    from pipecat.services.llm_service import FunctionCallRegistryItem
+    from pipecat.services.llm_service import FunctionCallRegistryItem, LLMService
 
 
 @dataclass
@@ -49,12 +49,13 @@ class BaseLLMExtension(BaseObject):
     filter what the service pushes, and push frames of its own. The service
     runs its extensions in :attr:`order`.
 
-    An extension is attached to a service at construction
-    (``LLMService(extensions=[...])``), later by a component that has the
-    service in hand
+    An extension is attached to a service in its settings
+    (``LLMService(settings=...Settings(extensions=[...]))``), later by a
+    component that has the service in hand
     (:meth:`~pipecat.services.llm_service.LLMService.add_extension`), or by
     an :class:`~pipecat.frames.frames.LLMUpdateSettingsFrame` whose delta
-    lists it in ``extensions``. From then on the service:
+    lists it in ``extensions``. An extension belongs to one service. From
+    then on the service:
 
     - composes :attr:`system_instruction` onto its system instruction, after
       the application's prompt;
@@ -92,6 +93,12 @@ class BaseLLMExtension(BaseObject):
         super().__init__(**kwargs)
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
+
+    @property
+    def attached_service(self) -> LLMService | None:
+        """The service the extension is attached to, known once that service is set up; None before."""
+        handlers = self._event_handlers["on_push_frame"].handlers
+        return getattr(handlers[0], "__self__", None) if handlers else None
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the extension, as the service it extends is set up.

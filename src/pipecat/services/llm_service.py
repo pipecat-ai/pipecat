@@ -386,7 +386,6 @@ class LLMService(AIService, Generic[TAdapter]):
         enable_async_tool_cancellation: bool = False,
         settings: LLMSettings | None = None,
         file_resolver: FileResolver | None = None,
-        extensions: Sequence[BaseLLMExtension] | None = None,
         **kwargs,
     ):
         """Initialize the LLM service.
@@ -423,8 +422,6 @@ class LLMService(AIService, Generic[TAdapter]):
                 switched between mid-session) so downloads are reused.
                 Defaults to a resolver that
                 handles ``data:`` and ``http(s)`` URLs only.
-            extensions: The LLM extensions to attach, besides any the settings
-                hold.
             **kwargs: Additional arguments passed to the parent AIService.
 
         Raises:
@@ -534,9 +531,13 @@ class LLMService(AIService, Generic[TAdapter]):
         # PerceptionMetadataFrame can pass before the settings update that
         # attaches the extension that reads it.
         self._metadata_frames: dict[type[Frame], ServiceMetadataFrame] = {}
+        # The settings' initial entries take the path a delta's do: a callable
+        # builds an extension, and each attaches in turn.
+        initial = assert_given(self._settings.extensions)
+        self._settings.extensions = []
         self._sort_extensions()
-        for extension in extensions or ():
-            self._attach_extension(extension)
+        for entry in initial:
+            self._attach_extension(entry() if callable(entry) else entry)
         # Whether the one-time realtime-service "no turn frames" warning has
         # fired (see _warn_if_realtime_service_emits_no_turn_frames).
         self._warned_realtime_service_no_turn_frames: bool = False
@@ -907,9 +908,10 @@ class LLMService(AIService, Generic[TAdapter]):
         """Attach an LLM extension to the service, before the service is set up.
 
         For a component that has the service in hand after construction, such
-        as a worker that owns it; an application attaches its extensions at
-        construction, with ``extensions=``. A running service takes an
-        extension over an ``LLMUpdateSettingsFrame`` with it in the delta.
+        as a worker that owns it; an application attaches its extensions in
+        the service's settings (``settings=...Settings(extensions=[...])``). A
+        running service takes an extension over an ``LLMUpdateSettingsFrame``
+        with it in the delta.
 
         Args:
             extension: The extension to attach.
@@ -967,8 +969,18 @@ class LLMService(AIService, Generic[TAdapter]):
         self._extensions = sorted(extensions, key=lambda extension: extension.order)
 
     async def _wire_extension(self, extension: BaseLLMExtension):
-        """Set an extension up and take its frames, as the user turn controller does its strategies."""
+        """Set an extension up and take its frames, as the user turn controller does its strategies.
+
+        Raises:
+            ValueError: If another service already holds the extension.
+        """
         assert self._setup is not None
+        if (other := extension.attached_service) is not None and other is not self:
+            raise ValueError(
+                f"{extension} belongs to {other} already, and an extension belongs to one "
+                "service. A settings update that reaches several services should carry a callable "
+                "that builds an extension for each."
+            )
         await extension.setup(self._setup)
         extension.add_event_handler("on_push_frame", self._on_extension_push_frame)
         extension.add_event_handler("on_broadcast_frame", self._on_extension_broadcast_frame)

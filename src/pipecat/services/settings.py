@@ -339,13 +339,13 @@ class LLMSettings(ServiceSettings):
             none. ``BackendLLMWorker`` sets it on its LLM. Defaults to False.
         extensions: The LLM extensions attached to the service (see
             :class:`~pipecat.services.base_llm_extension.BaseLLMExtension`).
-            The union type reflects the two modes. A delta adds to the
-            extensions held, and each of its entries is a callable that builds
-            an extension, one for each service the delta reaches: an update
-            marked ``reach_inactive_services`` reaches every LLM behind an
+            A delta adds to the extensions held. An entry is an extension, for
+            the one service the settings are for, or a callable that builds
+            one for each service the delta reaches: an update marked
+            ``reach_inactive_services`` reaches every LLM behind an
             :class:`~pipecat.pipeline.llm_switcher.LLMSwitcher`, and an
-            extension belongs to one service. The stored value holds the
-            extensions themselves, however they were attached.
+            extension belongs to one service, which refuses one that another
+            has. The stored value holds the extensions themselves.
     """
 
     system_instruction: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -366,35 +366,26 @@ class LLMSettings(ServiceSettings):
     )
 
     def apply_update(self, delta: Self) -> dict[str, Any]:
-        """Merge a delta into these settings; its ``extensions`` build and add to the ones held.
+        """Merge a delta into these settings; its ``extensions`` add to the ones held.
+
+        A callable entry builds the extension it adds. An entry held already
+        is left as it is.
 
         Args:
             delta: A delta-mode settings object of the same type.
 
         Returns:
             A dict mapping each changed field name to its pre-update value.
-
-        Raises:
-            TypeError: If an entry of the delta's ``extensions`` is an
-                extension rather than a callable that builds one.
         """
-        builders = delta.extensions
-        if not is_given(builders):
+        entries = delta.extensions
+        if not is_given(entries):
             return super().apply_update(delta)
-        built: list[BaseLLMExtension] = []
-        for builder in builders:
-            if not callable(builder):
-                raise TypeError(
-                    "A settings update's extensions are callables that build an extension, "
-                    "one per service the update reaches. To attach an extension in hand, use "
-                    "LLMService.add_extension()."
-                )
-            built.append(builder())
+        held = list(self.extensions) if is_given(self.extensions) else []
+        added = [entry() if callable(entry) else entry for entry in entries]
 
         changed = super().apply_update(replace(delta, extensions=NOT_GIVEN))
-        held = list(self.extensions) if is_given(self.extensions) else []
         changed["extensions"] = held
-        self.extensions = [*held, *built]
+        self.extensions = [*held, *(e for e in added if e not in held)]
         return changed
 
 

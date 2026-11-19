@@ -46,6 +46,7 @@ class _MockLLMService(LLMService):
             seed=None,
             filter_incomplete_user_turns=None,
             user_turn_completion_config=None,
+            extensions=kwargs.pop("extensions", []),
         )
         super().__init__(settings=settings, **kwargs)
 
@@ -402,12 +403,34 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
             [e for e in service._extensions if isinstance(e, _Recorder)], service._extensions[:1]
         )
 
-    async def test_an_extension_in_a_settings_update_is_refused(self):
-        service = _MockLLMService()
+    async def test_constructor_settings_build_a_callable_entry(self):
+        service = _MockLLMService(extensions=[_Recorder])
 
-        with self.assertRaises(TypeError) as ctx:
-            await service._update_settings(LLMSettings(extensions=[_Recorder()]))
-        self.assertIn("add_extension", str(ctx.exception))
+        self.assertIsInstance(service.get_extension(_Recorder), _Recorder)
+
+    async def test_a_settings_update_takes_an_extension_in_hand(self):
+        service = _MockLLMService()
+        extension = _Recorder()
+
+        await service._update_settings(LLMSettings(extensions=[extension]))
+
+        self.assertIs(service.get_extension(_Recorder), extension)
+
+    async def test_an_extension_belongs_to_one_service(self):
+        """A second service that an update with an extension in hand reaches refuses it."""
+        extension = _Recorder()
+        one = _MockLLMService()
+        another = _MockLLMService()
+        await one.setup(frame_processor_setup(TaskManager()))
+        await another.setup(frame_processor_setup(TaskManager()))
+
+        await one._update_settings(LLMSettings(extensions=[extension]))
+        self.assertIs(extension.attached_service, one)
+        with self.assertRaises(ValueError):
+            await another._update_settings(LLMSettings(extensions=[extension]))
+
+        await one.cleanup()
+        await another.cleanup()
 
     async def test_a_settings_update_builds_an_extension_per_service(self):
         delta = LLMSettings(extensions=[_Recorder])
