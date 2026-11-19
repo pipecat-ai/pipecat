@@ -20,6 +20,7 @@ from urllib.parse import urlencode
 
 import aiohttp
 from loguru import logger
+from websockets.asyncio.client import ClientConnection
 from websockets.protocol import State
 
 from pipecat import version as pipecat_version
@@ -640,6 +641,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._receive_task = None
 
         self._audio_buffer = bytearray()
+        self._audio_send_lock = asyncio.Lock()
         self._chunk_size_ms = 50
         self._chunk_size_bytes = 0
 
@@ -834,19 +836,40 @@ class AssemblyAISTTService(WebsocketSTTService):
         Yields:
             None (processing handled via WebSocket messages).
         """
-        self._audio_buffer.extend(audio)
-
-        if self._websocket and self._websocket.state is State.OPEN:
-            while len(self._audio_buffer) >= self._chunk_size_bytes:
-                chunk = bytes(self._audio_buffer[: self._chunk_size_bytes])
-                self._audio_buffer = self._audio_buffer[self._chunk_size_bytes :]
+        async with self._audio_send_lock:
+            self._audio_buffer.extend(audio)
+            websocket = self._websocket
+            while (
+                websocket
+                and websocket is self._websocket
+                and websocket.state is State.OPEN
+                and not self._disconnecting
+                and len(self._audio_buffer) >= self._chunk_size_bytes
+            ):
                 try:
-                    await self._websocket.send(chunk)
+                    await self._send_buffered_audio(websocket, self._chunk_size_bytes)
                 except Exception as e:
                     logger.warning(f"{self}: send failed: {e}")
                     break
 
         yield None
+
+    async def _send_buffered_audio(self, websocket: ClientConnection, size: int) -> None:
+        """Send a reserved buffer prefix while the caller holds the audio send lock.
+
+        Args:
+            websocket: Connection receiving the audio.
+            size: Number of buffered bytes to send.
+        """
+        chunk = bytes(self._audio_buffer[:size])
+        self._audio_buffer = self._audio_buffer[size:]
+        try:
+            await websocket.send(chunk)
+        except (Exception, asyncio.CancelledError):
+            # A failed send has no delivery acknowledgment; retain the bytes
+            # without promising exactly-once delivery across connection failures.
+            self._audio_buffer[:0] = chunk
+            raise
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Forward a Pipecat-detected turn end to AssemblyAI as a ForceEndpoint.
@@ -1045,21 +1068,21 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         await super()._disconnect()
 
-        if self._websocket and self._websocket.state is State.OPEN:
-            try:
-                if self._audio_buffer:
-                    await self._websocket.send(bytes(self._audio_buffer))
-                    self._audio_buffer.clear()
+        async with self._audio_send_lock:
+            if self._websocket and self._websocket.state is State.OPEN:
+                try:
+                    if self._audio_buffer:
+                        await self._send_buffered_audio(self._websocket, len(self._audio_buffer))
 
-                # The receive loop sets the event on the acknowledgment, so it
-                # must still be running while we wait.
-                self._termination_event.clear()
-                await self._websocket.send(json.dumps({"type": "Terminate"}))
-                await asyncio.wait_for(self._termination_event.wait(), timeout=5.0)
-            except TimeoutError:
-                logger.warning(f"{self} timed out waiting for termination message from server")
-            except Exception as e:
-                await self.push_error(error_msg=f"Error terminating session: {e}", exception=e)
+                    # The receive loop sets the event on the acknowledgment, so it
+                    # must still be running while we wait.
+                    self._termination_event.clear()
+                    await self._websocket.send(json.dumps({"type": "Terminate"}))
+                    await asyncio.wait_for(self._termination_event.wait(), timeout=5.0)
+                except TimeoutError:
+                    logger.warning(f"{self} timed out waiting for termination message from server")
+                except Exception as e:
+                    await self.push_error(error_msg=f"Error terminating session: {e}", exception=e)
 
         if self._receive_task:
             await self.cancel_task(self._receive_task)
