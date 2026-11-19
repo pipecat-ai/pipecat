@@ -234,6 +234,10 @@ class PipelineWorker(BaseWorker):
           Use this event for cleanup, logging, or post-processing tasks. Users can inspect
           the frame if they need to handle specific cases.
 
+    - on_pipeline_flushed: Called when a flush has made its whole trip through this
+          pipeline, so every frame queued ahead of it has been processed. The frame's
+          ``flush_id`` tells flushes apart; pass a probe to :meth:`flush_pipeline` to
+          know it beforehand.
     - on_pipeline_timeout: Called when a frame the worker was waiting on never
           reached the end of the pipeline, meaning a processor is blocked. Inspect
           the frame to tell the cases apart:
@@ -268,6 +272,10 @@ class PipelineWorker(BaseWorker):
 
         @worker.event_handler("on_pipeline_finished")
         async def on_pipeline_finished(worker, frame):
+            ...
+
+        @worker.event_handler("on_pipeline_flushed")
+        async def on_pipeline_flushed(worker, frame):
             ...
 
         @worker.event_handler("on_pipeline_timeout")
@@ -629,6 +637,7 @@ class PipelineWorker(BaseWorker):
         self._register_event_handler("on_idle_timeout")
         self._register_event_handler("on_pipeline_started")
         self._register_event_handler("on_pipeline_finished")
+        self._register_event_handler("on_pipeline_flushed")
         self._register_event_handler("on_pipeline_timeout")
         self._register_event_handler("on_setup_timeout")
         self._register_event_handler("on_pipeline_error")
@@ -969,7 +978,9 @@ class PipelineWorker(BaseWorker):
             for frame in frames:
                 await self.queue_frame(frame, direction)
 
-    async def flush_pipeline(self, timeout: float = 5.0) -> bool:
+    async def flush_pipeline(
+        self, timeout: float = 5.0, *, probe: PipelineFlushFrame | None = None
+    ) -> bool:
         """Flush all in-flight frames from the pipeline and wait for it to drain.
 
         Pushes a :class:`~pipecat.frames.frames.PipelineFlushFrame` downstream
@@ -988,14 +999,19 @@ class PipelineWorker(BaseWorker):
                 long it takes; one that is stuck, or that nobody will answer,
                 gives up after this much quiet. On giving up a warning is
                 logged and ``False`` is returned rather than blocking forever.
+            probe: The probe to push, so the caller knows its ``flush_id`` (e.g. to
+                match it in ``on_pipeline_flushed``). Its ``event`` and ``origin``
+                are set here. A new probe is made if not given.
 
         Returns:
             True if the pipeline drained, False if it went quiet first.
         """
+        probe = probe if probe else PipelineFlushFrame()
         event = asyncio.Event()
-        probe = PipelineFlushFrame(event=event, origin=self.name)
+        probe.event = event
+        probe.origin = self.name
 
-        logger.debug(f"{self}: pushing flush probe downstream")
+        logger.debug(f"{self}: pushing {probe} downstream")
 
         self._flush_progress[probe.flush_id] = 0
         try:
@@ -1570,20 +1586,21 @@ class PipelineWorker(BaseWorker):
             at_sink: Whether the probe has arrived at the sink or the source.
         """
         if not at_sink:
-            logger.debug(f"{self}: flush probe reached source — sending it down again")
+            logger.debug(f"{self}: {frame} reached source, sending it down again")
             probe = PipelineFlushFrame(
                 event=frame.event, origin=frame.origin, flush_id=frame.flush_id, returning=True
             )
             await self._source.push_frame(probe, FrameDirection.DOWNSTREAM)
         elif not frame.returning:
-            logger.debug(f"{self}: flush probe reached sink — bouncing upstream")
+            logger.debug(f"{self}: {frame} reached sink, bouncing upstream")
             probe = PipelineFlushFrame(
                 event=frame.event, origin=frame.origin, flush_id=frame.flush_id
             )
             await self._sink.push_frame(probe, FrameDirection.UPSTREAM)
         else:
-            logger.debug(f"{self}: flush probe reached sink again — pipeline drained")
+            logger.debug(f"{self}: {frame} reached sink again, pipeline drained")
             self._foreign_probes.pop(frame.flush_id, None)
+            await self._call_event_handler("on_pipeline_flushed", frame)
             if frame.event:
                 frame.event.set()
 

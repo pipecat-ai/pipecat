@@ -2599,7 +2599,10 @@ class PipelineFlushFrame(ControlFrame):
     flush_id: int = field(default_factory=obj_id, compare=False)
 
     def __str__(self):
-        return f"{self.name}(flush_id: {self.flush_id}, returning: {self.returning})"
+        return (
+            f"{self.name}(flush_id: {self.flush_id}, origin: {self.origin}, "
+            f"returning: {self.returning})"
+        )
 
 
 @dataclass

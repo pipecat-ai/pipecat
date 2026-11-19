@@ -305,6 +305,36 @@ class TestPipelineFlush(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(inactive.legs, {})
         self.assertEqual(outer.legs, {})
 
+    async def test_flush_with_probe_reports_it_flushed(self):
+        """A flush started with the caller's probe settles under its flush id."""
+        worker = PipelineWorker(Pipeline([IdentityFilter()]))
+        probe = PipelineFlushFrame()
+        started = asyncio.Event()
+        flushed_ids = []
+        result = None
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_pipeline_started(worker, frame):
+            started.set()
+
+        @worker.event_handler("on_pipeline_flushed")
+        async def on_pipeline_flushed(worker, frame):
+            flushed_ids.append(frame.flush_id)
+
+        async def drive():
+            nonlocal result
+            await started.wait()
+            result = await worker.flush_pipeline(probe=probe, timeout=1.0)
+            await worker.queue_frame(EndFrame())
+
+        await asyncio.wait_for(
+            asyncio.gather(worker.run(WorkerParams(task_manager=TaskManager())), drive()),
+            timeout=10.0,
+        )
+
+        self.assertTrue(result)
+        self.assertEqual(flushed_ids, [probe.flush_id])
+
 
 class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):
     async def test_task_single(self):
