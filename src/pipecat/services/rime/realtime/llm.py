@@ -9,7 +9,6 @@
 import asyncio
 import copy
 import json
-import math
 import time
 from collections import OrderedDict, deque
 from collections.abc import Coroutine
@@ -228,7 +227,9 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         """
         if turn_detection is not None and not isinstance(turn_detection, r.TurnDetection):
             raise ValueError("Prism requires SDK server turn detection")
-        given = {"extra", "model", "filter_incomplete_user_turns", "use_provider_thinking_default"}
+        # Every base field Prism doesn't use is unset in its store; the fields
+        # the service handles itself are left to it.
+        given = {"extra", "model", *LLMSettings.service_handled_fields()}
         unset: dict[str, Any] = {f.name: None for f in fields(LLMSettings) if f.name not in given}
         default_settings = self.Settings(
             **unset,
@@ -377,8 +378,7 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             "response_metadata",
             "speed",
             *_INTERRUPTION_RULES,
-            "filter_incomplete_user_turns",
-            "use_provider_thinking_default",
+            *LLMSettings.service_handled_fields(),
         }
         for name, value in settings.given_fields().items():
             if name not in supported and value is not None:
