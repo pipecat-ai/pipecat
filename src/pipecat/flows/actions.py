@@ -26,7 +26,7 @@ Actions are used to perform side effects during conversations, such as:
 import asyncio
 import inspect
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -37,6 +37,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     ControlFrame,
     EndFrame,
+    PlaybackMarkFrame,
     TTSSpeakFrame,
 )
 from pipecat.pipeline.worker import PipelineWorker
@@ -47,8 +48,12 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class FunctionActionFrame(ControlFrame):
+class FunctionActionFrame(PlaybackMarkFrame):
     """Frame containing a function action to be executed.
+
+    The function runs when the frame reaches the end of the pipeline. As a
+    playback mark, it gets there once the user has heard what the bot said
+    before it, and the user talking over the bot can't drop it.
 
     Parameters:
         action: Action configuration dictionary.
@@ -61,9 +66,12 @@ class FunctionActionFrame(ControlFrame):
 
 @dataclass
 class ActionFinishedFrame(ControlFrame):
-    """Frame indicating that an action has completed execution."""
+    """Frame indicating that an action has completed execution.
 
-    pass
+    Uninterruptible, so an interruption can't leave an action unfinished.
+    """
+
+    interruptible: bool = field(default=False, init=False)
 
 
 class ActionManager:
@@ -306,7 +314,9 @@ class ActionManager:
             action: Action configuration dictionary. Required 'text' key with
                 the text to speak. Optional 'append_text_to_context' key (bool)
                 controlling whether the spoken text is appended to the LLM
-                context. Defaults to True.
+                context. Defaults to True. Optional 'interruptible' key (bool):
+                False keeps the user from talking over the text, as before a
+                transfer. Defaults to True.
         """
         text = action.get("text")
         if not text:
@@ -319,11 +329,11 @@ class ActionManager:
 
             # Queue the action frame. Default to appending the spoken text to the
             # context; callers opt out with append_text_to_context=False.
-            await self._worker.queue_frame(
-                TTSSpeakFrame(
-                    text=text, append_to_context=action.get("append_text_to_context", True)
-                )
+            frame = TTSSpeakFrame(
+                text=text, append_to_context=action.get("append_text_to_context", True)
             )
+            frame.interruptible = action.get("interruptible", True)
+            await self._worker.queue_frame(frame)
 
             # Queue a frame marking the end of the action
             await self._worker.queue_frame(ActionFinishedFrame())
@@ -365,8 +375,9 @@ class ActionManager:
         """Built-in handler for queuing functions to run inline in the pipeline.
 
         This handler queues a FunctionActionFrame to be executed when the pipeline
-        is done with all the work queued before it. It expects a 'handler' key in
-        the action containing the function to execute.
+        is done with all the work queued before it and the user has heard what
+        the bot said before it. It expects a 'handler' key in the action
+        containing the function to execute.
 
         Args:
             action: Action configuration dictionary. Required 'handler' key
