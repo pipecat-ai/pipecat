@@ -914,6 +914,15 @@ class TestUIWorkerPromptGuide(unittest.IsolatedAsyncioTestCase):
         worker.llm.append_system_instruction.assert_not_called()
 
 
+class TestUIWorkerPipelineWorkerArguments(unittest.TestCase):
+    def test_pipeline_worker_arguments_reach_the_worker(self):
+        worker = UIWorker(
+            "ui", llm=MagicMock(), conversation_id="conversation-1", idle_timeout_secs=30
+        )
+        self.assertEqual(worker._conversation_id, "conversation-1")
+        self.assertEqual(worker._idle_timeout_secs, 30)
+
+
 if __name__ == "__main__":
     unittest.main()
 

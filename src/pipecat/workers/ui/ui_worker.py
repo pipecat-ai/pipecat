@@ -165,6 +165,7 @@ class UIWorker(LLMContextWorker):
         auto_inject_ui_state: bool = True,
         keep_history: bool = False,
         prompt_guide: str | None = UI_STATE_PROMPT_GUIDE,
+        **kwargs: Any,
     ):
         """Initialize the UIWorker.
 
@@ -206,6 +207,9 @@ class UIWorker(LLMContextWorker):
                 ``<ui_event>`` messages. Defaults to ``UI_STATE_PROMPT_GUIDE``;
                 pass a string to override or ``None`` to disable. Living in
                 ``system_instruction``, it survives context resets.
+            **kwargs: Additional arguments forwarded to :class:`LLMContextWorker`
+                and on to ``PipelineWorker``, such as ``enable_tracing`` or
+                ``observers``.
         """
         super().__init__(
             name,
@@ -214,6 +218,7 @@ class UIWorker(LLMContextWorker):
             defer_tool_frames=True,
             context=context,
             assistant_params=assistant_params,
+            **kwargs,
         )
         # Auto-append the UI wire-format guide to the LLM's system
         # instruction so the author doesn't have to concatenate it manually
