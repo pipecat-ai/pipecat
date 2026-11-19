@@ -5627,7 +5627,7 @@
       "subject": "pipecat.turns.user_turn_completion_mixin",
       "module": "pipecat.turns.user_turn_completion_mixin",
       "kind": "module",
-      "deprecated_in": "1.16.0",
+      "deprecated_in": "1.17.0",
       "removed_in": "2.0.0",
       "relation": "move",
       "replacement": "pipecat.turns.user_turn_completion",
