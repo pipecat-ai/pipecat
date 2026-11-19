@@ -903,8 +903,10 @@ class LLMService(AIService, Generic[TAdapter]):
         self._expression_policy = setup.expression_policy
         for extension in self._extensions:
             await self._wire_extension(extension)
-        # The extensions' tools are advertised from the start, ahead of the
-        # first context frame's sync.
+        # The cancellation and extension tools are advertised, and the
+        # instruction composed with them, from the start: a service that
+        # connects at setup sends the model everything known at construction.
+        self._sync_cancel_tools()
         self._sync_extension_tools()
         self._compose_system_instruction()
 
