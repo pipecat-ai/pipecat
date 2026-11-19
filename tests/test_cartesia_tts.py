@@ -530,3 +530,12 @@ class TestCartesiaCJKPunctuationTokens(unittest.IsolatedAsyncioTestCase):
             ]
         )
         self.assertEqual(context_text, "".join(sentences))
+
+
+def test_spell_tag_aggregator_keeps_the_settings_language():
+    service = CartesiaTTSService(
+        api_key="test-api-key",
+        settings=CartesiaTTSService.Settings(voice="voice", language=Language.FR),
+    )
+
+    assert service._text_aggregator.language == "fr"
