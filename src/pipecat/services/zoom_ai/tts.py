@@ -107,7 +107,7 @@ class ZoomAIHttpTTSService(TTSService):
         *,
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
-        url: str = "https://api.zoom.us/v2/aiservices/tts/synthesize",
+        base_url: str = "https://api.zoom.us/v2/aiservices/tts/synthesize",
         sample_rate: int | None = None,
         settings: Settings | None = None,
         **kwargs,
@@ -117,8 +117,8 @@ class ZoomAIHttpTTSService(TTSService):
         Args:
             api_key: Zoom AI Services API key or JWT, from https://www.zoom.ai/
             aiohttp_session: Shared aiohttp session for HTTP requests.
-            url: Text-to-Speech synthesize endpoint URL. A plaintext ``http://`` URL
-                to a host other than localhost logs a warning.
+            base_url: Text-to-Speech synthesize endpoint URL. A plaintext ``http://``
+                URL to a host other than localhost logs a warning.
             sample_rate: Output sample rate in Hz. If None, uses the pipeline's
                 output rate.
             settings: Runtime-updatable settings.
@@ -139,7 +139,7 @@ class ZoomAIHttpTTSService(TTSService):
         )
         self._api_key = api_key
         self._session = aiohttp_session
-        self._url = check_url(url, service="Zoom TTS", data="text")
+        self._base_url = check_url(base_url, service="Zoom TTS", data="text")
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -174,7 +174,6 @@ class ZoomAIHttpTTSService(TTSService):
         if not text.strip():
             return
         try:
-            await self.start_ttfb_metrics()
             for piece in _split_text(text):
                 async for frame in self._synthesize(piece, context_id):
                     yield frame
@@ -190,27 +189,26 @@ class ZoomAIHttpTTSService(TTSService):
         # Non-ASCII text stays UTF-8 rather than \u escapes, which keeps a request
         # of the longest input within the API's 32 KiB body limit.
         body = json.dumps(self._payload(text), ensure_ascii=False).encode("utf-8")
-        response = None
-        complete = False
         try:
-            response = await self._session.post(self._url, data=body, headers=headers)
-            if response.status != 200:
-                detail = await _describe_error(response)
-                await self.push_error(
-                    error_msg=f"Zoom TTS error: {detail} (x-zm-trackingid {tracking_id})",
-                    category=classify_http_status_code(response.status),
-                )
-                return
-            logger.debug(f"{self}: synthesizing (x-zm-trackingid {tracking_id})")
-            await self.start_tts_usage_metrics(text)
-            async for frame in self._stream_audio_frames_from_iterator(
-                response.content.iter_chunked(self.chunk_size),
-                in_sample_rate=ZOOM_TTS_SAMPLE_RATE,
-                context_id=context_id,
-            ):
-                await self.stop_ttfb_metrics()
-                yield frame
-            complete = True
+            # Leaving this block mid-stream, as an interruption or a failed stream does,
+            # closes the connection, which stops synthesis on the server.
+            async with self._session.post(self._base_url, data=body, headers=headers) as response:
+                if response.status != 200:
+                    detail = await _describe_error(response)
+                    await self.push_error(
+                        error_msg=f"Zoom TTS error: {detail} (x-zm-trackingid {tracking_id})",
+                        category=classify_http_status_code(response.status),
+                    )
+                    return
+                logger.debug(f"{self}: synthesizing (x-zm-trackingid {tracking_id})")
+                await self.start_tts_usage_metrics(text)
+                async for frame in self._stream_audio_frames_from_iterator(
+                    response.content.iter_chunked(self.chunk_size),
+                    in_sample_rate=ZOOM_TTS_SAMPLE_RATE,
+                    context_id=context_id,
+                ):
+                    await self.stop_ttfb_metrics()
+                    yield frame
         except aiohttp.ClientPayloadError as e:
             # Once audio is streaming the status can't change, so a synthesis failure
             # ends the response early instead.
@@ -219,16 +217,8 @@ class ZoomAIHttpTTSService(TTSService):
                 exception=e,
                 category=ErrorCategory.SERVER,
             )
-        except aiohttp.ClientError as e:
+        except Exception as e:
             await self.push_error(
                 error_msg=f"Zoom TTS request failed (x-zm-trackingid {tracking_id}): {e}",
                 exception=e,
             )
-        finally:
-            if response is not None:
-                if complete:
-                    response.release()  # keep the connection for the next sentence
-                else:
-                    # Closing the connection stops synthesis on the server, which an
-                    # interruption or a failed stream wants.
-                    response.close()
