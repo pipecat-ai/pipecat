@@ -18,7 +18,6 @@ import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlparse
 
 import aiohttp
 from loguru import logger
@@ -26,7 +25,7 @@ from loguru import logger
 from pipecat.frames.frames import Frame
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
-from pipecat.services.zoom_ai.stt import _headers, _tracking_id
+from pipecat.services.zoom_ai.utils import check_url, new_tracking_id, request_headers
 from pipecat.utils.errors import ErrorCategory, classify_http_status_code
 from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
@@ -35,7 +34,6 @@ from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 ZOOM_TTS_SAMPLE_RATE = 44100
 # The longest input one request accepts, in Unicode code points.
 MAX_INPUT_CHARS = 4000
-_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 
 def _split_text(text: str, limit: int = MAX_INPUT_CHARS) -> list[str]:
@@ -50,16 +48,6 @@ def _split_text(text: str, limit: int = MAX_INPUT_CHARS) -> list[str]:
     if text:
         pieces.append(text)
     return pieces
-
-
-def _check_url(url: str) -> str:
-    """Return ``url``, warning if it sends the API key and text unencrypted to a remote host."""
-    parsed = urlparse(url)
-    if parsed.scheme.lower() == "http" and parsed.hostname not in _LOOPBACK_HOSTS:
-        logger.warning(
-            "Zoom TTS url is not encrypted (http://); the API key and text are sent in plaintext"
-        )
-    return url
 
 
 async def _describe_error(response: aiohttp.ClientResponse) -> str:
@@ -151,7 +139,7 @@ class ZoomAITTSService(TTSService):
         )
         self._api_key = api_key
         self._session = aiohttp_session
-        self._url = _check_url(url)
+        self._url = check_url(url, service="Zoom TTS", data="text")
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -194,8 +182,11 @@ class ZoomAITTSService(TTSService):
             await self.stop_all_metrics()
 
     async def _synthesize(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
-        tracking_id = _tracking_id()
-        headers = {**_headers(self._api_key, tracking_id), "Content-Type": "application/json"}
+        tracking_id = new_tracking_id()
+        headers = {
+            **request_headers(self._api_key, tracking_id),
+            "Content-Type": "application/json",
+        }
         # Non-ASCII text stays UTF-8 rather than \u escapes, which keeps a request
         # of the longest input within the API's 32 KiB body limit.
         body = json.dumps(self._payload(text), ensure_ascii=False).encode("utf-8")
