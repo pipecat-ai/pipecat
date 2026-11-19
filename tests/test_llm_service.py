@@ -72,6 +72,17 @@ class MockLLMService(LLMService):
             pipeline_worker=SimpleNamespace(app_resources=None, worker_runner=None)
         )
 
+    async def _broadcast_function_call_in_progress(self, runner_item, item):
+        await self.broadcast_frame(
+            FunctionCallInProgressFrame,
+            function_name=runner_item.function_name,
+            tool_call_id=runner_item.tool_call_id,
+            arguments=runner_item.arguments,
+            cancel_on_interruption=item.cancel_on_interruption,
+            group_id=runner_item.group_id,
+        )
+        runner_item.in_progress_frame_sent = True
+
 
 class TestUnparameterizedSubclass(unittest.TestCase):
     """Backward-compat coverage: third-party providers subclass LLMService
