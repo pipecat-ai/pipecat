@@ -527,6 +527,7 @@ class LLMService(AIService, Generic[TAdapter]):
         self._sequential_runner_task: asyncio.Task | None = None
         self._skip_tts: bool | None = None
         self._summary_task: asyncio.Task | None = None
+        # Filled in here rather than in every service's default settings.
         if not is_given(self._settings.extensions):
             self._settings.extensions = []
         # The settings hold the extensions; this is them in running order.

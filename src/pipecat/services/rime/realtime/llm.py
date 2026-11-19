@@ -228,7 +228,13 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
         """
         if turn_detection is not None and not isinstance(turn_detection, r.TurnDetection):
             raise ValueError("Prism requires SDK server turn detection")
-        given = {"extra", "model", "filter_incomplete_user_turns", "use_provider_thinking_default"}
+        given = {
+            "extra",
+            "model",
+            "filter_incomplete_user_turns",
+            "use_provider_thinking_default",
+            "extensions",
+        }
         unset: dict[str, Any] = {f.name: None for f in fields(LLMSettings) if f.name not in given}
         default_settings = self.Settings(
             **unset,
@@ -379,6 +385,7 @@ class RimeRealtimeLLMService(LLMService[RimeRealtimeLLMAdapter]):
             *_INTERRUPTION_RULES,
             "filter_incomplete_user_turns",
             "use_provider_thinking_default",
+            "extensions",
         }
         for name, value in settings.given_fields().items():
             if name not in supported and value is not None:
