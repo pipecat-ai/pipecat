@@ -6,6 +6,7 @@
 
 """Tests for AssemblyAITTSService against a fake Streaming TTS server."""
 
+import asyncio
 import base64
 import json
 import time
@@ -30,6 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.assemblyai import tts as assemblyai_tts
 from pipecat.services.assemblyai.tts import AssemblyAITTSService
+from pipecat.services.tts_service import TextAggregationMode
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transcriptions.language import Language
 
@@ -37,6 +39,197 @@ from pipecat.transcriptions.language import Language
 AUDIO_CHUNK = b"\x01\x02" * 1920
 CHUNK_MS = 80
 WORD_MS = 50
+
+
+def _skipping_cancel_server(
+    captured: dict, skip: int, *, empty_first: bool = False, cancel_delay: float = 0
+):
+    """A Cancel may advance the server's next ID by more than one."""
+
+    async def handler(ws):
+        captured["connections"] = captured.get("connections", 0) + 1
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "Begin",
+                    "id": "skipping",
+                    "expires_at": time.time() + 3600,
+                    "configuration": {"word_boundaries": True},
+                }
+            )
+        )
+        flush_id, session_ms, buffer = 0, 0, ""
+        empty_due = False
+        async for raw in ws:
+            msg = json.loads(raw)
+            captured["messages"].append(msg)
+            if msg["type"] == "Generate":
+                buffer += msg["text"]
+            elif msg["type"] == "Cancel":
+                # A tail already in transit belongs to an old request.
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "Audio",
+                            "audio": base64.b64encode(AUDIO_CHUNK).decode(),
+                            "flush_id": max(0, flush_id - 1),
+                        }
+                    )
+                )
+                flush_id += skip
+                buffer = ""
+                empty_due = empty_first
+                await asyncio.sleep(cancel_delay)
+                await ws.send(json.dumps({"type": "Cancelled", "audio_duration_seconds": 0.08}))
+            elif msg["type"] == "Flush":
+                text, buffer = buffer, ""
+                captured.setdefault("requests", []).append((flush_id, text))
+                interrupted = text.startswith("Interrupted")
+                duration = 0 if empty_due else CHUNK_MS
+                if duration:
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "Audio",
+                                "audio": base64.b64encode(AUDIO_CHUNK).decode(),
+                                "flush_id": flush_id,
+                            }
+                        )
+                    )
+                if not interrupted:
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "FlushDone",
+                                "flush_id": flush_id,
+                                "audio_duration_ms": duration,
+                            }
+                        )
+                    )
+                    if duration:
+                        await ws.send(
+                            json.dumps(
+                                {
+                                    "type": "WordBoundaries",
+                                    "flush_id": flush_id,
+                                    "audio_start_ms": session_ms,
+                                    "words": [
+                                        {
+                                            "word": word,
+                                            "start": session_ms + i * 10,
+                                            "end": session_ms + (i + 1) * 10,
+                                        }
+                                        for i, word in enumerate(text.split())
+                                    ],
+                                }
+                            )
+                        )
+                empty_due = False
+                session_ms += duration
+                flush_id += 1
+
+    return handler
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("skip", [1, 4, 9])
+@pytest.mark.parametrize("token_mode", [False, True])
+async def test_repeated_interruptions_follow_server_flush_ids(skip, token_mode):
+    """New replies survive skipped IDs, queued requests and repeated barge-in."""
+    captured = {"messages": []}
+    mode = TextAggregationMode.TOKEN if token_mode else TextAggregationMode.SENTENCE
+    frames = []
+    for number in range(2):
+        frames.extend(
+            [
+                LLMFullResponseStartFrame(),
+                LLMTextFrame(text=f"Interrupted {number}. "),
+                LLMTextFrame(text="Interrupted tail. "),
+                LLMFullResponseEndFrame(),
+                SleepFrame(sleep=0.1),
+                InterruptionFrame(),
+                SleepFrame(sleep=0.05),
+                TTSSpeakFrame(text=f"Recovered {number}."),
+                SleepFrame(sleep=0.15),
+                BotStoppedSpeakingFrame(),
+            ]
+        )
+    async with serve(_skipping_cancel_server(captured, skip), "127.0.0.1", 0) as server:
+        service = _service(server, text_aggregation_mode=mode, stop_frame_timeout_s=0.3)
+        down, up = await asyncio.wait_for(run_test(service, frames_to_send=frames), timeout=5)
+    words = [f.text for f in down if isinstance(f, TTSTextFrame)]
+    print("skip=", skip, "token=", token_mode, "requests=", captured["requests"], "words=", words)
+    assert words == ["Recovered", "0.", "Recovered", "1."]
+    assert len(_sent(captured, "Cancel")) == 2
+    assert captured["connections"] == 1
+    assert not any(isinstance(f, ErrorFrame) for f in up)
+    assert not service.get_audio_contexts()
+
+
+@pytest.mark.asyncio
+async def test_empty_flush_done_after_cancel_anchors_next_audio_request():
+    """An empty request's FlushDone establishes the ID before the next Audio."""
+    captured = {"messages": []}
+    async with serve(
+        _skipping_cancel_server(captured, 7, empty_first=True), "127.0.0.1", 0
+    ) as server:
+        down, _ = await asyncio.wait_for(
+            run_test(
+                _service(server, stop_frame_timeout_s=0.3),
+                frames_to_send=[
+                    TTSSpeakFrame(text="Interrupted reply."),
+                    SleepFrame(sleep=0.1),
+                    InterruptionFrame(),
+                    SleepFrame(sleep=0.05),
+                    TTSSpeakFrame(text="Silent."),
+                    SleepFrame(sleep=0.4),
+                    TTSSpeakFrame(text="Recovered audio."),
+                    SleepFrame(sleep=0.2),
+                ],
+            ),
+            timeout=5,
+        )
+    words = [f.text for f in down if isinstance(f, TTSTextFrame)]
+    print("empty first: requests=", captured["requests"], "words=", words)
+    assert words == ["Recovered", "audio."]
+
+
+@pytest.mark.asyncio
+async def test_queued_replies_after_overlapping_cancel_acknowledgments():
+    """Two outstanding Cancels gate stale audio before rebasing queued new requests."""
+    captured = {"messages": []}
+    async with serve(
+        _skipping_cancel_server(captured, 5, cancel_delay=0.1), "127.0.0.1", 0
+    ) as server:
+        service = _service(server, stop_frame_timeout_s=0.5)
+        down, up = await asyncio.wait_for(
+            run_test(
+                service,
+                frames_to_send=[
+                    TTSSpeakFrame(text="Interrupted first."),
+                    SleepFrame(sleep=0.03),
+                    InterruptionFrame(),
+                    SleepFrame(sleep=0.02),
+                    TTSSpeakFrame(text="Interrupted second."),
+                    SleepFrame(sleep=0.02),
+                    InterruptionFrame(),
+                    SleepFrame(sleep=0.02),
+                    LLMFullResponseStartFrame(),
+                    LLMTextFrame(text="Recovered first. "),
+                    LLMTextFrame(text="Recovered second."),
+                    LLMFullResponseEndFrame(),
+                    SleepFrame(sleep=0.4),
+                ],
+            ),
+            timeout=5,
+        )
+    words = [f.text for f in down if isinstance(f, TTSTextFrame)]
+    print("overlapping cancels: requests=", captured["requests"], "words=", words)
+    assert words == ["Recovered", "first.", "Recovered", "second."]
+    assert len(_sent(captured, "Cancel")) == 2
+    assert not any(isinstance(f, ErrorFrame) for f in up)
+    assert not service.get_audio_contexts()
+    assert captured["connections"] == 1
 
 
 def _server(
