@@ -94,6 +94,18 @@ class _Recorder(BaseLLMExtension):
         return self._filter(frame) if self._filter else [frame]
 
 
+class _Alpha(_Recorder):
+    """A recorder of a class of its own, for a service that holds several: one of each class."""
+
+
+class _Beta(_Recorder):
+    """A recorder of a class of its own, for a service that holds several: one of each class."""
+
+
+class _Gamma(_Recorder):
+    """A recorder of a class of its own, for a service that holds several: one of each class."""
+
+
 def _append(suffix: str) -> Callable[[Frame], list[Frame]]:
     """A filter that appends ``suffix`` to the text of every LLMTextFrame."""
 
@@ -127,8 +139,8 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_extensions_filter_what_the_service_pushes_in_order(self):
-        later = _Recorder(order=1, filter=_append("-later"))
-        earlier = _Recorder(order=0, filter=_append("-earlier"))
+        later = _Beta(order=1, filter=_append("-later"))
+        earlier = _Alpha(order=0, filter=_append("-earlier"))
         # Attached in the other order: the order decides.
         service = _MockLLMService(extensions=[later, earlier])
 
@@ -146,8 +158,8 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
                 return [frame, LLMTextFrame("added")]
             return [frame]
 
-        adder = _Recorder(order=0, filter=add_one)
-        after = _Recorder(order=1)
+        adder = _Alpha(order=0, filter=add_one)
+        after = _Beta(order=1)
         service = _MockLLMService(extensions=[adder, after])
 
         received_down, _ = await run_test(
@@ -270,9 +282,9 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
         service = _MockLLMService(
             system_instruction="APP",
             extensions=[
-                _Recorder(order=1, instruction="LATER"),
-                _Recorder(order=0, instruction="EARLIER"),
-                _Recorder(order=0),
+                _Alpha(order=1, instruction="LATER"),
+                _Beta(order=0, instruction="EARLIER"),
+                _Gamma(order=0),
             ],
         )
 
@@ -349,14 +361,14 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
         self.assertIs(service._functions["helper"].handler, handler)
 
     async def test_a_settings_update_builds_and_adds_extensions(self):
-        first = _Recorder(instruction="FIRST")
+        first = _Alpha(instruction="FIRST")
         service = _MockLLMService(extensions=[first])
 
         await run_test(
             service,
             frames_to_send=[
                 LLMUpdateSettingsFrame(
-                    delta=LLMSettings(extensions=[lambda: _Recorder(instruction="SECOND")])
+                    delta=LLMSettings(extensions=[lambda: _Beta(instruction="SECOND")])
                 )
             ],
         )
@@ -364,9 +376,31 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(service._extensions), 2)
         self.assertIs(service._extensions[0], first)
         second = service._extensions[1]
-        self.assertIsInstance(second, _Recorder)
+        self.assertIsInstance(second, _Beta)
         self.assertTrue(second.set_up)
         self.assertEqual(service._settings.system_instruction, "FIRST\n\nSECOND")
+
+    async def test_get_extension_finds_the_attached_extension_of_a_class(self):
+        alpha = _Alpha()
+        service = _MockLLMService(extensions=[alpha])
+
+        self.assertIs(service.get_extension(_Alpha), alpha)
+        self.assertIsNone(service.get_extension(_Recorder))
+        self.assertIsNone(service.get_extension(_Beta))
+
+    async def test_a_second_extension_of_a_class_is_refused(self):
+        with self.assertRaises(ValueError) as ctx:
+            _MockLLMService(extensions=[_Recorder(), _Recorder()])
+        self.assertIn("subclass", str(ctx.exception))
+
+        service = _MockLLMService(extensions=[_Recorder()])
+        with self.assertRaises(ValueError):
+            service.add_extension(_Recorder())
+        with self.assertRaises(ValueError):
+            await service._update_settings(LLMSettings(extensions=[_Recorder]))
+        self.assertEqual(
+            [e for e in service._extensions if isinstance(e, _Recorder)], service._extensions[:1]
+        )
 
     async def test_an_extension_in_a_settings_update_is_refused(self):
         service = _MockLLMService()

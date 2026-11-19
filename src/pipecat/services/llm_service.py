@@ -304,6 +304,7 @@ class FunctionCallRunnerItem:
 # `TAdapter = BaseLLMAdapter` instead of `Unknown` at type-check time —
 # matching the pre-generic behavior of `get_llm_adapter()`.
 TAdapter = TypeVar("TAdapter", bound=BaseLLMAdapter, default=BaseLLMAdapter)
+TExtension = TypeVar("TExtension", bound=BaseLLMExtension)
 
 
 class LLMService(AIService, Generic[TAdapter]):
@@ -923,11 +924,33 @@ class LLMService(AIService, Generic[TAdapter]):
             )
         self._attach_extension(extension)
 
+    def get_extension(self, extension_type: type[TExtension]) -> TExtension | None:
+        """Get the attached extension of a class.
+
+        Args:
+            extension_type: The extension's class, exactly: a subclass is an
+                extension of its own.
+
+        Returns:
+            The extension, or None if none of that class is attached.
+        """
+        return next((e for e in self._extensions if type(e) is extension_type), None)
+
     def _attach_extension(self, extension: BaseLLMExtension):
-        """Add an extension to the settings, in running order, and its instruction to the composition."""
+        """Add an extension to the settings, in running order, and its instruction to the composition.
+
+        Raises:
+            ValueError: If an extension of the same class is attached already.
+        """
         extensions = assert_given(self._settings.extensions)
-        if extension not in extensions:
-            extensions.append(extension)
+        if extension in extensions:
+            return
+        if self.get_extension(type(extension)):
+            raise ValueError(
+                f"{self} already has a {type(extension).__name__}, and holds one extension of "
+                "each class. If you need a parameterized extension twice, make a subclass for it."
+            )
+        extensions.append(extension)
         self._sort_extensions()
         self._compose_system_instruction()
 
@@ -974,11 +997,6 @@ class LLMService(AIService, Generic[TAdapter]):
         upstream_frame.broadcast_sibling_id = downstream_frame.id
         await self._push_past_extensions(downstream_frame, FrameDirection.DOWNSTREAM)
         await self._push_past_extensions(upstream_frame, FrameDirection.UPSTREAM)
-
-    def _user_turn_completion_extension(self) -> LLMTurnCompletionLLMExtension | None:
-        return next(
-            (e for e in self._extensions if isinstance(e, LLMTurnCompletionLLMExtension)), None
-        )
 
     def _handle_tts_metadata(self, frame: TTSMetadataFrame):
         """Teach the expression the TTS service performs, replacing any before it."""
@@ -1077,12 +1095,24 @@ class LLMService(AIService, Generic[TAdapter]):
         """
         changed = await super()._update_settings(delta)
 
+        if "system_instruction" in changed:
+            # The user replaced the base prompt; re-snapshot it before anything
+            # composes, so composition rebuilds the effective instruction from
+            # the new value.
+            base_si = self._settings.system_instruction
+            self._base_system_instruction = base_si if isinstance(base_si, str) else None
+
         if "extensions" in changed:
-            self._sort_extensions()
-            if self._setup:
-                for extension in self._extensions:
-                    if extension not in changed["extensions"]:
-                        await self._wire_extension(extension)
+            # The extensions the delta built are attached one by one, as the
+            # constructor's and add_extension()'s are.
+            held = cast(list[BaseLLMExtension], changed["extensions"])
+            store = cast(list[BaseLLMExtension], assert_given(self._settings.extensions))
+            built = [e for e in store if e not in held]
+            self._settings.extensions = list(held)
+            for extension in built:
+                self._attach_extension(extension)
+                if self._setup:
+                    await self._wire_extension(extension)
 
         if "filter_incomplete_user_turns" in changed:
             warn_deprecated(
@@ -1091,21 +1121,15 @@ class LLMService(AIService, Generic[TAdapter]):
                 "instead.",
                 stacklevel=2,
             )
-            extension = self._user_turn_completion_extension()
-            if self._settings.filter_incomplete_user_turns and extension is None:
+            extension = self.get_extension(LLMTurnCompletionLLMExtension)
+            if self._settings.filter_incomplete_user_turns and not extension:
                 config = self._settings.user_turn_completion_config
                 extension = LLMTurnCompletionLLMExtension(config if is_given(config) else None)
                 self._attach_extension(extension)
                 if self._setup:
                     await self._wire_extension(extension)
-            elif not self._settings.filter_incomplete_user_turns and extension is not None:
+            elif not self._settings.filter_incomplete_user_turns and extension:
                 await self._detach_extension(extension)
-
-        if "system_instruction" in changed:
-            # The user replaced the base prompt; re-snapshot it so composition
-            # rebuilds the effective instruction from the new value.
-            base_si = self._settings.system_instruction
-            self._base_system_instruction = base_si if isinstance(base_si, str) else None
 
         if "user_turn_completion_config" in changed:
             warn_deprecated(
@@ -1114,7 +1138,7 @@ class LLMService(AIService, Generic[TAdapter]):
                 "instead.",
                 stacklevel=2,
             )
-            if (extension := self._user_turn_completion_extension()) is not None:
+            if extension := self.get_extension(LLMTurnCompletionLLMExtension):
                 config = assert_given(self._settings.user_turn_completion_config)
                 extension.config = config or UserTurnCompletionConfig()
 

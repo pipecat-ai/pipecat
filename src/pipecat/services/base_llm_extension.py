@@ -67,6 +67,11 @@ class BaseLLMExtension(BaseObject):
     - pushes the frames the extension pushes with :meth:`push_frame` and
       :meth:`broadcast_frame` as they are: its extensions don't filter them.
 
+    A service holds one extension of each class, which
+    :meth:`~pipecat.services.llm_service.LLMService.get_extension` finds. If a
+    developer needs a parameterized extension twice, they should make a
+    subclass for it.
+
     Events triggered by LLM extensions:
 
       - `on_push_frame`: Indicates the extension wants to push a frame.

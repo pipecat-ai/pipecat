@@ -395,10 +395,7 @@ class PredictiveDelegation(FrameProcessor):
                 "frontend",
             )
             return False
-        if any(
-            isinstance(e, LLMTurnCompletionLLMExtension)
-            for e in assert_given(self._frontend_settings().extensions)
-        ):
+        if self._frontend.get_extension(LLMTurnCompletionLLMExtension):
             self._warn_once(
                 "filtering",
                 "Predictive delegation: turns are left to the frontend while it filters "
