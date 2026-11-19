@@ -1118,6 +1118,15 @@ class ServiceRegistry:
             include_params=["base_url"],
             settings_params=["voice"],
         ),
+        ServiceDefinition(
+            value="zoom_ai_tts",
+            label="Zoom AI",
+            package="pipecat-ai[zoom-ai]",
+            class_name=["ZoomAIHttpTTSService"],
+            env_prefix="ZOOM_AI",
+            include_params=["api_key"],
+            settings_params=["voice"],
+        ),
     ]
 
     # Realtime (Speech-to-Speech) Services
