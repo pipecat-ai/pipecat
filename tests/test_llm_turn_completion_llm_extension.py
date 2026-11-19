@@ -39,7 +39,7 @@ class _Reader:
     """Runs the extension the way its service does, recording what goes out.
 
     ``pushed`` holds every frame in order, with its direction: what the
-    extension lets through or adds in ``filter_push``, and what it pushes or
+    extension lets through or adds in ``filter_push_frame``, and what it pushes or
     broadcasts itself.
     """
 
@@ -58,7 +58,7 @@ class _Reader:
 
     async def push(self, frame: Frame):
         """Push a frame as the service would, through the extension's filter."""
-        for filtered in await self.extension.filter_push(frame, FrameDirection.DOWNSTREAM):
+        for filtered in await self.extension.filter_push_frame(frame, FrameDirection.DOWNSTREAM):
             self.pushed.append((filtered, FrameDirection.DOWNSTREAM))
 
     async def text(self, text: str):

@@ -1220,7 +1220,7 @@ class LLMService(AIService, Generic[TAdapter]):
             await self._push_past_extensions(frame, direction)
             return
         first, rest = extensions[0], extensions[1:]
-        for filtered in await first.filter_push(frame, direction):
+        for filtered in await first.filter_push_frame(frame, direction):
             await self._push_through_extensions(filtered, direction, rest)
 
     async def _push_past_extensions(self, frame: Frame, direction: FrameDirection):

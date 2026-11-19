@@ -89,7 +89,7 @@ class _Recorder(BaseLLMExtension):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         self.processed.append((frame, direction))
 
-    async def filter_push(self, frame: Frame, direction: FrameDirection) -> list[Frame]:
+    async def filter_push_frame(self, frame: Frame, direction: FrameDirection) -> list[Frame]:
         self.filtered.append(frame)
         return self._filter(frame) if self._filter else [frame]
 
@@ -168,7 +168,9 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
             return [frame]
 
         class Announcer(BaseLLMExtension):
-            async def filter_push(self, frame: Frame, direction: FrameDirection) -> list[Frame]:
+            async def filter_push_frame(
+                self, frame: Frame, direction: FrameDirection
+            ) -> list[Frame]:
                 if isinstance(frame, LLMTextFrame) and frame.text == "first":
                     await self.push_frame(LLMTextFrame("announced"))
                 return [frame]

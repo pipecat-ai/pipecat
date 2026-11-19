@@ -1428,7 +1428,7 @@ class TestFrameContracts(unittest.IsolatedAsyncioTestCase):
     async def _markers_pushed_for(self, text: str) -> list[LLMMarkerFrame]:
         """Run one response through the turn completion extension."""
         extension = LLMTurnCompletionLLMExtension()
-        pushed = await extension.filter_push(LLMTextFrame(text), FrameDirection.DOWNSTREAM)
+        pushed = await extension.filter_push_frame(LLMTextFrame(text), FrameDirection.DOWNSTREAM)
         return [f for f in pushed if isinstance(f, LLMMarkerFrame)]
 
     async def test_turn_completion_pushes_markers_that_way_round(self):

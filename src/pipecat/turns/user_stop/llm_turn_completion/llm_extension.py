@@ -140,7 +140,7 @@ class LLMTurnCompletionLLMExtension(BaseLLMExtension):
         elif isinstance(frame, PerceptionMetadataFrame) and self._expressive:
             self._perception = frame.perception
 
-    async def filter_push(self, frame: Frame, direction: FrameDirection) -> list[Frame]:
+    async def filter_push_frame(self, frame: Frame, direction: FrameDirection) -> list[Frame]:
         """Read the marker from the response's text, and report it.
 
         Args:

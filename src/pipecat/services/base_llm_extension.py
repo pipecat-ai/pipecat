@@ -62,7 +62,7 @@ class BaseLLMExtension(BaseObject):
       synced with the registered tools before each inference;
     - hands it every frame it processes, in :meth:`process_frame`, before its
       own handling of the frame;
-    - passes every frame it pushes through :meth:`filter_push`, which can
+    - passes every frame it pushes through :meth:`filter_push_frame`, which can
       hold the frame back, drop it, or add frames;
     - pushes the frames the extension pushes with :meth:`push_frame` and
       :meth:`broadcast_frame` as they are: its extensions don't filter them.
@@ -134,7 +134,7 @@ class BaseLLMExtension(BaseObject):
         """
         pass
 
-    async def filter_push(self, frame: Frame, direction: FrameDirection) -> list[Frame]:
+    async def filter_push_frame(self, frame: Frame, direction: FrameDirection) -> list[Frame]:
         """Filter a frame the service pushes.
 
         Returns the frames to push in its place, in the same direction:
