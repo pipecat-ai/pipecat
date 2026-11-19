@@ -656,10 +656,10 @@ SERVICE_CONFIGS = {
         "    )\n"
     ),
     "zoom_ai_tts": (
-        "ZoomAITTSService(\n"
+        "ZoomAIHttpTTSService(\n"
         '        api_key=os.getenv("ZOOM_AI_API_KEY"),\n'
         "        aiohttp_session=session,\n"
-        "        settings=ZoomAITTSService.Settings(\n"
+        "        settings=ZoomAIHttpTTSService.Settings(\n"
         '            voice=os.getenv("ZOOM_AI_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"

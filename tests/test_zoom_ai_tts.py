@@ -14,7 +14,7 @@ import pytest
 from aiohttp import web
 
 from pipecat.frames.frames import ErrorFrame, InterruptionFrame, TTSAudioRawFrame, TTSSpeakFrame
-from pipecat.services.zoom_ai.tts import MAX_INPUT_CHARS, ZoomAITTSService, _split_text
+from pipecat.services.zoom_ai.tts import MAX_INPUT_CHARS, ZoomAIHttpTTSService, _split_text
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.errors import ErrorCategory
 
@@ -52,7 +52,7 @@ async def _run(aiohttp_client, fake, text="Hello from Zoom.", **kwargs):
     app.router.add_post("/v2/aiservices/tts/synthesize", fake.handler)
     client = await aiohttp_client(app)
     async with aiohttp.ClientSession() as session:
-        tts = ZoomAITTSService(
+        tts = ZoomAIHttpTTSService(
             api_key="test-key",
             aiohttp_session=session,
             url=str(client.make_url("/v2/aiservices/tts/synthesize")),
@@ -98,7 +98,7 @@ async def test_settings_map_to_request_fields(aiohttp_client):
     await _run(
         aiohttp_client,
         fake,
-        settings=ZoomAITTSService.Settings(voice="ava", speed=1.2, volume=0.8),
+        settings=ZoomAIHttpTTSService.Settings(voice="ava", speed=1.2, volume=0.8),
     )
 
     body = fake.body()
@@ -145,7 +145,7 @@ async def test_unsupported_voice_reports_zoom_reason_and_makes_the_service_unusa
         )
 
     tts, down, up = await _run(
-        aiohttp_client, FakeZoomTTS(reject), settings=ZoomAITTSService.Settings(voice="nobody")
+        aiohttp_client, FakeZoomTTS(reject), settings=ZoomAIHttpTTSService.Settings(voice="nobody")
     )
 
     errors = [f for f in up if isinstance(f, ErrorFrame)]
@@ -219,7 +219,7 @@ async def test_interruption_closes_the_request(aiohttp_client):
     app.router.add_post("/v2/aiservices/tts/synthesize", FakeZoomTTS(slow).handler)
     client = await aiohttp_client(app)
     async with aiohttp.ClientSession() as session:
-        tts = ZoomAITTSService(
+        tts = ZoomAIHttpTTSService(
             api_key="test-key",
             aiohttp_session=session,
             url=str(client.make_url("/v2/aiservices/tts/synthesize")),
