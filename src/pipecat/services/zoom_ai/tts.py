@@ -6,7 +6,7 @@
 
 """Zoom text-to-speech service.
 
-:class:`ZoomAITTSService` synthesizes speech with the Zoom AI Services Text-to-Speech
+:class:`ZoomAIHttpTTSService` synthesizes speech with the Zoom AI Services Text-to-Speech
 API in Fast mode: each sentence is one HTTPS request, and the audio streams back in
 the response, so playback starts before synthesis finishes.
 
@@ -63,7 +63,7 @@ async def _describe_error(response: aiohttp.ClientResponse) -> str:
 
 @dataclass
 class ZoomAITTSSettings(TTSSettings):
-    """Settings for :class:`ZoomAITTSService`.
+    """Settings for :class:`ZoomAIHttpTTSService`.
 
     ``voice`` is a Zoom TTS voice ID, such as ``jenna`` (the default) or ``ava``; see
     https://developers.zoom.us/docs/ai-services/tts/#language-and-voices for the list.
@@ -81,7 +81,7 @@ class ZoomAITTSSettings(TTSSettings):
     volume: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class ZoomAITTSService(TTSService):
+class ZoomAIHttpTTSService(TTSService):
     """Zoom AI Services text-to-speech service.
 
     Sends each sentence to the Zoom TTS API in its own request and streams the
@@ -92,10 +92,10 @@ class ZoomAITTSService(TTSService):
     Example::
 
         async with aiohttp.ClientSession() as session:
-            tts = ZoomAITTSService(
+            tts = ZoomAIHttpTTSService(
                 api_key=os.getenv("ZOOM_AI_API_KEY"),
                 aiohttp_session=session,
-                settings=ZoomAITTSService.Settings(voice="ava"),
+                settings=ZoomAIHttpTTSService.Settings(voice="ava"),
             )
     """
 
