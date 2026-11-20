@@ -796,6 +796,16 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             self._cancelled_result_ids.discard(result_id)
             logger.debug(f"{self}: Dropping canceled event of interrupted synthesis")
             return
+        if (
+            reason == CancellationReason.CancelledByUser
+            and result_id is not None
+            and self._active_result_id is not None
+            and result_id != self._active_result_id
+        ):
+            # An untracked cancellation can arrive after the next synthesis starts.
+            # Its marker must not end that synthesis's audio stream.
+            logger.debug(f"{self}: Ignoring cancellation for a different synthesis")
+            return
         if result_id == self._active_result_id:
             self._active_result_id = None
         # User cancellation (from interruption) is expected, not an error

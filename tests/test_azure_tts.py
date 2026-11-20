@@ -332,3 +332,32 @@ async def test_next_synthesis_audio_flows_after_interruption():
     svc._handle_synthesizing(audio_evt)
 
     assert await asyncio.wait_for(svc._audio_queue.get(), timeout=1.0) == audio
+
+
+@pytest.mark.asyncio
+async def test_untracked_user_cancel_does_not_end_new_synthesis():
+    """A late cancellation cannot end a different, already-started synthesis."""
+    svc = _make_streaming_service()
+    svc._synthesis_in_flight = True
+    started = Mock()
+    started.result.result_id = "rid-B"
+    svc._handle_started(started)
+
+    svc._handle_canceled(_cancel_event("rid-A"))
+    await asyncio.sleep(0.05)
+
+    assert svc._audio_queue.empty()
+    assert svc._active_result_id == "rid-B"
+
+
+@pytest.mark.asyncio
+async def test_user_cancel_of_active_result_still_unblocks_synthesis():
+    """The matching result id must still terminate its own awaiting synthesis."""
+    svc = _make_streaming_service()
+    svc._synthesis_in_flight = True
+    svc._active_result_id = "rid-B"
+
+    svc._handle_canceled(_cancel_event("rid-B"))
+
+    assert await asyncio.wait_for(svc._audio_queue.get(), timeout=1.0) is None
+    assert svc._active_result_id is None
