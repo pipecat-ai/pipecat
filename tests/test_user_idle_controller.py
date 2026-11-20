@@ -11,6 +11,7 @@ import unittest.mock
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    FunctionCallCancelFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     FunctionCallsStartedFrame,
@@ -226,7 +227,7 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         # LLM emits function call and "let me check" concurrently
         await controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
         await controller.process_frame(BotStartedSpeakingFrame())
         await controller.process_frame(BotStoppedSpeakingFrame())
@@ -271,7 +272,7 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         # Async tool starts; bot acknowledges it and stops speaking
         await controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
         await controller.process_frame(BotStartedSpeakingFrame())
         await controller.process_frame(BotStoppedSpeakingFrame())
@@ -308,6 +309,65 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
         self.assertTrue(idle_triggered)
 
+        await controller.cleanup()
+
+    async def test_result_for_unstarted_call_does_not_settle_active_call(self):
+        """A cancel tool result cannot decrement a call it never started."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="real")])
+        )
+        await controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="cancel_lookup",
+                tool_call_id="cancel",
+                arguments={},
+                result=None,
+            )
+        )
+        self.assertTrue(controller.function_calls_in_progress)
+
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+        self.assertFalse(idle_triggered)
+
+        await controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="lookup",
+                tool_call_id="real",
+                arguments={},
+                result="done",
+            )
+        )
+        self.assertFalse(controller.function_calls_in_progress)
+        await controller.cleanup()
+
+    async def test_cancel_for_unstarted_call_does_not_settle_active_call(self):
+        """A cancellation for an unknown call does not settle a tracked call."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        await controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="real")])
+        )
+        await controller.process_frame(
+            FunctionCallCancelFrame(function_name="unknown", tool_call_id="unknown")
+        )
+
+        self.assertTrue(controller.function_calls_in_progress)
+
+        await controller.process_frame(
+            FunctionCallCancelFrame(function_name="lookup", tool_call_id="real")
+        )
+        self.assertFalse(controller.function_calls_in_progress)
         await controller.cleanup()
 
     async def test_disabled_by_default(self):

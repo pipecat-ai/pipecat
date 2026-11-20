@@ -70,7 +70,7 @@ class UserIdleController(BaseObject):
         self._waiting_for_user: bool = False
         self._bot_speaking: bool = False
         self._user_turn_in_progress: bool = False
-        self._function_calls_in_progress: int = 0
+        self._function_calls_in_progress: set[str] = set()
         self._idle_timer_task: asyncio.Task | None = None
 
         self._register_event_handler("on_user_turn_idle", sync=True)
@@ -87,7 +87,7 @@ class UserIdleController(BaseObject):
     @property
     def function_calls_in_progress(self) -> bool:
         """Whether function calls have started and not finished."""
-        return self._function_calls_in_progress > 0
+        return bool(self._function_calls_in_progress)
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the controller.
@@ -143,7 +143,7 @@ class UserIdleController(BaseObject):
             # BotStoppedSpeaking when pushing a TTSSpeakFrame in the
             # on_function_calls_started event handler, so the counter guard
             # prevents the timer from starting while a function call is in progress.
-            if not self._user_turn_in_progress and self._function_calls_in_progress == 0:
+            if not self._user_turn_in_progress and not self._function_calls_in_progress:
                 # Track the waiting-for-user window even when the timeout is
                 # currently <= 0 (no timer), so a later timeout update can arm
                 # the timer without waiting for the next bot turn.
@@ -161,16 +161,18 @@ class UserIdleController(BaseObject):
             self._user_turn_in_progress = False
         elif isinstance(frame, FunctionCallsStartedFrame):
             self._waiting_for_user = False
-            self._function_calls_in_progress += len(frame.function_calls)
+            self._function_calls_in_progress.update(
+                call.tool_call_id for call in frame.function_calls
+            )
             await self._cancel_idle_timer()
         elif isinstance(frame, FunctionCallResultFrame):
             # An async tool can report progress with intermediate results
             # while it keeps running; only its final result settles the call.
             is_final = frame.properties.is_final if frame.properties else True
             if is_final:
-                self._function_calls_in_progress = max(0, self._function_calls_in_progress - 1)
+                self._function_calls_in_progress.discard(frame.tool_call_id)
         elif isinstance(frame, FunctionCallCancelFrame):
-            self._function_calls_in_progress = max(0, self._function_calls_in_progress - 1)
+            self._function_calls_in_progress.discard(frame.tool_call_id)
 
     async def wait_for_user(self):
         """Start waiting for the user after a turn the bot will not answer.
@@ -183,7 +185,7 @@ class UserIdleController(BaseObject):
         """
         if self._bot_speaking or self._user_turn_in_progress:
             return
-        if self._function_calls_in_progress > 0:
+        if self._function_calls_in_progress:
             return
         self._waiting_for_user = True
         await self._start_idle_timer()
