@@ -30,10 +30,14 @@ class SentenceAggregator(FrameProcessor):
     Useful for ensuring downstream processors receive coherent, complete sentences
     rather than fragmented text.
 
+    A frame that holds the end of one sentence and the start of the next emits
+    only the completed sentence. The rest stays buffered for the following one.
+
     Frame input/output::
 
         TextFrame("Hello,") -> None
         TextFrame(" world.") -> TextFrame("Hello, world.")
+        TextFrame("Hello. How are") -> TextFrame("Hello.")
     """
 
     def __init__(self):
@@ -59,9 +63,20 @@ class SentenceAggregator(FrameProcessor):
 
         if isinstance(frame, TextFrame):
             self._aggregation += frame.text
-            if match_endofsentence(self._aggregation):
-                await self.push_frame(TextFrame(self._aggregation))
-                self._aggregation = ""
+            # ``match_endofsentence`` returns the end of the first sentence.
+            while self._aggregation:
+                end = match_endofsentence(self._aggregation)
+                if not end:
+                    break
+                # Keep a coarse chunk's post-boundary text together for the next
+                # sentence. When only trailing whitespace follows the boundary,
+                # preserve the existing eager, word-by-word output.
+                remainder = self._aggregation[end:]
+                split = len(self._aggregation) if remainder and not remainder.strip() else end
+                sentence = self._aggregation[:split]
+                self._aggregation = self._aggregation[split:]
+                if sentence:
+                    await self.push_frame(TextFrame(sentence))
         elif isinstance(frame, InterruptionFrame):
             self._aggregation = ""
             await self.push_frame(frame, direction)
