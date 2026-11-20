@@ -9,7 +9,6 @@
 import asyncio
 import copy
 import json
-import math
 import time
 from collections import OrderedDict, deque
 from collections.abc import Coroutine
@@ -23,7 +22,7 @@ try:
     from rimelabs_sdk import Rime, RimeInputError
     from rimelabs_sdk import realtime as r
 except ModuleNotFoundError as error:
-    logger.error('Install Rime realtime support with `uv pip install "pipecat-ai[rime-realtime]"`.')
+    logger.error('In order to use RimeRealtimeLLMService, you need to `uv add "pipecat-ai[rime]"`.')
     raise Exception(f"Missing module: {error}") from error
 
 from pipecat.audio.utils import create_stream_resampler

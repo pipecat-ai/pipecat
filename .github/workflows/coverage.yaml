@@ -51,7 +51,6 @@ jobs:
             --extra redis \
             --extra resampy \
             --extra rime \
-            --extra rime-realtime \
             --extra runner \
             --extra sagemaker \
             --extra sarvam \
