@@ -251,15 +251,13 @@ class UserIdleController(BaseObject):
         The timer normally starts when the bot stops speaking. A user turn that
         ends with nothing for the bot to answer (e.g. no transcript) cancels
         the timer without the bot speaking again afterwards, so the caller
-        re-arms it here. Does nothing while the bot is speaking, a user turn
-        is in progress, or function calls are pending.
+        re-arms it here: the waiting timer with background work in progress,
+        the idle timer otherwise. Does nothing while the bot is speaking or a
+        user turn is in progress, and starts no idle timer while function
+        calls are pending.
         """
-        if not self._quiet:
-            return
-        if self._function_calls_in_progress > 0:
-            return
-        self._waiting_for_user = True
-        await self._start_timer()
+        if self._quiet:
+            await self._start_after_bot_turn()
 
     async def _start_after_bot_turn(self):
         """Start the timer for the silence after the bot's turn.
