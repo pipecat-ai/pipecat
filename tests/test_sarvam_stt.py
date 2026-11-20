@@ -2090,3 +2090,149 @@ async def test_http_segment_pipeline_emits_finalized_transcription():
     ]
     assert len(usage_indexes) == 1
     assert usage_indexes[0] < received_down.index(transcripts[0])
+
+
+def _diarized_service(monkeypatch, pushed, **kwargs) -> SarvamRealtimeSTTService:
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        with_diarization=True,
+        settings=SarvamRealtimeSTTService.Settings(model="saaras:v4", **kwargs),
+    )
+    monkeypatch.setattr(service, "push_frame", _capture(pushed))
+    monkeypatch.setattr(service, "broadcast_frame", _capture_class([]))
+    monkeypatch.setattr(service, "start_ttfb_metrics", _noop)
+    monkeypatch.setattr(service, "stop_ttfb_metrics", _noop)
+    return service
+
+
+def _word(text: str, start: float | None, end: float | None, speaker: str) -> dict:
+    return {"word": text, "start_s": start, "end_s": end, "speaker": speaker}
+
+
+def test_with_diarization_is_sent_only_when_enabled():
+    plain = SarvamRealtimeSTTService(api_key="test-key")
+    diarized = SarvamRealtimeSTTService(api_key="test-key", with_diarization=True)
+
+    assert "with_diarization" not in _query(plain)
+    assert _query(diarized)["with_diarization"] == ["true"]
+
+
+@pytest.mark.asyncio
+async def test_diarized_final_from_one_speaker_sets_speaker(monkeypatch):
+    pushed = []
+    service = _diarized_service(monkeypatch, pushed)
+    # Captured from a live saaras:v4 session with `with_diarization=true` (trimmed).
+    words = [
+        _word("And", 4.14, 4.429, "spk_0"),
+        _word("I", 4.429, 4.59, "spk_0"),
+        _word("am", 4.59, 4.766, "spk_0"),
+    ]
+
+    await service._handle_message({"event": "vad.speech_start", "utterance_idx": 1})
+    await service._handle_message({"event": "vad.speech_end", "utterance_idx": 1})
+    await service._handle_message(
+        {
+            "event": "transcript.final",
+            "utterance_idx": 1,
+            "text": "And I am",
+            "start_s": 4.0,
+            "end_s": 7.501,
+            "source": "offline",
+            "speaker_attribution": "word",
+            "words": words,
+            "turns": [{"speaker": "spk_0", "start_s": 4.14, "end_s": 4.766, "text": "And I am"}],
+        }
+    )
+
+    finals = [f for f in pushed if isinstance(f, TranscriptionFrame)]
+    assert len(finals) == 1
+    assert finals[0].text == "And I am"
+    assert finals[0].finalized is True
+    assert finals[0].speaker.label == "spk_0"
+    assert finals[0].speaker.number == 1
+    assert finals[0].result["words"] == words
+
+
+@pytest.mark.asyncio
+async def test_diarized_final_is_split_by_speaker_and_formatted(monkeypatch):
+    pushed = []
+    service = _diarized_service(monkeypatch, pushed, speaker_format="{speaker_number}: {text}")
+
+    await service._handle_message({"event": "vad.speech_start", "utterance_idx": 3})
+    await service._handle_message({"event": "vad.speech_end", "utterance_idx": 3})
+    await service._handle_message(
+        {
+            "event": "transcript.final",
+            "utterance_idx": 3,
+            "text": "For the record.",
+            "speaker_attribution": "word",
+            "words": [
+                _word("For", 12.9, 12.98, "spk_0"),
+                _word("the", None, None, "spk_0"),
+                _word("record.", 13.2, 13.52, "spk_1"),
+            ],
+        }
+    )
+
+    finals = [f for f in pushed if isinstance(f, TranscriptionFrame)]
+    assert [f.text for f in finals] == ["1: For the", "2: record."]
+    assert [f.speaker.label for f in finals] == ["spk_0", "spk_1"]
+    assert [f.finalized for f in finals] == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_diarized_final_without_words_is_not_split(monkeypatch):
+    pushed = []
+    service = _diarized_service(monkeypatch, pushed)
+
+    await service._handle_message(
+        {
+            "event": "transcript.final",
+            "utterance_idx": 0,
+            "text": "Hello.",
+            "speaker_attribution": "none",
+            "turns": [{"speaker": None, "start_s": 0.4, "end_s": 1.2, "text": "Hello."}],
+        }
+    )
+
+    finals = [f for f in pushed if isinstance(f, TranscriptionFrame)]
+    assert len(finals) == 1
+    assert finals[0].text == "Hello."
+    assert finals[0].speaker is None
+    assert finals[0].finalized is True
+
+
+@pytest.mark.asyncio
+async def test_diarized_partial_keeps_word_times_in_result(monkeypatch):
+    pushed = []
+    service = _diarized_service(monkeypatch, pushed)
+    words = [{**_word("Nama", 1.936, 2.096, "spk_0"), "stable": False}]
+
+    await service._handle_message(
+        {"event": "transcript.partial", "utterance_idx": 0, "text": "Nama", "words": words}
+    )
+
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], InterimTranscriptionFrame)
+    assert pushed[0].result["words"] == words
+
+
+@pytest.mark.asyncio
+async def test_speaker_format_update_is_not_sent_to_sarvam(monkeypatch):
+    pushed = []
+    service = _diarized_service(monkeypatch, pushed)
+    sent = []
+
+    async def _send_json(payload):
+        sent.append(payload)
+        return True
+
+    monkeypatch.setattr(service, "_send_json", _send_json)
+    monkeypatch.setattr(
+        service, "_warn_unhandled_updated_settings", lambda *_: pytest.fail("warned")
+    )
+
+    await service._update_settings(SarvamRealtimeSTTService.Settings(speaker_format="{text}"))
+
+    assert service._settings.speaker_format == "{text}"
+    assert sent == []
