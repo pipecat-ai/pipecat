@@ -524,7 +524,8 @@ class LLMService(AIService, Generic[TAdapter]):
         # Filled in here rather than in every service's default settings.
         if not is_given(self._settings.extensions):
             self._settings.extensions = []
-        # The settings hold the extensions; this is them in running order.
+        # The settings hold the extensions; this is them in order, from the
+        # one "closest" to the service to the one "farthest" from it.
         self._extensions: list[BaseLLMExtension] = []
         # The latest metadata frame of each kind the service has processed,
         # handed to an extension attached later: a system frame such as a
@@ -939,7 +940,7 @@ class LLMService(AIService, Generic[TAdapter]):
         return next((e for e in self._extensions if type(e) is extension_type), None)
 
     def _attach_extension(self, extension: BaseLLMExtension):
-        """Add an extension to the settings, in running order, and its instruction to the composition.
+        """Add an extension to the settings, in its place by order, and its instruction to the composition.
 
         Raises:
             ValueError: If an extension of the same class is attached already.
@@ -992,13 +993,17 @@ class LLMService(AIService, Generic[TAdapter]):
         extension.remove_event_handler("on_broadcast_frame", self._on_extension_broadcast_frame)
         await extension.cleanup()
 
+    def _extensions_outside(self, extension: BaseLLMExtension) -> list[BaseLLMExtension]:
+        """The extensions "farther" from the service than the given one, "closest" first."""
+        return self._extensions[self._extensions.index(extension) + 1 :]
+
     async def _on_extension_push_frame(
         self,
         extension: BaseLLMExtension,
         frame: Frame,
         direction: FrameDirection = FrameDirection.DOWNSTREAM,
     ):
-        await self._push_past_extensions(frame, direction)
+        await self._push_through_extensions(frame, direction, self._extensions_outside(extension))
 
     async def _on_extension_broadcast_frame(
         self, extension: BaseLLMExtension, frame_cls: type[Frame], **kwargs
@@ -1007,8 +1012,9 @@ class LLMService(AIService, Generic[TAdapter]):
         upstream_frame = frame_cls(**kwargs)
         downstream_frame.broadcast_sibling_id = upstream_frame.id
         upstream_frame.broadcast_sibling_id = downstream_frame.id
-        await self._push_past_extensions(downstream_frame, FrameDirection.DOWNSTREAM)
-        await self._push_past_extensions(upstream_frame, FrameDirection.UPSTREAM)
+        outside = self._extensions_outside(extension)
+        await self._push_through_extensions(downstream_frame, FrameDirection.DOWNSTREAM, outside)
+        await self._push_through_extensions(upstream_frame, FrameDirection.UPSTREAM, outside)
 
     def _handle_tts_metadata(self, frame: TTSMetadataFrame):
         """Teach the expression the TTS service performs, replacing any before it."""
@@ -1176,7 +1182,11 @@ class LLMService(AIService, Generic[TAdapter]):
 
         if isinstance(frame, ServiceMetadataFrame):
             self._metadata_frames[type(frame)] = frame
-        for extension in self._extensions:
+        # The extensions are layers around the service, and an incoming frame
+        # goes through them from the outside in: the one "farthest" from the
+        # service processes it first. Each one has then seen the frame before
+        # it filters anything produced in reaction to it.
+        for extension in reversed(self._extensions):
             await extension.process_frame(frame, direction)
 
         if self._output_gate is not None:
@@ -1234,10 +1244,12 @@ class LLMService(AIService, Generic[TAdapter]):
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Pushes a frame, through the service's extensions.
 
-        Each extension filters the frame in turn, in extension order; what one
-        returns continues through the extensions after it. Frames go out in
-        the order the extensions produce them: each frame an extension returns
-        goes through the rest of the chain and out before the next one.
+        Each extension filters the frame in turn, from the one "closest" to
+        the service to the one "farthest" from it; what one returns goes on
+        through the extensions "farther" from the service than it. Frames go
+        out in the order the extensions produce them: each frame an extension
+        returns goes through the rest of the chain and out before the next
+        one.
 
         Args:
             frame: The frame to push.
@@ -1251,7 +1263,11 @@ class LLMService(AIService, Generic[TAdapter]):
     async def _push_through_extensions(
         self, frame: Frame, direction: FrameDirection, extensions: list[BaseLLMExtension]
     ):
-        """Run a frame through the given extensions, in order, and push what comes out."""
+        """Run a frame through the given extensions and push what comes out.
+
+        The extensions filter it in the order given: the one "closest" to the
+        service first.
+        """
         if not extensions:
             await self._push_past_extensions(frame, direction)
             return
@@ -1260,7 +1276,11 @@ class LLMService(AIService, Generic[TAdapter]):
             await self._push_through_extensions(filtered, direction, rest)
 
     async def _push_past_extensions(self, frame: Frame, direction: FrameDirection):
-        """Push a frame the extensions have filtered, or one of their own."""
+        """Push a frame out of the service: the last step of every push.
+
+        No extension filters the frame from here. It has already gone through
+        any and all extensions that need to filter it.
+        """
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts

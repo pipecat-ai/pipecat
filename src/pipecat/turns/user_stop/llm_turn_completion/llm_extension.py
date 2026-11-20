@@ -63,8 +63,9 @@ class LLMTurnCompletionLLMExtension(BaseLLMExtension):
     on the user aggregator is how an application turns turn completion on.
     """
 
-    # Before any other reader of the model's output: the marker opens the
-    # response, and what follows it reads differently once it is stripped.
+    # "Closer" to the service than any other reader of the model's output, so
+    # it filters the output first: the marker opens the response, and what
+    # follows it reads differently once it is stripped.
     order = -1
 
     def __init__(self, config: UserTurnCompletionConfig | None = None, **kwargs):

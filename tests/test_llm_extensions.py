@@ -215,17 +215,22 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(_texts(received_down), [])
 
-    async def test_what_an_extension_pushes_goes_out_as_it_is(self):
+    async def test_what_an_extension_pushes_passes_the_extensions_outside_it(self):
         class Speaker(BaseLLMExtension):
+            order = 1
+
             async def process_frame(self, frame: Frame, direction: FrameDirection):
                 if isinstance(frame, TextFrame):
                     await self.push_frame(LLMTextFrame("spoken"))
                     await self.push_frame(LLMTextFrame("up"), FrameDirection.UPSTREAM)
                     await self.broadcast_frame(UserTurnInferenceCompletedFrame)
 
-        # A filter that would drop the text, were it filtered.
-        dropper = _Recorder(filter=lambda frame: [] if isinstance(frame, LLMTextFrame) else [frame])
-        service = _MockLLMService(extensions=[Speaker(), dropper])
+        # A filter that would drop the text, were it handed it.
+        inside = _Alpha(
+            order=0, filter=lambda frame: [] if isinstance(frame, LLMTextFrame) else [frame]
+        )
+        outside = _Beta(order=2, filter=_append("-outside"))
+        service = _MockLLMService(extensions=[inside, Speaker(), outside])
 
         received_down, received_up = await run_test(
             service,
@@ -243,9 +248,94 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        self.assertEqual(_texts(received_down), ["spoken"])
-        self.assertEqual(_texts(received_up), ["up"])
-        self.assertEqual(_texts(dropper.filtered), [])
+        self.assertEqual(_texts(received_down), ["spoken-outside"])
+        self.assertEqual(_texts(received_up), ["up-outside"])
+        self.assertEqual(_texts(inside.filtered), [])
+        self.assertEqual(_texts(outside.filtered), ["spoken", "up"])
+        self.assertEqual(
+            len([f for f in outside.filtered if isinstance(f, UserTurnInferenceCompletedFrame)]), 2
+        )
+        self.assertEqual(
+            [f for f in inside.filtered if isinstance(f, UserTurnInferenceCompletedFrame)], []
+        )
+
+    async def test_extensions_process_a_frame_from_the_outside_in(self):
+        """Each extension processes a frame before it filters any frame pushed in response."""
+        log: list[str] = []
+
+        class Responder(BaseLLMExtension):
+            """Answers a TextFrame with a frame of its own, and logs what it is handed."""
+
+            def __init__(self, name: str, order: int):
+                super().__init__()
+                self._name = name
+                self.order = order
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                if isinstance(frame, TextFrame):
+                    log.append(f"{self._name} processes")
+                    await self.push_frame(LLMTextFrame(f"from {self._name}"))
+
+            async def filter_push_frame(
+                self, frame: Frame, direction: FrameDirection
+            ) -> list[Frame]:
+                if isinstance(frame, LLMTextFrame):
+                    log.append(f"{self._name} filters {frame.text}")
+                return [frame]
+
+        class A(Responder):
+            pass
+
+        class B(Responder):
+            pass
+
+        class C(Responder):
+            pass
+
+        service = _MockLLMService(extensions=[A("A", 0), B("B", 1), C("C", 2)])
+
+        received_down, _ = await run_test(service, frames_to_send=[TextFrame("hi")])
+
+        self.assertEqual(
+            log,
+            [
+                "C processes",
+                "B processes",
+                "C filters from B",
+                "A processes",
+                "B filters from A",
+                "C filters from A",
+            ],
+        )
+        self.assertEqual(_texts(received_down), ["from C", "from B", "from A"])
+
+    async def test_what_an_extension_pushes_is_past_the_output_gate(self):
+        class ClosedGate:
+            """Stands in for the gate predictive delegation installs: lets no text out."""
+
+            async def process_frame(self, service, frame):
+                pass
+
+            def allow_push(self, frame):
+                return not isinstance(frame, LLMTextFrame)
+
+            def allow_function_calls(self):
+                return True
+
+        class Speaker(BaseLLMExtension):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                if isinstance(frame, UserTurnInferenceCompletedFrame):
+                    await self.push_frame(LLMTextFrame("from the extension"))
+
+        service = _MockLLMService(extensions=[Speaker()])
+        service._output_gate = ClosedGate()  # type: ignore[assignment]
+
+        received_down, _ = await run_test(
+            service,
+            frames_to_send=[UserTurnInferenceCompletedFrame(), LLMTextFrame("from the service")],
+        )
+
+        self.assertEqual(_texts(received_down), ["from the extension"])
 
     async def test_extensions_are_set_up_and_cleaned_up_with_the_service(self):
         extension = _Recorder()
