@@ -63,6 +63,20 @@ class GeminiLiveLLMAdapter(GeminiLLMAdapter):
         )
         return params
 
+    def session_tools(self, context_tools: Any, service_tools: Any) -> list[Any] | None:
+        """Get the tools a live session should carry, without converting messages.
+
+        Args:
+            context_tools: The context's tools (``NOT_GIVEN`` or ``None`` when it
+                has none).
+            service_tools: The service's init-provided tools, as
+                ``_service_tools()`` returns them.
+
+        Returns:
+            The tools in Gemini Live format, or ``None`` when there are none.
+        """
+        return self._realtime_session_tools(context_tools, service_tools)
+
     def _from_universal_context_messages(
         self,
         universal_context_messages: list[LLMContextMessage],

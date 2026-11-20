@@ -45,6 +45,9 @@ class _FakeSession:
     async def close(self):
         self._closed.set()
 
+    async def send_context_update(self, **update):
+        pass
+
 
 class _FakeConnection:
     async def __aenter__(self):
