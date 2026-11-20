@@ -387,18 +387,19 @@ class TestFramesToEvents(unittest.TestCase):
         ):
             self.assertIsNone(s.frame_to_event(frame))
 
-    def test_user_started_speaking_message_discards_interrupted_output(self):
-        # A new user turn drops the bot's leftover output (but keeps a queued
-        # user_transcription, which is the turn's input).
+    def test_user_started_speaking_message_discards_the_unfinished_response(self):
+        # A new user turn drops the bot's response in progress, and what the
+        # bot still says of it is not its reply. The queue is left as it is.
         s = _stream(bot_audio=True)
         s._text_buffer = ["greeting"]
-        s._queue.put_nowait({"type": "response", "text": "greeting"})
         s._queue.put_nowait({"type": "user_transcription", "transcript": "hi"})
         msg = InputTransportMessageFrame(
             message={"label": RTVI.MESSAGE_LABEL, "type": "user-started-speaking"}
         )
         self.assertEqual(s.frame_to_event(msg), {"type": "user_started_speaking"})
         self.assertEqual(s._text_buffer, [])
+        self.assertIsNone(s.frame_to_event(LLMTextFrame(text=" and welcome")))
+        self.assertIsNone(s.frame_to_event(LLMFullResponseEndFrame()))
         self.assertEqual(s._queue.get_nowait(), {"type": "user_transcription", "transcript": "hi"})
         self.assertTrue(s._queue.empty())
 
@@ -707,6 +708,50 @@ class TestBotTurn(unittest.IsolatedAsyncioTestCase):
         s = _stream(bot_audio=True)
         await s.bot_turn_stopped("")
         self.assertEqual(await self._responses(s), [])
+
+
+class TestInterruptionKeepsTheUsersTurn(unittest.IsolatedAsyncioTestCase):
+    """The bot's reports of the user's turn starting survive the interruption sent right behind them."""
+
+    async def _expect(self, messages: list[str], event: str) -> dict:
+        """Feed the bot's messages as the sink does, back to back, to a turn waiting for ``event``."""
+        s = _stream(bot_audio=True)
+        s.input_sent()
+        waiting = asyncio.create_task(s.next_event(event, time.monotonic() + 1))
+        await asyncio.sleep(0)
+        for msg_type in messages:
+            message = {"label": RTVI.MESSAGE_LABEL, "type": msg_type}
+            reported = s.frame_to_event(InputTransportMessageFrame(message=message))
+            if reported is not None:
+                await s.append(reported)
+        return await waiting
+
+    async def test_user_started_speaking_survives_the_interruption_behind_it(self):
+        matched = await self._expect(
+            ["user-started-speaking", "bot-interrupted"], "user_started_speaking"
+        )
+        self.assertEqual(matched["type"], "user_started_speaking")
+
+    async def test_vad_user_started_speaking_survives_both_reports_behind_it(self):
+        matched = await self._expect(
+            ["vad-user-started-speaking", "user-started-speaking", "bot-interrupted"],
+            "vad_user_started_speaking",
+        )
+        self.assertEqual(matched["type"], "vad_user_started_speaking")
+
+    async def test_bot_interrupted_still_matches(self):
+        matched = await self._expect(
+            ["user-started-speaking", "bot-interrupted"], "bot_interrupted"
+        )
+        self.assertEqual(matched["type"], "bot_interrupted")
+
+    async def test_a_send_still_drops_the_turn_befores_reports(self):
+        # Left queued, they would match the next turn's expectation.
+        s = _stream(bot_audio=True)
+        for kind in ("vad_user_started_speaking", "user_started_speaking", "bot_interrupted"):
+            s._queue.put_nowait({"type": kind})
+        s.drop_pending_bot_output("before send")
+        self.assertTrue(s._queue.empty())
 
 
 class TestInterruptingSendDropsOpenBotTurn(unittest.IsolatedAsyncioTestCase):
