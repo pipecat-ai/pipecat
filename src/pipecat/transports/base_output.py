@@ -43,6 +43,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     OutputTransportReadyFrame,
+    PlaybackMarkFrame,
     SpeechOutputAudioRawFrame,
     SpriteFrame,
     StartFrame,
@@ -62,6 +63,10 @@ from pipecat.utils.time import nanoseconds_to_seconds
 BOT_VAD_STOP_SECS = 0.35
 # Only used as a fallback
 BOT_VAD_STOP_FALLBACK_SECS = 3
+# How long a playback mark waits for the peer to report it played before it is
+# pushed on anyway. The audio before a mark has already been written at playback
+# pace, so a peer that reports playback does so well within this.
+PLAYBACK_MARK_TIMEOUT_SECS = 5.0
 
 
 class BaseOutputTransport(FrameProcessor):
@@ -96,6 +101,9 @@ class BaseOutputTransport(FrameProcessor):
         # us to send multiple streams at the same time if the transport allows
         # it.
         self._media_senders: dict[Any, BaseOutputTransport.MediaSender] = {}
+
+        # Playback marks waiting for the peer to report they played, by frame id.
+        self._playback_marks: dict[int, tuple[PlaybackMarkFrame, asyncio.Task]] = {}
 
         if params.video_out_bitrate is not None:
             warn_deprecated(
@@ -183,6 +191,11 @@ class BaseOutputTransport(FrameProcessor):
         """
         for _, sender in self._media_senders.items():
             await sender.stop(frame)
+        # Nothing more will play, so marks still waiting go on ahead of the EndFrame.
+        for mark, task in list(self._playback_marks.values()):
+            await self.cancel_task(task)
+            await self.push_frame(mark)
+        self._playback_marks.clear()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the output transport and stop all processing.
@@ -192,6 +205,9 @@ class BaseOutputTransport(FrameProcessor):
         """
         for _, sender in self._media_senders.items():
             await sender.cancel(frame)
+        for _, task in list(self._playback_marks.values()):
+            await self.cancel_task(task)
+        self._playback_marks.clear()
 
     async def set_transport_ready(self, frame: StartFrame):
         """Called when the transport is ready to stream.
@@ -308,6 +324,45 @@ class BaseOutputTransport(FrameProcessor):
         """
         pass
 
+    async def write_playback_mark(self, frame: PlaybackMarkFrame) -> asyncio.Future[None] | None:
+        """Send a playback mark to the peer, once the audio before it has been written.
+
+        Override in transports whose peer reports how far it has played the
+        audio sent to it. The transport holds the mark until the returned
+        future is done, then pushes it on.
+
+        Args:
+            frame: The playback mark.
+
+        Returns:
+            A future done once the peer reports playback reached the mark, or
+            None if the transport can't tell, in which case the mark is pushed
+            on right away: the audio before it has been written.
+        """
+        return None
+
+    async def _handle_playback_mark(self, frame: PlaybackMarkFrame):
+        """Push a playback mark on once the user has heard the audio before it."""
+        reached = await self.write_playback_mark(frame)
+        if reached is None:
+            await self.push_frame(frame)
+            return
+        task = self.create_task(
+            self._push_playback_mark(frame, reached), name=f"{self}::playback_mark"
+        )
+        self._playback_marks[frame.id] = (frame, task)
+
+    async def _push_playback_mark(self, frame: PlaybackMarkFrame, reached: asyncio.Future[None]):
+        try:
+            await asyncio.wait_for(reached, timeout=PLAYBACK_MARK_TIMEOUT_SECS)
+        except TimeoutError:
+            logger.warning(
+                f"{self} the peer didn't report playing {frame} within "
+                f"{PLAYBACK_MARK_TIMEOUT_SECS}s, pushing it on"
+            )
+        self._playback_marks.pop(frame.id, None)
+        await self.push_frame(frame)
+
     def _supports_native_dtmf(self) -> bool:
         """Override in transport implementations that support native DTMF.
 
@@ -418,6 +473,8 @@ class BaseOutputTransport(FrameProcessor):
             await sender.handle_mixer_control_frame(frame)
         elif isinstance(frame, TTSStoppedFrame):
             await sender.handle_tts_stopped(frame)
+        elif isinstance(frame, PlaybackMarkFrame):
+            await sender.handle_playback_mark(frame)
         elif frame.pts:
             await sender.handle_timed_frame(frame)
         else:
@@ -712,6 +769,18 @@ class BaseOutputTransport(FrameProcessor):
 
             Args:
                 frame: The TTS stopped frame to queue.
+            """
+            await self._enqueue_flushed_audio_buffer()
+            await self._audio_queue.put(frame)
+
+        async def handle_playback_mark(self, frame: PlaybackMarkFrame):
+            """Queue a playback mark behind all the audio received before it.
+
+            Like a TTSStoppedFrame, it first flushes the buffered audio that
+            doesn't fill a chunk, so that audio is written before the mark.
+
+            Args:
+                frame: The playback mark to queue.
             """
             await self._enqueue_flushed_audio_buffer()
             await self._audio_queue.put(frame)
@@ -1039,6 +1108,11 @@ class BaseOutputTransport(FrameProcessor):
 
                 # Skip frames with no audio data (e.g. filter is buffering).
                 if isinstance(frame, OutputAudioRawFrame) and not frame.audio:
+                    continue
+
+                # The transport pushes a mark on once the user has heard what's before it.
+                if isinstance(frame, PlaybackMarkFrame):
+                    await self._transport._handle_playback_mark(frame)
                     continue
 
                 # Handle frame.

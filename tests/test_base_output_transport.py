@@ -11,7 +11,7 @@ import hashlib
 import io
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import numpy as np
 from loguru import logger
@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
+    PlaybackMarkFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -944,5 +945,129 @@ class TestBaseOutputTransportVolume(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.1)
 
             self.assertEqual(self._written(transport), [32767])
+        finally:
+            await transport.cancel(CancelFrame())
+
+
+async def _until(condition, timeout: float = 1):
+    """Wait until ``condition()`` holds."""
+
+    async def wait():
+        while not condition():
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(wait(), timeout)
+
+
+def _pushed_marks(transport) -> list[PlaybackMarkFrame]:
+    return [
+        call.args[0]
+        for call in transport.push_frame.call_args_list
+        if isinstance(call.args[0], PlaybackMarkFrame)
+    ]
+
+
+class TestBaseOutputTransportPlaybackMarks(unittest.IsolatedAsyncioTestCase):
+    """A playback mark goes on once the user has heard the audio before it."""
+
+    async def test_mark_goes_on_after_the_audio_before_it_is_written(self):
+        transport = await _make_transport()
+        events: list = []
+
+        async def write(frame):
+            events.append(len(frame.audio))
+            return True
+
+        async def push(frame, *args):
+            if isinstance(frame, PlaybackMarkFrame):
+                events.append(frame)
+
+        transport.write_audio_frame.side_effect = write
+        transport.push_frame.side_effect = push
+        try:
+            sender = transport._media_senders[None]
+            chunk = sender.audio_chunk_size
+            # A chunk and a half: the half is still buffered when the mark arrives.
+            audio = OutputAudioRawFrame(b"\x01" * (chunk * 3 // 2), sender.sample_rate, 1)
+            mark = PlaybackMarkFrame()
+            await transport.process_frame(audio, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(mark, FrameDirection.DOWNSTREAM)
+
+            await _until(lambda: mark in events)
+            # The buffered half is padded to a chunk and written before the mark.
+            self.assertEqual(events, [chunk, chunk, mark])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_mark_waits_for_the_peer_to_report_playback(self):
+        transport = await _make_transport()
+        reached = asyncio.get_running_loop().create_future()
+        transport.write_playback_mark = AsyncMock(return_value=reached)
+        try:
+            mark = PlaybackMarkFrame()
+            await transport.process_frame(mark, FrameDirection.DOWNSTREAM)
+            await _until(lambda: transport.write_playback_mark.await_count == 1)
+            await asyncio.sleep(0.05)
+            self.assertEqual(_pushed_marks(transport), [])
+
+            reached.set_result(None)
+
+            await _until(lambda: _pushed_marks(transport) == [mark])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_interruption_keeps_a_queued_mark(self):
+        transport = await _make_transport()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def write(frame):
+            entered.set()
+            await release.wait()
+            return True
+
+        transport.write_audio_frame.side_effect = write
+        try:
+            sender = transport._media_senders[None]
+            audio = TTSAudioRawFrame(b"\x01" * sender.audio_chunk_size * 2, sender.sample_rate, 1)
+            mark = PlaybackMarkFrame()
+            await transport.process_frame(audio, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(mark, FrameDirection.DOWNSTREAM)
+            await asyncio.wait_for(entered.wait(), timeout=1)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            release.set()
+
+            await _until(lambda: _pushed_marks(transport) == [mark])
+            # The interrupted audio's second chunk was dropped, the mark wasn't.
+            self.assertEqual(transport.write_audio_frame.await_count, 1)
+        finally:
+            release.set()
+            await transport.cancel(CancelFrame())
+
+    async def test_end_frame_lets_marks_still_waiting_go_first(self):
+        transport = await _make_transport()
+        never = asyncio.get_running_loop().create_future()
+        transport.write_playback_mark = AsyncMock(return_value=never)
+        mark = PlaybackMarkFrame()
+        await transport.process_frame(mark, FrameDirection.DOWNSTREAM)
+        await _until(lambda: transport.write_playback_mark.await_count == 1)
+
+        await transport.process_frame(EndFrame(), FrameDirection.DOWNSTREAM)
+
+        pushed = [call.args[0] for call in transport.push_frame.call_args_list]
+        end = next(i for i, frame in enumerate(pushed) if isinstance(frame, EndFrame))
+        self.assertLess(pushed.index(mark), end)
+
+    async def test_mark_the_peer_never_reports_goes_on_after_a_while(self):
+        transport = await _make_transport()
+        never = asyncio.get_running_loop().create_future()
+        transport.write_playback_mark = AsyncMock(return_value=never)
+        try:
+            with patch("pipecat.transports.base_output.PLAYBACK_MARK_TIMEOUT_SECS", 0.05):
+                mark = PlaybackMarkFrame()
+                await transport.process_frame(mark, FrameDirection.DOWNSTREAM)
+
+                await _until(lambda: _pushed_marks(transport) == [mark])
         finally:
             await transport.cancel(CancelFrame())
