@@ -1,0 +1,1 @@
+- Added `DeepgramFluxSTTService.force_end_turn()`, which ends the user's turn without waiting for Flux to detect it, and `DeepgramSTTService.finalize()`, which transcribes all the audio sent so far without waiting for a pause.

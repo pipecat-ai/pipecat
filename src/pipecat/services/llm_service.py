@@ -40,6 +40,8 @@ from pipecat.expressive.perception import PerceptionCapabilities
 from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
     CancelFrame,
+    ClientFunctionCallRequestFrame,
+    ClientFunctionCallResultFrame,
     EndFrame,
     ErrorFrame,
     ExpressionMetadataFrame,
@@ -63,6 +65,7 @@ from pipecat.frames.frames import (
     PerceptionMetadataFrame,
     StartFrame,
     TTSMetadataFrame,
+    UserStoppedSpeakingFrame,
     UserTurnResponseCancelFrame,
 )
 from pipecat.processors.aggregators.async_tool_messages import ASYNC_TOOL_INSTRUCTIONS
@@ -255,6 +258,8 @@ class FunctionCallRegistryItem:
             from an advertised tool set (listed in an ``LLMContext`` or
             ``LLMSetToolsFrame``). False for every explicitly registered handler —
             direct or non-direct — and for the catch-all and built-in handlers.
+        speculative: Whether the call may run before the user's turn is
+            confirmed, during an inference started from an eager end of turn.
     """
 
     function_name: str | None
@@ -263,6 +268,7 @@ class FunctionCallRegistryItem:
     timeout_secs: float | None = None
     cancellable_by_llm: bool = False
     auto_registered: bool = False
+    speculative: bool = False
 
 
 @dataclass
@@ -505,6 +511,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # again or stops being advertised (see _sync_registered_tool_handlers).
         self._explicitly_unregistered_function_names: set[str | None] = set()
         self._function_call_tasks: dict[asyncio.Task | None, FunctionCallRunnerItem] = {}
+        # Client function calls waiting for the client's answer, by tool call id.
+        self._client_function_calls: dict[str, asyncio.Future] = {}
+        # Speculative calls run for an eager end of turn that isn't confirmed yet.
+        self._speculative_tool_call_ids: set[str] = set()
         self._sequential_runner_task: asyncio.Task | None = None
         self._skip_tts: bool | None = None
         self._summary_task: asyncio.Task | None = None
@@ -1027,6 +1037,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 await self._update_settings(delta)
         elif isinstance(frame, LLMContextSummaryRequestFrame):
             await self._handle_summary_request(frame)
+        elif isinstance(frame, ClientFunctionCallResultFrame):
+            self._handle_client_function_call_result(frame)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            # The turn is confirmed, so its speculative calls are ordinary ones.
+            self._speculative_tool_call_ids.clear()
         elif isinstance(frame, TTSMetadataFrame) and self._expressive:
             self._handle_tts_metadata(frame)
         elif isinstance(frame, PerceptionMetadataFrame) and self._expressive:
@@ -1117,6 +1132,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         logger.debug(f"{self}: eager end of turn withdrawn, stopping the speculative inference")
         await self._start_interruption()
         await self.stop_all_metrics()
+        if self._speculative_tool_call_ids:
+            withdrawn = self._speculative_tool_call_ids
+            self._speculative_tool_call_ids = set()
+            await self._cancel_function_call_tasks(
+                lambda item: item.tool_call_id in withdrawn, reason="eager end of turn withdrawn"
+            )
 
     async def _handle_summary_request(self, frame: LLMContextSummaryRequestFrame):
         """Handle context summarization request from aggregator.
@@ -1242,6 +1263,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         cancel_on_interruption: bool | None = None,
         timeout_secs: float | None = None,
         cancellable_by_llm: bool | None = None,
+        speculative: bool = False,
     ):
         """Register a function handler for LLM function calls.
 
@@ -1280,6 +1302,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 until it returns, so there is no moment at which it could ask for
                 the call to stop. Defaults to ``None`` (fall back to the
                 ``@tool_options`` decorator value, then to False).
+            speculative: Whether the call may run before the user's turn is
+                confirmed. An inference started from an eager end of turn is
+                speculative; by default one that calls a tool is withdrawn, and
+                the tool runs from the inference that follows the confirmed
+                turn. A speculative tool runs at once instead, saving that wait,
+                and is cancelled if the eager end of turn is withdrawn. Use it
+                for tools that are safe to run on a guess, such as lookups.
+                Defaults to False.
         """
         if function_name in self._cancel_tool_names:
             raise ValueError(
@@ -1308,6 +1338,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             cancellable_by_llm=self._resolve_cancellable_by_llm(
                 function_name, cancellable_by_llm, handler, resolved_cancel_on_interruption
             ),
+            speculative=speculative,
         )
         self._record_tool_cleanup(handler)
 
@@ -1338,6 +1369,80 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 await cleanup()
             except Exception as e:
                 logger.error(f"{self} error running tool cleanup {cleanup}: {e}")
+
+    def register_client_function(
+        self,
+        function_name: str | None,
+        *,
+        cancel_on_interruption: bool | None = None,
+        timeout_secs: float | None = None,
+        speculative: bool = False,
+    ):
+        """Register a function that the client executes.
+
+        Use this when the state a tool acts on lives in the client — a game, a
+        native app, a page — rather than somewhere the server can reach. The
+        tool is still advertised to the LLM the usual way (in the
+        ``LLMContext``), but instead of running a handler here, the service
+        pushes a :class:`~pipecat.frames.frames.ClientFunctionCallRequestFrame`
+        downstream and waits for the matching
+        :class:`~pipecat.frames.frames.ClientFunctionCallResultFrame`. Delivering
+        the request and turning the client's answer into a result frame is the
+        job of whatever speaks the client's protocol, typically a serializer
+        and the processor that goes with it.
+
+        A client function behaves like any other registered function: a
+        synchronous call holds the LLM until the client answers, interruptions
+        and timeouts cancel it, and a result arriving after the call settled is
+        ignored.
+
+        Args:
+            function_name: The name of the function. Use None for a catch-all
+                that sends every function call without its own handler to the
+                client.
+            cancel_on_interruption: Whether an interruption cancels the call.
+                Same meaning as in :meth:`register_function`: ``False`` makes
+                the call asynchronous. Defaults to ``None`` (True).
+            timeout_secs: How long to wait for the client, overriding the
+                global ``function_call_timeout_secs``. Defaults to ``None``.
+            speculative: Whether the call may be sent before the user's turn
+                is confirmed. Same meaning as in :meth:`register_function`.
+                Defaults to False.
+        """
+        self.register_function(
+            function_name,
+            self._run_client_function_call,
+            cancel_on_interruption=cancel_on_interruption,
+            timeout_secs=timeout_secs,
+            speculative=speculative,
+        )
+
+    async def _run_client_function_call(self, params: FunctionCallParams):
+        """Handler for client functions: ask the client and report its answer."""
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._client_function_calls[params.tool_call_id] = future
+        try:
+            await self.push_frame(
+                ClientFunctionCallRequestFrame(
+                    function_name=params.function_name,
+                    tool_call_id=params.tool_call_id,
+                    arguments=params.arguments,
+                )
+            )
+            result = await future
+        finally:
+            self._client_function_calls.pop(params.tool_call_id, None)
+        await params.result_callback(result)
+
+    def _handle_client_function_call_result(self, frame: ClientFunctionCallResultFrame):
+        future = self._client_function_calls.get(frame.tool_call_id)
+        if future is None or future.done():
+            logger.debug(
+                f"{self} Ignoring client result for function call [{frame.tool_call_id}]:"
+                " no call is waiting for it (it may have timed out or been cancelled)."
+            )
+            return
+        future.set_result(frame.result)
 
     @deprecated(
         "`LLMService.register_direct_function` is deprecated since 1.4.0 and will be removed in "
@@ -1857,6 +1962,16 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             item = self._functions.get(None)
         return item is not None and not item.cancel_on_interruption
 
+    def _function_is_speculative(self, function_name: str) -> bool:
+        """Whether the named function may run before the user's turn is confirmed.
+
+        Uses the same lookup as :meth:`_function_is_async`.
+        """
+        item = self._functions.get(function_name)
+        if item is None:
+            item = self._functions.get(None)
+        return item is not None and item.speculative
+
     async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
         """Execute a sequence of function calls from the LLM.
 
@@ -1873,14 +1988,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             return
 
         if self._speculation_gate.is_speculating:
-            # Tools run inside the service, so no downstream gate can undo their
-            # side effects if the speculation is discarded. Withdraw it instead;
-            # the inference that follows the committed transcript runs the call.
-            # A turn confirmed before the call was reached leaves nothing
-            # pending, and the call runs as an ordinary one.
-            logger.debug(f"{self}: speculative inference wants a tool call, cancelling it")
-            await self.broadcast_frame(UserTurnResponseCancelFrame)
-            return
+            if not all(self._function_is_speculative(fc.function_name) for fc in function_calls):
+                # Tools run inside the service, so no downstream gate can undo
+                # their side effects if the speculation is discarded. Withdraw it
+                # instead; the inference that follows the committed transcript
+                # runs the call. A turn confirmed before the call was reached
+                # leaves nothing pending, and the call runs as an ordinary one.
+                logger.debug(f"{self}: speculative inference wants a tool call, cancelling it")
+                await self.broadcast_frame(UserTurnResponseCancelFrame)
+                return
+            # Every call may run on a guess; cancel them if it's withdrawn.
+            self._speculative_tool_call_ids.update(fc.tool_call_id for fc in function_calls)
 
         # Exclude the built-in cancel tool — it's an internal mechanism and
         # should not be surfaced to user-facing event handlers or frames.

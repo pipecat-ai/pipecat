@@ -1,0 +1,1 @@
+- Added `on_configure_success` and `on_configure_failure` events to `DeepgramFluxSTTService`, fired when Deepgram answers a mid-stream `Configure` (sent for settings updates such as `keyterm` and the end-of-turn thresholds), so an application can tell when an update has taken effect.
