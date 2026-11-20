@@ -38,7 +38,8 @@ from pipecat.services.llm_service import (
 )
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.turns.user_stop.llm_turn_completion.llm_extension import LLMTurnCompletionLLMExtension
+from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 from pipecat.utils.async_tool_cancellation import cancel_tool_name
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.errors import ErrorCategory
@@ -1092,13 +1093,14 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         service.append_system_instruction("GUIDE")
 
         # Enabling turn completion composes after the appended guide, once.
-        await service._update_settings(LLMSettings(filter_incomplete_user_turns=True))
+        await service._update_settings(LLMSettings(extensions=[LLMTurnCompletionLLMExtension]))
         composed = service._settings.system_instruction
         self.assertTrue(composed.startswith("APP\n\nGUIDE\n\n"))
         self.assertEqual(composed.count("GUIDE"), 1)
 
         # Disabling restores base + guide (without the turn instructions).
-        await service._update_settings(LLMSettings(filter_incomplete_user_turns=False))
+        with self.assertWarns(DeprecationWarning):
+            await service._update_settings(LLMSettings(filter_incomplete_user_turns=False))
         self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
 
     async def test_runtime_system_instruction_update_preserves_appended(self):
@@ -1437,15 +1439,26 @@ class TestTurnCompletionSettingsDeprecation(unittest.IsolatedAsyncioTestCase):
             MockLLMService(filter_incomplete_user_turns=False, user_turn_completion_config=None)
 
     async def test_strategy_settings_update_is_silent(self):
-        """The strategy's own update is how the setting is meant to arrive."""
+        """The strategy's own update, which installs the extension, is how it is meant to arrive."""
         service = MockLLMService()
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
             await service.process_frame(
+                LLMUpdateSettingsFrame(
+                    delta=LLMSettings(extensions=[LLMTurnCompletionLLMExtension])
+                ),
+                FrameDirection.DOWNSTREAM,
+            )
+        self.assertIsInstance(service._extensions[0], LLMTurnCompletionLLMExtension)
+
+    async def test_the_flag_in_a_settings_update_warns_and_installs_the_extension(self):
+        service = MockLLMService()
+        with self.assertWarns(DeprecationWarning):
+            await service.process_frame(
                 LLMUpdateSettingsFrame(delta=LLMSettings(filter_incomplete_user_turns=True)),
                 FrameDirection.DOWNSTREAM,
             )
-        self.assertTrue(service._filter_incomplete_user_turns)
+        self.assertIsInstance(service._extensions[0], LLMTurnCompletionLLMExtension)
 
 
 class TestToolHandlerErrorClassification(unittest.IsolatedAsyncioTestCase):
