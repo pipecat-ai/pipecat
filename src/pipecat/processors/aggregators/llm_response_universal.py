@@ -163,10 +163,10 @@ class LLMUserAggregatorParams:
         user_mute_strategies: List of user mute strategies.
         user_turn_stop_timeout: Seconds without user activity before an open user
             turn is ended, unless a stop strategy has a decision scheduled.
-        user_idle_timeout: Timeout in seconds for detecting user idle state.
-            The aggregator will emit an `on_user_turn_idle` event when the user
-            has been idle (not speaking) for this duration. Set to 0 to disable
-            idle detection.
+        user_idle_timeout: Seconds of quiet, while no background work is in
+            progress (see `user_waiting_timeout`), before the aggregator emits
+            an `on_user_turn_idle` event: it is the user's turn, and they have
+            said nothing. Set to 0 to disable idle detection.
         user_waiting_timeout: Seconds of quiet, while background work is in
             progress (e.g. an asynchronous function call, or a task delegated
             to an `LLMWithBackend` backend), before the aggregator emits an
@@ -661,8 +661,9 @@ class LLMUserAggregator(LLMContextAggregator):
     - on_user_turn_stopped: Called when the user turn ends
     - on_user_turn_stop_timeout: Called when the stop timeout ends a user turn its
       stop strategies didn't end.
-    - on_user_turn_idle: Called when the user has been idle for the configured timeout.
-      A ``UserTurnIdleFrame`` is broadcast with it.
+    - on_user_turn_idle: Called when the user has been idle, with no background
+      work in progress, for the configured timeout. A ``UserTurnIdleFrame`` is
+      broadcast with it.
     - on_user_waiting: Called when the user has waited quietly on background
       work for the configured timeout. A ``UserWaitingFrame`` is broadcast with it.
     - on_user_turn_message_added: Called when a user message is written to context.

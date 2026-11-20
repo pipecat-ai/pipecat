@@ -70,7 +70,8 @@ class UserIdleController(BaseObject):
 
     Event handlers available:
 
-    - on_user_turn_idle: Emitted when the user has been idle for the timeout period.
+    - on_user_turn_idle: Emitted when the user has been idle, with no background
+      work in progress, for the timeout period.
     - on_user_waiting: Emitted when the user has waited quietly on background
       work for the timeout period.
 

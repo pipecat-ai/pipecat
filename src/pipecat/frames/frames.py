@@ -2996,7 +2996,9 @@ class UserTurnIdleFrame(SystemFrame):
     Broadcast by the user aggregator (or a ``UserTurnProcessor``) when its
     :class:`~pipecat.turns.user_idle_controller.UserIdleController` reports
     the user idle, together with its ``on_user_turn_idle`` event, so a
-    processor can act on the silence too.
+    processor can act on the silence too. The user is idle while no background
+    work is in progress; with background work in progress they are waiting,
+    which a :class:`UserWaitingFrame` reports.
 
     Parameters:
         quiet_secs: How long nothing has been said, in seconds.
@@ -3028,8 +3030,8 @@ class UserIdleTimeoutUpdateFrame(SystemFrame):
 
     Setting timeout to 0 disables idle detection. Setting a positive value
     enables it. Updates apply immediately: a running idle timer restarts with
-    the new duration, and if the bot is waiting for the user to speak the
-    timer is armed right away.
+    the new duration, and if the bot is waiting for the user to speak, with
+    no background work in progress, the timer is armed right away.
 
     Parameters:
         timeout: The new idle timeout in seconds. 0 disables idle detection.

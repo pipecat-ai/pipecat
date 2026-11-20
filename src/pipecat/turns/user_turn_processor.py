@@ -56,8 +56,9 @@ class UserTurnProcessor(FrameProcessor):
       the bot and whether that inference was triggered.
     - on_user_turn_stop_timeout: Emitted when the stop timeout ends a user turn
       its stop strategies didn't end.
-    - on_user_turn_idle: Emitted when the user has been idle for the configured timeout.
-      A ``UserTurnIdleFrame`` is broadcast with it.
+    - on_user_turn_idle: Emitted when the user has been idle, with no background
+      work in progress, for the configured timeout. A ``UserTurnIdleFrame`` is
+      broadcast with it.
     - on_user_waiting: Emitted when the user has waited quietly on background
       work for the configured timeout. A ``UserWaitingFrame`` is broadcast with it.
 
@@ -107,10 +108,10 @@ class UserTurnProcessor(FrameProcessor):
                 :class:`~pipecat.turns.user_turn_strategies.UserTurnStrategiesParams`.
             user_turn_stop_timeout: Seconds without user activity before an open
                 user turn is ended, unless a stop strategy has a decision scheduled.
-            user_idle_timeout: Timeout in seconds for detecting user idle state.
-                The processor will emit an `on_user_turn_idle` event when the user
-                has been idle (not speaking) for this duration. Set to 0 to disable
-                idle detection.
+            user_idle_timeout: Seconds of quiet, while no background work is in
+                progress (see `user_waiting_timeout`), before the processor emits
+                an `on_user_turn_idle` event: it is the user's turn, and they have
+                said nothing. Set to 0 to disable idle detection.
             user_waiting_timeout: Seconds of quiet, while background work is in
                 progress (e.g. an asynchronous function call, or a task delegated
                 to an `LLMWithBackend` backend), before the processor emits an
