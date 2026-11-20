@@ -25,7 +25,6 @@ class UIStateLLMExtension(BaseLLMExtension):
     worker installs the extension on its LLM and renders the snapshot.
     """
 
-
     def __init__(self, *, prompt_guide: str | None, render: Callable[[], str] | None, **kwargs):
         """Initialize the extension.
 
