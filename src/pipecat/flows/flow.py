@@ -19,6 +19,10 @@ the configured-flow contract: a tool returns ``(result, TRANSITION_IN_YAML)``
 and the config decides the next node. ``{{ key }}`` placeholders in prompts
 are left in place; :class:`~pipecat.flows.FlowManager` fills them from its
 state when it enters the node.
+
+A config's subflows are expanded here: each include's nodes are built under
+the name ``<include>.<node>``, and a transition into an include, or a
+``return`` out of one, is wired to the node it leads to.
 """
 
 import inspect
@@ -28,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from pipecat.flows.config import case_key
+from pipecat.flows.config import RETURN, case_key
 from pipecat.flows.exceptions import FlowError, FlowProblem, FlowReferenceError
 from pipecat.flows.types import (
     NO_RESPONSE,
@@ -92,6 +96,10 @@ class Flow:
         self._nodes: dict[str, NodeConfig] = {
             name: self._build_node(name, node) for name, node in config.nodes.items()
         }
+        for include_id, include in config.includes.items():
+            for name, node in config.flows[include.flow].nodes.items():
+                expanded = f"{include_id}.{name}"
+                self._nodes[expanded] = self._build_node(expanded, node, include=include_id)
         self._global_functions = [
             schema
             for ref in config.global_functions
@@ -110,7 +118,7 @@ class Flow:
     @property
     def initial_node(self) -> NodeConfig:
         """The node config the flow starts in."""
-        return self._nodes[self._config.initial_node]
+        return self._nodes[self._resolve(self._config.initial_node)]
 
     @property
     def global_functions(self) -> list[FlowsFunctionSchema | FlowsDirectFunction]:
@@ -124,7 +132,8 @@ class Flow:
         """The node config for ``name``.
 
         Args:
-            name: A node name from the config.
+            name: A node name from the config, or ``<include>.<node>`` for a
+                node of a subflow.
 
         Raises:
             ~pipecat.flows.FlowError: If the config has no such node.
@@ -136,7 +145,10 @@ class Flow:
 
     # Building
 
-    def _build_node(self, name: str, node: "FlowConfig.Node") -> NodeConfig:
+    def _build_node(
+        self, name: str, node: "FlowConfig.Node", *, include: str | None = None
+    ) -> NodeConfig:
+        """Build one node; ``include`` is the include it belongs to, if any."""
         where = f"node '{name}'"
         config: NodeConfig = {
             "name": name,
@@ -149,7 +161,7 @@ class Flow:
             config["functions"] = [
                 schema
                 for ref in node.functions
-                if (schema := self._build_function(ref, where=where, node=name))
+                if (schema := self._build_function(ref, where=where, node=name, include=include))
             ]
         if node.pre_actions:
             config["pre_actions"] = [
@@ -169,7 +181,12 @@ class Flow:
         return config
 
     def _build_function(
-        self, ref: "FlowConfig.Function", *, where: str, node: str | None
+        self,
+        ref: "FlowConfig.Function",
+        *,
+        where: str,
+        node: str | None,
+        include: str | None = None,
     ) -> FlowsFunctionSchema | None:
         """Build the schema for one function entry, or record why it cannot be built."""
         if ref.transition_only:
@@ -178,7 +195,7 @@ class Flow:
                 description=ref.description or "",
                 properties={},
                 required=[],
-                handler=self._make_transition_handler(ref),
+                handler=self._make_transition_handler(ref, include),
                 metadata=ref.metadata,
             )
         function = self._lookup(ref.name, kind="tool", where=where, node=node)
@@ -205,7 +222,7 @@ class Flow:
             description=schema.description,
             properties=schema.properties,
             required=schema.required,
-            handler=self._make_handler(ref, wrapper, where),
+            handler=self._make_handler(ref, wrapper, where, include),
             cancel_on_interruption=wrapper.cancel_on_interruption,
             timeout_secs=wrapper.timeout_secs,
             metadata=ref.metadata,
@@ -274,8 +291,28 @@ class Flow:
 
     # Calling
 
+    def _resolve(self, target: str, include: str | None = None) -> str:
+        """The name of the built node a transition target leads to.
+
+        Args:
+            target: A target as the config writes it.
+            include: The include whose subflow the target is written in, or
+                None for the config's own nodes and global functions.
+        """
+        if include is not None:
+            if target != RETURN:
+                return f"{include}.{target}"
+            target = self._config.includes[include].return_to
+        if entered := self._config.includes.get(target):
+            return f"{target}.{self._config.flows[entered.flow].initial_node}"
+        return target
+
     def _make_handler(
-        self, ref: "FlowConfig.Function", wrapper: FlowsDirectFunctionWrapper, where: str
+        self,
+        ref: "FlowConfig.Function",
+        wrapper: FlowsDirectFunctionWrapper,
+        where: str,
+        include: str | None,
     ) -> Callable[[FlowArgs, "FlowManager"], Any]:
         async def handler(
             args: FlowArgs, flow_manager: "FlowManager"
@@ -284,28 +321,28 @@ class Flow:
             result, next_node = _check_contract(response, ref.name, where)
             if next_node is NO_RESPONSE:
                 return result, NO_RESPONSE
-            return result, self._destination(ref, result, where)
+            return result, self._destination(ref, result, where, include)
 
         return handler
 
     def _make_transition_handler(
-        self, ref: "FlowConfig.Function"
+        self, ref: "FlowConfig.Function", include: str | None
     ) -> Callable[[FlowArgs, "FlowManager"], Any]:
         async def handler(
             args: FlowArgs, flow_manager: "FlowManager"
         ) -> ConsolidatedFunctionResult:
-            return None, self._nodes[ref.transition_to]  # type: ignore[index]
+            return None, self._nodes[self._resolve(ref.transition_to, include)]  # type: ignore[arg-type]
 
         return handler
 
     def _destination(
-        self, ref: "FlowConfig.Function", result: Any, where: str
+        self, ref: "FlowConfig.Function", result: Any, where: str, include: str | None
     ) -> NodeConfig | None:
         target = ref.transition_to
         if target is None:
             return None
         if isinstance(target, str):
-            return self._nodes[target]
+            return self._nodes[self._resolve(target, include)]
 
         if not isinstance(result, Mapping) or target.field not in result:
             raise FlowError(
@@ -316,7 +353,7 @@ class Flow:
         if node_name is None:
             logger.debug(f"{where} tool '{ref.name}': no branch case matched, staying")
             return None
-        return self._nodes[node_name]
+        return self._nodes[self._resolve(node_name, include)]
 
 
 def _check_contract(response: Any, name: str, where: str) -> tuple[Any, Any]:

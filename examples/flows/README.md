@@ -45,6 +45,7 @@ The Python examples support multiple LLM providers (OpenAI, Anthropic, Google Ge
 - [`yaml/patient_intake/`](./yaml/patient_intake) — data-capture tools, a branch on a boolean result, and session facts such as the practice and patient names read from state
 - [`yaml/insurance_quote/`](./yaml/insurance_quote) — prompts built from computed values: the handlers store each quote in state, the results node reads it with `{{ quote.monthly_premium }}`, and adjusting the coverage re-enters the node with the new figures
 - [`yaml/podcast_interview/`](./yaml/podcast_interview) — a node that transitions back to itself
+- [`yaml/clinic_appointments/`](./yaml/clinic_appointments) — a subflow: the steps that verify a caller are written once in `verification.yaml` and included twice, returning to the booking node from one include and to the cancelling node from the other
 
 ## Flows in Python
 
