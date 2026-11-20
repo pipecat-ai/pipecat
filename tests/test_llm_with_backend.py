@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
+    FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -677,6 +678,35 @@ async def test_client_tracing_sends_each_exchange_as_a_server_message():
     ]
     assert traced[0]["backend"] == "idle" and "weather in seattle?" in traced[0]["text"]
     assert traced[-2]["text"] == "It's 62 and raining." and traced[-2]["spoken"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_delegate_call_is_announced_when_it_starts():
+    """As a call of the application's own tools is, to the app and to the pipeline."""
+    frontend = _DelegatingFrontend()
+    service = LLMWithBackend(
+        frontend=frontend,
+        backend=BackendLLMWorker(
+            name="backend", llm=_ScriptedLLM([[("text", ">> Done.")]]), context=LLMContext()
+        ),
+    )
+    announced = []
+
+    @frontend.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        announced.extend(call.function_name for call in function_calls)
+
+    down, _ = await run_test(
+        service,
+        frames_to_send=[
+            LLMContextFrame(LLMContext([{"role": "user", "content": "weather in seattle?"}])),
+            SleepFrame(sleep=1.0),
+        ],
+    )
+
+    (started,) = [f for f in down if isinstance(f, FunctionCallsStartedFrame)]
+    assert [call.function_name for call in started.function_calls] == ["delegate"]
+    assert announced == ["delegate"]
 
 
 @pytest.mark.asyncio
