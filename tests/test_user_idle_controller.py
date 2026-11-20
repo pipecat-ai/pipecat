@@ -213,7 +213,7 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
         # Function call starts shortly after, cancels the timer
         await asyncio.sleep(USER_IDLE_TIMEOUT * 0.3)
         await controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
 
         # Wait longer than timeout — should not fire
@@ -241,7 +241,7 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         # LLM emits function call and "let me check" concurrently
         await controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
         await controller.process_frame(BotStartedSpeakingFrame())
         await controller.process_frame(BotStoppedSpeakingFrame())
@@ -286,7 +286,7 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         # Async tool starts; bot acknowledges it and stops speaking
         await controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
         await controller.process_frame(BotStartedSpeakingFrame())
         await controller.process_frame(BotStoppedSpeakingFrame())
@@ -545,7 +545,7 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
         await controller.process_frame(BotStartedSpeakingFrame())
         await controller.process_frame(BotStoppedSpeakingFrame())
         await controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
         await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=USER_IDLE_TIMEOUT))
 
@@ -601,6 +601,36 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         await controller.cleanup()
 
+    async def test_a_result_for_a_call_not_seen_starting_settles_nothing(self):
+        """A built-in tool whose calls are not announced still reports a result."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(frame_processor_setup(self.task_manager))
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
+        )
+        await controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="unannounced", tool_call_id="456", arguments={}, result="ok"
+            )
+        )
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(BotStoppedSpeakingFrame())
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertTrue(controller.function_calls_in_progress)
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
     async def test_wait_for_user_during_function_call_does_not_arm(self):
         """Test that wait_for_user does nothing while a function call is pending."""
         controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
@@ -614,7 +644,7 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
             idle_triggered = True
 
         await controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
         await controller.wait_for_user()
 
@@ -686,7 +716,7 @@ class TestUserWaiting(unittest.IsolatedAsyncioTestCase):
     async def test_an_open_async_call_counts_as_work_in_flight(self):
         """The call's work frames bracket it; its pending result alone suppresses idle."""
         await self.controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
         await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="call_1"))
         await self.controller.process_frame(BotStartedSpeakingFrame())
@@ -698,7 +728,7 @@ class TestUserWaiting(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_pending_synchronous_call_starts_no_timer(self):
         await self.controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
         await self.controller.process_frame(BotStoppedSpeakingFrame())
         await self._let_timers_run()
@@ -850,7 +880,7 @@ class TestUserWaiting(unittest.IsolatedAsyncioTestCase):
         await self.controller.process_frame(BotStartedSpeakingFrame())
         await self.controller.process_frame(BotStoppedSpeakingFrame())
         await self.controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
         await self.controller.process_frame(
             FunctionCallResultFrame(
@@ -864,7 +894,7 @@ class TestUserWaiting(unittest.IsolatedAsyncioTestCase):
     async def test_a_call_settling_while_the_bot_speaks_starts_no_timer(self):
         await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
         await self.controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
         await self.controller.process_frame(BotStartedSpeakingFrame())
         await self.controller.process_frame(
@@ -898,7 +928,7 @@ class TestUserWaiting(unittest.IsolatedAsyncioTestCase):
     async def test_wait_for_user_during_an_async_function_call_starts_the_waiting_timer(self):
         """An async call stays pending while it runs as background work."""
         await self.controller.process_frame(
-            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
         await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
         await self.controller.process_frame(BotStartedSpeakingFrame())
