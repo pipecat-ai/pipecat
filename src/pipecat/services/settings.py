@@ -290,6 +290,11 @@ class VisionSettings(ServiceSettings):
     """
 
 
+_SERVICE_HANDLED_KEY = "service_handled"
+SERVICE_HANDLED: Mapping[str, Any] = {_SERVICE_HANDLED_KEY: True}
+"""Field metadata marking a setting the service acts on itself, never sent to the provider."""
+
+
 @dataclass
 class LLMSettings(ServiceSettings):
     """Runtime-updatable settings for LLM services.
@@ -299,7 +304,9 @@ class LLMSettings(ServiceSettings):
     These fields are common across LLM providers.  Not every provider supports
     every field; in store mode, set unsupported fields to ``None`` (e.g. a
     service that doesn't support ``seed`` should initialize it as
-    ``seed=None``).
+    ``seed=None``). The fields the service acts on itself, which the provider
+    never sees, carry ``SERVICE_HANDLED`` metadata and are listed by
+    :meth:`service_handled_fields`.
 
     Parameters:
         model: LLM model identifier.
@@ -346,11 +353,24 @@ class LLMSettings(ServiceSettings):
     frequency_penalty: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     presence_penalty: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     seed: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    filter_incomplete_user_turns: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    user_turn_completion_config: UserTurnCompletionConfig | None | NotGiven = field(
-        default_factory=lambda: NOT_GIVEN
+    filter_incomplete_user_turns: bool | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN, metadata=SERVICE_HANDLED
     )
-    use_provider_thinking_default: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    user_turn_completion_config: UserTurnCompletionConfig | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN, metadata=SERVICE_HANDLED
+    )
+    use_provider_thinking_default: bool | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN, metadata=SERVICE_HANDLED
+    )
+
+    @classmethod
+    def service_handled_fields(cls) -> frozenset[str]:
+        """The fields the LLM service acts on itself, never sent to the provider.
+
+        A service that checks its settings against what its provider accepts
+        leaves these to the base service.
+        """
+        return frozenset(f.name for f in fields(cls) if f.metadata.get(_SERVICE_HANDLED_KEY))
 
 
 @dataclass

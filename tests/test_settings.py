@@ -252,6 +252,13 @@ class TestLLMSettings:
         s = LLMSettings(temperature=0.7, seed=42)
         assert s.given_fields() == {"temperature": 0.7, "seed": 42}
 
+    def test_service_handled_fields(self):
+        assert LLMSettings.service_handled_fields() == {
+            "filter_incomplete_user_turns",
+            "user_turn_completion_config",
+            "use_provider_thinking_default",
+        }
+
 
 # ---------------------------------------------------------------------------
 # TTSSettings specifics
