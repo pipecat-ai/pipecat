@@ -435,17 +435,22 @@ class LLMMarkerResponseFrame(DataFrame):
 
     Pushed when the response ends, after the :class:`LLMMarkerFrame` and the
     spoken text: the marker it found, what it meant, and the raw text the LLM
-    produced before anything was held back. A diagnostic, for consumers that
-    check how well the LLM follows the marker protocol; it plays no part in the
-    conversation.
+    produced before anything was held back. A reply dropped as a silent mark
+    is reported as soon as the mark is read, broadcast both ways: the user
+    aggregator starts its idle or waiting timer over on it, and the assistant
+    aggregator records nothing for the reply. A diagnostic otherwise, for
+    consumers that check how well the LLM follows the marker protocol; it
+    plays no part in the conversation.
 
     Parameters:
-        raw: The response text as the LLM produced it, markers included.
+        raw: The response text as the LLM produced it, markers included; for
+            a silent reply, its opening up to the mark.
         marker: The marker found, or ``None`` when the response carried none.
         kind: What the marker meant, in the emitter's own vocabulary, for
             consumers that should not depend on the marker text (which is
             configurable). The turn-completion extension uses ``"complete"``,
-            ``"short"`` and ``"long"``.
+            ``"short"`` and ``"long"``; the wait-reassurance extension uses
+            ``"silent"`` for a reply it dropped as its silent mark.
         markers: Every marker the emitter recognizes, so a consumer can find
             them in ``raw`` without knowing the emitter's configuration.
     """

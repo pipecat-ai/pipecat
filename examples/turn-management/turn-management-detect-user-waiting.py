@@ -38,6 +38,9 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
+# WaitReassuranceLLMExtension (pipecat.turns.wait_reassurance.llm_extension)
+# does this for you, with a prompt that also lets the LLM stay quiet when it
+# has nothing worth saying. This example shows how to handle the wait yourself.
 async def handle_wait(aggregator):
     """Have the bot tell the waiting user that it is still working."""
     message: LLMContextMessage = {

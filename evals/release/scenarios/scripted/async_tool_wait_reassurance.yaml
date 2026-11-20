@@ -1,0 +1,32 @@
+name: async_tool_wait_reassurance
+
+# An async function call long enough for the conversation to go quiet: the bot
+# says a brief word on its own that it is still on it, claiming no result, and
+# the result follows.
+
+scenarios:
+  - name: text
+    judge: !include ../judge_text.yaml
+    turns:
+      - expect:
+          - event: response
+            eval: "the bot opens the conversation in some way (a greeting, an introduction, an offer to help, or a question to get the user started)"
+
+      - user: "What's the weather in San Francisco? Use Fahrenheit."
+        expect:
+          - event: function_call
+            calls:
+              - name: get_current_weather
+
+      # No user turn: the bot's own word while the lookup runs.
+      - expect:
+          - event: response
+            within_ms: 20000
+            eval: "says, unprompted, that it is still working on the weather lookup, in one or two short sentences, giving no temperature or conditions and asking nothing"
+            allow_continue: false
+
+      # No user turn: the result, on its own.
+      - expect:
+          - event: response
+            within_ms: 30000
+            eval: "informs that the weather in San Francisco is 75 degrees"

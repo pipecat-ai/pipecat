@@ -2900,7 +2900,7 @@
             "type": "string"
           },
           "kind": {
-            "description": "What the marker means, such as `complete`, `short` or `long` for the markers that say whether the user's turn was complete, or `null` when it means nothing the server knows.",
+            "description": "What the marker means, such as `complete`, `short` or `long` for the markers that say whether the user's turn was complete, `silent` for a reply dropped as the wait-reassurance silent mark, or `null` when it means nothing the server knows.",
             "type": "string"
           },
           "raw": {
