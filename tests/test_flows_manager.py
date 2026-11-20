@@ -39,6 +39,7 @@ from pipecat.frames.frames import (
     LLMSetToolsFrame,
     LLMUpdateSettingsFrame,
 )
+from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from tests.flows_test_helpers import (
@@ -1592,6 +1593,61 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
             for call in worker.queue_frames.call_args_list
             for frame in call.args[0]
         ]
+
+    @staticmethod
+    def rtvi_messages(worker) -> list[dict]:
+        """The data of every RTVI server message queued on the worker, in order."""
+        return [
+            call.args[0].data
+            for call in worker.queue_frame.call_args_list
+            if isinstance(call.args[0], RTVIServerMessageFrame)
+        ]
+
+    async def test_rtvi_client_is_told_about_each_node(self):
+        booking = self.node("booking", metadata={"step": 2})
+        start = self.node("start", self.edge("begin", booking, metadata={"exit": "begun"}))
+        flow_manager = FlowManager(
+            worker=self.mock_worker, llm=self.llm, context_aggregator=self.context_aggregator
+        )
+
+        await flow_manager.initialize(start)
+        self.assertEqual(
+            self.rtvi_messages(self.mock_worker),
+            [{"type": "flows", "event": "node", "node": "start"}],
+        )
+
+        await self.invoke("begin")
+        self.assertEqual(
+            self.rtvi_messages(self.mock_worker)[1],
+            {
+                "type": "flows",
+                "event": "node",
+                "node": "booking",
+                "previous_node": "start",
+                "function": "begin",
+                "metadata": {"step": 2},
+                "function_metadata": {"exit": "begun"},
+            },
+        )
+
+    async def test_rtvi_message_follows_the_handlers_and_precedes_the_llm_run(self):
+        calls = MagicMock()
+        self.mock_worker.queue_frame.side_effect = lambda frame: calls.frame(type(frame).__name__)
+        self.mock_worker.queue_frames.side_effect = lambda frames: [
+            calls.frame(type(frame).__name__) for frame in frames
+        ]
+        flow_manager = FlowManager(
+            worker=self.mock_worker, llm=self.llm, context_aggregator=self.context_aggregator
+        )
+
+        @flow_manager.event_handler("on_node_entered")
+        async def on_node_entered(flow_manager, event):
+            calls.handler()
+
+        await flow_manager.initialize(self.node("start"))
+
+        order = [c[0] if c[0] == "handler" else c.args[0] for c in calls.mock_calls]
+        self.assertEqual(order[-3:], ["handler", "RTVIServerMessageFrame", "LLMRunFrame"])
 
     async def test_initialize_enters_the_first_node(self):
         flow_manager, entered = self.make_manager()

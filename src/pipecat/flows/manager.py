@@ -73,6 +73,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext, NotGiven
+from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.transports.base_transport import BaseTransport
@@ -118,6 +119,24 @@ class FlowManager(BaseObject):
         @flow_manager.event_handler("on_node_entered")
         async def on_node_entered(flow_manager, entered: NodeEntered):
             ...
+
+    An RTVI client is told about each node too, so it can follow the
+    conversation through the flow. On entering a node the manager sends an
+    RTVI ``server-message`` whose data is::
+
+        {
+            "type": "flows",
+            "event": "node",
+            "node": "find_slot",
+            "previous_node": "start",
+            "function": "begin",
+            "metadata": {"step": 2},
+            "function_metadata": {"exit": "chosen"}
+        }
+
+    ``type``, ``event`` and ``node`` are always present. The other fields are
+    those of :class:`~pipecat.flows.NodeEntered`, and one with no value is
+    left out.
     """
 
     def __init__(
@@ -640,6 +659,16 @@ class FlowManager(BaseObject):
         """
         await self._set_node(get_or_generate_node_name(node_config), node_config)
 
+    @staticmethod
+    def _node_entered_message(entered: NodeEntered) -> dict[str, Any]:
+        """The RTVI server message data that announces a node; see the class docstring."""
+        message: dict[str, Any] = {"type": "flows", "event": "node", "node": entered.node}
+        for field in ("previous_node", "function", "metadata", "function_metadata"):
+            value = getattr(entered, field)
+            if value is not None:
+                message[field] = value
+        return message
+
     def _render_node(self, node_id: str, node_config: NodeConfig) -> NodeConfig:
         r"""Fill ``{{ key }}`` placeholders in the node's prompts from ``self.state``.
 
@@ -702,7 +731,7 @@ class FlowManager(BaseObject):
         3. Register node functions
         4. Update LLM context with messages and tools
         5. Update state (current node and functions)
-        6. Call ``on_node_entered`` handlers
+        6. Call ``on_node_entered`` handlers and tell an RTVI client
         7. Trigger LLM completion with new context
         8. Execute post-actions (if any)
 
@@ -812,6 +841,9 @@ class FlowManager(BaseObject):
             self._current_function_metadata = new_function_metadata
 
             await self._call_event_handler("on_node_entered", entered)
+            await self._worker.queue_frame(
+                RTVIServerMessageFrame(data=self._node_entered_message(entered))
+            )
 
             # Trigger completion with new context
             respond_immediately = node_config.get("respond_immediately", True)

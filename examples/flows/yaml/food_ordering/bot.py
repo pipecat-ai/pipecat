@@ -35,7 +35,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.evals.transport import EvalTransportParams
-from pipecat.flows import Flow, FlowConfig, FlowManager, announce_nodes
+from pipecat.flows import Flow, FlowConfig, FlowManager
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -147,9 +147,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         transport=transport,
         global_functions=flow.global_functions,
     )
-
-    # Tell an RTVI client which node the conversation is on, as it moves.
-    announce_nodes(flow_manager)
 
     # Session facts the prompts refer to as {{ key }}. The manager fills them
     # in from its state when it enters each node.

@@ -25,7 +25,6 @@ from .exceptions import (
 )
 from .flow import Flow
 from .manager import FlowManager
-from .rtvi import announce_nodes
 from .types import (
     NO_RESPONSE,
     TRANSITION_IN_YAML,
@@ -55,7 +54,6 @@ from .types import (
 __all__ = [
     # Flow Manager
     "FlowManager",
-    "announce_nodes",
     # Declarative config
     "FlowConfig",
     "Flow",

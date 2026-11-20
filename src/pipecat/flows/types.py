@@ -202,8 +202,9 @@ class NodeConfig(TypedDict, total=False):
         context_strategy: Strategy for updating context during transitions.
         respond_immediately: Whether to run LLM inference as soon as the node is
             set (default: True).
-        metadata: Data the application attaches to the node. Flows carries it
-            and never acts on it, and it is never sent to the LLM.
+        metadata: JSON-serializable data the application attaches to the
+            node. Flows never acts on it and never sends it to the LLM; an
+            RTVI client receives it when the node is entered.
 
     Example::
 
@@ -388,8 +389,9 @@ class FlowsFunctionSchema:
             interruption occurs. Defaults to False.
         timeout_secs: Optional per-tool timeout in seconds, overriding the global
             ``function_call_timeout_secs``. Defaults to None (use global timeout).
-        metadata: Data the application attaches to the function. Flows carries
-            it and never acts on it, and it is never sent to the LLM.
+        metadata: JSON-serializable data the application attaches to the
+            function. Flows never acts on it and never sends it to the LLM; an
+            RTVI client receives it when the function's call enters a node.
     """
 
     name: str
