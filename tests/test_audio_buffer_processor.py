@@ -149,6 +149,26 @@ class TestAudioBufferProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.processor._user_audio_buffer), 0)
         self.assertEqual(len(self.processor._bot_audio_buffer), 0)
 
+    async def test_stereo_user_audio_is_downmixed_before_recording(self):
+        """Stereo input is recorded as one mono sample per source frame."""
+        captured = {}
+        track_event = asyncio.Event()
+
+        async def on_track_audio_data(
+            _, user: bytes, bot: bytes, sample_rate: int, num_channels: int
+        ):
+            captured["user"] = user
+            track_event.set()
+
+        self.processor.add_event_handler("on_track_audio_data", on_track_audio_data)
+
+        stereo_audio = struct.pack("<hhhh", 1000, 3000, -1000, 1000)
+        frame = InputAudioRawFrame(audio=stereo_audio, sample_rate=16000, num_channels=2)
+        await self.processor.process_frame(frame, FrameDirection.DOWNSTREAM)
+        await asyncio.wait_for(track_event.wait(), timeout=1)
+
+        self.assertEqual(captured["user"], struct.pack("<hh", 2000, 0))
+
     async def test_flush_bot_audio_pads_user_track(self):
         bot_audio = struct.pack("<hh", -800, 400)
         audio_event = asyncio.Event()
