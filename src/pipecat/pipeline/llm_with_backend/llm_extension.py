@@ -27,7 +27,6 @@ class BackendPairingLLMExtension(BaseLLMExtension):
     session the tools feed.
     """
 
-
     def __init__(self, *, instruction: str | None, tools: Sequence[FunctionSchema], **kwargs):
         """Initialize the extension.
 
