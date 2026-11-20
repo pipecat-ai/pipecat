@@ -111,7 +111,8 @@ class UserIdleController(BaseObject):
         self._waiting_for_user: bool = False
         self._bot_speaking: bool = False
         self._user_turn_in_progress: bool = False
-        self._function_calls_in_progress: int = 0
+        # The function calls seen starting and not yet finished, by tool call id.
+        self._function_calls_in_progress: set[str] = set()
         self._background_work: set[str] = set()
         self._timer_task: asyncio.Task | None = None
         # When the conversation last went quiet, while it is.
@@ -137,7 +138,7 @@ class UserIdleController(BaseObject):
     @property
     def function_calls_in_progress(self) -> bool:
         """Whether function calls have started and not finished."""
-        return self._function_calls_in_progress > 0
+        return bool(self._function_calls_in_progress)
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the controller.
@@ -219,16 +220,18 @@ class UserIdleController(BaseObject):
                 await self._start_after_bot_turn()
         elif isinstance(frame, FunctionCallsStartedFrame):
             self._waiting_for_user = False
-            self._function_calls_in_progress += len(frame.function_calls)
+            self._function_calls_in_progress.update(
+                function_call.tool_call_id for function_call in frame.function_calls
+            )
             await self._cancel_timer()
         elif isinstance(frame, FunctionCallResultFrame):
             # An async tool can report progress with intermediate results
             # while it keeps running; only its final result settles the call.
             is_final = frame.properties.is_final if frame.properties else True
             if is_final:
-                await self._settle_function_call()
+                await self._settle_function_call(frame.tool_call_id)
         elif isinstance(frame, FunctionCallCancelFrame):
-            await self._settle_function_call()
+            await self._settle_function_call(frame.tool_call_id)
         elif isinstance(frame, BackgroundWorkStartedFrame):
             first = not self._background_work
             self._background_work.add(frame.work_id)
@@ -242,7 +245,7 @@ class UserIdleController(BaseObject):
             self._background_work.discard(frame.work_id)
             if not self._background_work and self._quiet:
                 # Nothing left to wait on: the user is idle from here.
-                if self._function_calls_in_progress == 0:
+                if not self._function_calls_in_progress:
                     self._waiting_for_user = True
                 await self._start_timer()
 
@@ -271,14 +274,14 @@ class UserIdleController(BaseObject):
         prevents the idle timer from starting while a function call is in
         progress.
         """
-        if self._function_calls_in_progress == 0:
+        if not self._function_calls_in_progress:
             # Track the waiting-for-user window even when the timeout is
             # currently <= 0 (no timer), so a later timeout update can arm
             # the timer without waiting for the next bot turn.
             self._waiting_for_user = True
         await self._start_timer()
 
-    async def _settle_function_call(self):
+    async def _settle_function_call(self, tool_call_id: str):
         """Count a function call as finished.
 
         The call's start cancelled the timer. A reply that speaks first and
@@ -286,9 +289,15 @@ class UserIdleController(BaseObject):
         the conversation quiet with the background work still in flight, so
         the last call settling starts the waiting timer over; the bot speaking
         on the result restarts it as usual.
+
+        A call the controller did not see start settles nothing: a built-in
+        tool whose calls are not announced still reports a result, and a bus
+        bridge can deliver a result a second time.
         """
-        self._function_calls_in_progress = max(0, self._function_calls_in_progress - 1)
-        if self._function_calls_in_progress == 0 and self._background_work and self._quiet:
+        if tool_call_id not in self._function_calls_in_progress:
+            return
+        self._function_calls_in_progress.remove(tool_call_id)
+        if not self._function_calls_in_progress and self._background_work and self._quiet:
             await self._start_waiting_timer()
 
     @property
@@ -308,7 +317,7 @@ class UserIdleController(BaseObject):
         await self._cancel_timer()
         if self._background_work:
             await self._start_waiting_timer()
-        elif self._function_calls_in_progress == 0:
+        elif not self._function_calls_in_progress:
             await self._start_idle_timer()
 
     async def _start_idle_timer(self):
