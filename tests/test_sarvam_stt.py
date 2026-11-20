@@ -369,9 +369,20 @@ def test_default_url_uses_realtime_contract_params():
     assert query["endpointing"] == ["vad"]
     assert query["encoding"] == ["linear16"]
     assert query["sample_rate"] == ["16000"]
-    assert query["model"] == ["saaras:v3-realtime"]
+    assert query["model"] == ["saaras:v4"]
     assert query["mode"] == ["transcribe"]
     assert query["return_timestamps"] == ["false"]
+
+
+def test_settings_allow_beta_realtime_model():
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        settings=SarvamRealtimeSTTService.Settings(model="saaras:v3-realtime"),
+    )
+
+    query = _query(service)
+
+    assert query["model"] == ["saaras:v3-realtime"]
 
 
 def test_validation_accepts_auto_language_and_modes():

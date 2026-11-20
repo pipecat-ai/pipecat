@@ -896,13 +896,14 @@ class SarvamSTTService(STTService):
         await self._socket_client.transcribe(**method_kwargs)
 
 
-_REALTIME_MODEL = "saaras:v3-realtime"
+_REALTIME_MODEL = "saaras:v4"
 
 # Sarvam's realtime endpoint serves both generations over the same connection
 # parameters and event protocol, so only the model string differs. The default
-# follows Sarvam's own, which is still v3. The second generation is named
-# `saaras:v4` here, without the `-realtime` suffix its predecessor carries: that
-# is the name the endpoint accepts, and it rejects `saaras:v4-realtime`.
+# follows Sarvam's current default, `saaras:v4`. The older generation is named
+# `saaras:v3-realtime` here, without the `-realtime` suffix its successor carries:
+# that is the name the endpoint accepts, and it rejects `saaras:v4-realtime`.
+# `saaras:v3-realtime` is beta-gated and still selectable through settings.
 _SUPPORTED_REALTIME_MODELS = frozenset({"saaras:v3-realtime", "saaras:v4"})
 
 SUPPORTED_LANGUAGES = {
@@ -1069,7 +1070,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
 
     Serves ``saaras:v3-realtime`` and ``saaras:v4``, selected with
     ``settings=SarvamRealtimeSTTService.Settings(model=...)`` and defaulting to
-    ``saaras:v3-realtime``, Sarvam's own default.
+    ``saaras:v4``, Sarvam's current default.
 
     With the default ``endpointing="vad"`` the server drives turn boundaries. With
     ``endpointing="manual"`` the pipeline drives them instead, so the pipeline
