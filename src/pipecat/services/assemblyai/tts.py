@@ -639,6 +639,11 @@ class AssemblyAITTSService(WebsocketTTSService):
             else:
                 await self._renew_session_if_expiring()
 
+            owner = self._requests.get(self._next_flush_id)
+            if owner and owner != context_id:
+                # A separate utterance must not take over unflushed token text.
+                await self._send_flush()
+
             # Recorded before sending, so audio that arrives while the messages
             # are still being sent is attributed to this context.
             self._requests[self._next_flush_id] = context_id
