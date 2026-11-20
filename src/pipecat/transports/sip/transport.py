@@ -103,6 +103,7 @@ shared between instances (see
 
 import asyncio
 
+import numpy as np
 from loguru import logger
 
 from pipecat.audio.dtmf.types import KeypadEntry
@@ -321,13 +322,18 @@ class SIPInputTransport(BaseInputTransport):
                 if not self._streaming:
                     continue
                 info = self._connection.audio_info()
-                rx_rate = info.rx_sample_rate if info else 0
-                if not rx_rate:
+                if info is None or not info.rx_sample_rate:
                     continue
-                max_bytes = int(rx_rate * AUDIO_IN_POLL_SECS) * 2 * AUDIO_IN_CATCHUP
+                rx_rate = info.rx_sample_rate
+                rx_channels = info.rx_channels or 1
+                max_bytes = int(rx_rate * AUDIO_IN_POLL_SECS) * 2 * rx_channels * AUDIO_IN_CATCHUP
                 pcm = self._connection.read_audio(max_bytes)
                 if not pcm:
                     continue
+                if rx_channels > 1:
+                    # Downmix first: the stream resampler is mono-only.
+                    samples = np.frombuffer(pcm, dtype=np.int16).reshape(-1, rx_channels)
+                    pcm = samples.mean(axis=1).astype(np.int16).tobytes()
                 if rx_rate != self.sample_rate:
                     pcm = await self._resampler.resample(pcm, rx_rate, self.sample_rate)
                     if not pcm:
@@ -428,7 +434,11 @@ class SIPOutputTransport(BaseOutputTransport):
                 # The stream resampler is still priming; the frame was
                 # consumed and its audio arrives with a later chunk.
                 return True
-        bytes_per_sec = tx_rate * 2 * (info.tx_channels or 1)
+        tx_channels = info.tx_channels or 1
+        if tx_channels > 1 and frame.num_channels == 1:
+            # Upmix after resampling: the stream resampler is mono-only.
+            audio = np.repeat(np.frombuffer(audio, dtype=np.int16), tx_channels).tobytes()
+        bytes_per_sec = tx_rate * 2 * tx_channels
         high_water = int(AUDIO_OUT_BUFFER_SECS * bytes_per_sec)
         if info.tx_buffered > high_water:
             await asyncio.sleep((info.tx_buffered - high_water) / bytes_per_sec)

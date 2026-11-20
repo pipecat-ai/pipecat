@@ -1433,6 +1433,17 @@
       "location": "pipecat/pipeline/worker.py"
     },
     {
+      "subject": "PipelineWorker.flush_pipeline.positional_timeout",
+      "module": "pipecat.pipeline.worker",
+      "kind": "parameter",
+      "deprecated_in": "1.17.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "timeout=",
+      "message": "Use ``timeout=`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/pipeline/worker.py"
+    },
+    {
       "subject": "PipelineWorker.tool_resources",
       "module": "pipecat.pipeline.worker",
       "kind": "parameter",
