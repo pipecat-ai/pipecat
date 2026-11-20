@@ -79,6 +79,8 @@ from pipecat.frames.frames import (
     LLMMarkerResponseFrame,
     LLMTextFrame,
     OutputTransportMessageUrgentFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     TextType,
     TranscriptionFrame,
     TranscriptionSpeaker,
@@ -94,8 +96,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_service import AIService
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.services.tts_service import TTSService
-from pipecat.tests.utils import run_test
+from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -1853,6 +1856,116 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
 def _untimed(events: list[dict]) -> list[dict]:
     """The events without the arrival time the stream stamps on them."""
     return [{k: v for k, v in e.items() if k != "at"} for e in events]
+
+
+class TestAudioSimulationBotTurns(unittest.IsolatedAsyncioTestCase):
+    """In an audio simulation the bot's turn ends once it has finished speaking and all of it is transcribed."""
+
+    @staticmethod
+    async def _proposals(frames, *, proposes_turns=True) -> list[str]:
+        """What the gate passes on, with its turn proposals marked, for the bot's frames in order."""
+        gate = _BotSpeechGate(
+            _stream(bot_audio=True), EvalTrace(), deque(), proposes_turns=proposes_turns
+        )
+        down, _ = await run_test(gate, frames_to_send=frames)
+        names = {
+            ProposedUserStartedSpeakingFrame: "start",
+            ProposedUserStoppedSpeakingFrame: "stop",
+            BotStartedSpeakingFrame: "bot started",
+            BotStoppedSpeakingFrame: "bot stopped",
+            _BotSegmentTranscribedFrame: "transcribed",
+        }
+        return [names[type(f)] for f in down if type(f) in names]
+
+    async def test_the_turn_ends_once_the_last_segment_is_transcribed(self):
+        # The bot reports it stopped before the VAD has heard its speech end.
+        seen = await self._proposals(
+            [
+                BotStartedSpeakingFrame(),
+                VADUserStartedSpeakingFrame(),
+                BotStoppedSpeakingFrame(),
+                VADUserStoppedSpeakingFrame(),
+                _BotSegmentTranscribedFrame(),
+            ]
+        )
+        self.assertEqual(seen, ["bot started", "start", "bot stopped", "transcribed", "stop"])
+
+    async def test_the_turn_ends_at_once_when_nothing_is_left_to_transcribe(self):
+        seen = await self._proposals([BotStartedSpeakingFrame(), BotStoppedSpeakingFrame()])
+        self.assertEqual(seen, ["bot started", "start", "bot stopped", "stop"])
+
+    async def test_the_bot_speaking_again_keeps_its_turn_open(self):
+        seen = await self._proposals(
+            [
+                BotStartedSpeakingFrame(),
+                VADUserStartedSpeakingFrame(),
+                VADUserStoppedSpeakingFrame(),
+                BotStoppedSpeakingFrame(),
+                BotStartedSpeakingFrame(),
+                _BotSegmentTranscribedFrame(),
+            ]
+        )
+        self.assertNotIn("stop", seen)
+
+    async def test_a_scripted_run_proposes_nothing(self):
+        seen = await self._proposals(
+            [BotStartedSpeakingFrame(), BotStoppedSpeakingFrame()], proposes_turns=False
+        )
+        self.assertEqual(seen, ["bot started", "bot stopped"])
+
+    @staticmethod
+    def _aggregator():
+        """The simulation's bot-turn aggregator, and the turns it ends with the strategy that ended each."""
+        client = _client(bot_audio=True)
+        aggregator = client._bot_turn_aggregator(LLMContext(), waits_for_bot=True)
+        ended: list[tuple[object, str]] = []
+
+        @aggregator.event_handler("on_user_turn_stopped")
+        async def _record(_aggregator, strategy, message):
+            ended.append((strategy, message.content or ""))
+
+        return aggregator, ended
+
+    @staticmethod
+    def _said(text):
+        return TranscriptionFrame(text=text, user_id="", timestamp="")
+
+    async def test_a_reply_with_a_pause_between_sentences_is_one_turn(self):
+        # The aggregator's VAD hears the pause, but the turn waits for the
+        # gate's proposal: the persona answers the whole reply.
+        aggregator, ended = self._aggregator()
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                VADUserStartedSpeakingFrame(),
+                self._said("We open at 5 PM on Friday."),
+                VADUserStoppedSpeakingFrame(),
+                VADUserStartedSpeakingFrame(),
+                self._said("Is there anything else?"),
+                VADUserStoppedSpeakingFrame(),
+                ProposedUserStoppedSpeakingFrame(),
+            ],
+        )
+        self.assertEqual(len(ended), 1)
+        strategy, text = ended[0]
+        self.assertIsInstance(strategy, ExternalUserTurnStopStrategy)
+        self.assertEqual(text, "We open at 5 PM on Friday. Is there anything else?")
+
+    async def test_the_turn_stays_open_until_the_bot_has_finished(self):
+        # Only the session ending, after the bot went quiet, closes it.
+        aggregator, ended = self._aggregator()
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                VADUserStartedSpeakingFrame(),
+                self._said("We open at 5 PM on Friday."),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.5),
+            ],
+        )
+        self.assertFalse(any(isinstance(s, ExternalUserTurnStopStrategy) for s, _ in ended))
 
 
 class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):

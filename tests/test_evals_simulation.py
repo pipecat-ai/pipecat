@@ -1153,6 +1153,31 @@ class TestClosingTurn(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_the_bot_ending_the_call_waits_for_its_last_words(self):
+        # The bot hangs up the moment it stops speaking, while its last segment
+        # is still being transcribed.
+        driver, stream, _, _ = _driver(_simulation(bot_audio=True), _FakeConversationJudge(["yes"]))
+
+        async def conversation():
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "That's all, thanks."})
+            stream.bot_turn_started()
+            stream.bot_segment_ended()
+            stream.bot_ended()
+            await stream.append({"type": BOT_ENDED_EVENT})
+            await asyncio.sleep(0.1)
+            stream.bot_segment_transcribed()
+            await stream.bot_turn_stopped("Thank you for choosing La Maison.")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "bot")
+        self.assertEqual(
+            result.messages[-1],
+            {"role": "assistant", "content": "Thank you for choosing La Maison."},
+        )
+
     async def test_a_hang_up_on_the_last_allowed_turn_waits_for_the_bots_reply(self):
         result, _ = await self._hang_up_while_speaking(_simulation(bot_audio=True, max_turns=1))
         self.assertEqual(result.ended_by, "end_call")

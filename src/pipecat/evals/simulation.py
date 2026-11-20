@@ -46,7 +46,12 @@ Fields:
     reach the bot as synthesized speech or as text; ``judge.modality``,
     ``judge.transcription`` and ``judge.eval`` decide whether the bot speaks and
     which LLM judges the outcome. Audio modality needs a ``user.speech`` block,
-    since every persona turn is synthesized.
+    since every persona turn is synthesized. When the bot speaks, the persona
+    waits for it to finish: the bot's turn ends once it reports it stopped
+    speaking and all of its speech is transcribed, and the persona answers the
+    whole reply. The conversation is then the one a text run would have, rather
+    than a test of the bot's turn-taking. A reply the bot pauses in to call a
+    tool, after saying "let me check", ends its turn there, as in text.
 
 ``success``
     what counts as the bot having done its job, judged over the whole

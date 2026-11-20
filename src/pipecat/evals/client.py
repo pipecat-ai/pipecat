@@ -68,6 +68,8 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     OutputTransportMessageUrgentFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
@@ -90,6 +92,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transports.websocket.client import WebsocketClientParams
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 # The default, at the name the deprecated ``pipecat.evals.harness`` re-exports.
@@ -206,9 +209,24 @@ class _BotSpeechGate(FrameProcessor):
 
     Both need a segmented STT, which transcribes one segment at a time, so the
     client accepts no other.
+
+    In a simulation the gate also proposes the bot's turns to the aggregator,
+    which treats the bot as its user: a turn starts when the bot reports it
+    started speaking, and ends once it reports it stopped and every segment
+    the gate has seen end is transcribed. The bot reports it stopped only once
+    its whole response has played, so a pause between sentences does not end
+    the turn. The gate counts the segments itself, since only it sees each
+    one end and its transcription close, in order.
     """
 
-    def __init__(self, stream: EvalEventStream, trace: EvalTrace, starts: "deque[float]"):
+    def __init__(
+        self,
+        stream: EvalEventStream,
+        trace: EvalTrace,
+        starts: "deque[float]",
+        *,
+        proposes_turns: bool = False,
+    ):
         """Initialize the gate.
 
         Args:
@@ -216,12 +234,18 @@ class _BotSpeechGate(FrameProcessor):
             trace: The run's trace, for what the gate drops.
             starts: Where the start of each ended segment goes, for the STT's
                 tagging.
+            proposes_turns: Whether to propose the bot's turns from its
+                speaking reports (a simulation).
         """
         super().__init__()
         self._stream = stream
         self._trace = trace
         self._starts = starts
         self._segment_started_at: float | None = None
+        self._proposes_turns = proposes_turns
+        self._bot_speaking = False
+        # Segments that ended and whose transcription has not closed yet.
+        self._segments_untranscribed = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -233,13 +257,32 @@ class _BotSpeechGate(FrameProcessor):
             logger.debug(f"bot speech: segment ended ({direction.name})")
             self._starts.append(self._segment_started_at or time.monotonic())
             self._segment_started_at = None
+            self._segments_untranscribed += 1
             self._stream.bot_segment_ended()
         elif isinstance(frame, _BotSegmentTranscriptionFrame):
             talked_over_until = self._stream.talked_over_until
             if talked_over_until is not None and frame.segment_started_at < talked_over_until:
                 self._trace.log(f"discard: bot speech from before the turn's reply {frame.text!r}")
                 return
+        elif isinstance(frame, _BotSegmentTranscribedFrame):
+            self._segments_untranscribed = max(0, self._segments_untranscribed - 1)
         await self.push_frame(frame, direction)
+        if self._proposes_turns and direction == FrameDirection.DOWNSTREAM:
+            await self._propose_turn(frame)
+
+    async def _propose_turn(self, frame: Frame) -> None:
+        """Propose the bot's turn starting when it starts speaking, and ending once all of it is transcribed."""
+        if isinstance(frame, BotStartedSpeakingFrame):
+            if not self._bot_speaking:
+                self._bot_speaking = True
+                await self.push_frame(ProposedUserStartedSpeakingFrame())
+        elif isinstance(frame, (BotStoppedSpeakingFrame, _BotSegmentTranscribedFrame)):
+            if isinstance(frame, BotStoppedSpeakingFrame):
+                self._bot_speaking = False
+            elif self._bot_speaking:
+                return
+            if self._segment_started_at is None and self._segments_untranscribed == 0:
+                await self.push_frame(ProposedUserStoppedSpeakingFrame())
 
 
 class _BotFrameSink(FrameProcessor):
@@ -986,8 +1029,11 @@ class EvalClient:
         if bot_stt is not None:
             starts: deque[float] = deque()
             _tag_bot_segments(bot_stt, starts)
-            self._bot_turns = self._bot_turn_aggregator(context)
-            inbound += [bot_stt, _BotSpeechGate(self._stream, self._trace, starts), self._bot_turns]
+            # In a simulation the persona waits for the bot to finish speaking.
+            waits_for_bot = persona is not None
+            self._bot_turns = self._bot_turn_aggregator(context, waits_for_bot=waits_for_bot)
+            gate = _BotSpeechGate(self._stream, self._trace, starts, proposes_turns=waits_for_bot)
+            inbound += [bot_stt, gate, self._bot_turns]
 
         speech = [user_tts] if user_tts is not None else []
         if persona is None:
@@ -1003,16 +1049,29 @@ class EvalClient:
             ]
         return inbound + [self._sink] + outbound
 
-    def _bot_turn_aggregator(self, context: LLMContext) -> LLMUserAggregator:
+    def _bot_turn_aggregator(
+        self, context: LLMContext, *, waits_for_bot: bool
+    ) -> LLMUserAggregator:
         """The aggregator that cuts the bot's transcribed speech into turns (audio mode).
 
         Its turn hooks give the stream the timing of the bot's replies, and its
-        finished turn is the persona's next user message.
+        finished turn is the persona's next user message. Its VAD marks the
+        segments the STT transcribes either way.
+
+        Args:
+            context: The context the aggregator writes the bot's turns to.
+            waits_for_bot: Whether the bot's turns follow the gate's proposals
+                (a simulation): a turn ends once the bot has finished speaking and
+                all of it is transcribed, so the persona answers a whole reply,
+                as it would in text. Otherwise the default turn detection on the
+                bot's audio decides.
         """
+        strategies = ExternalUserTurnStrategies() if waits_for_bot else None
         aggregator = LLMUserAggregator(
             context,
             params=LLMUserAggregatorParams(
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.4))
+                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.4)),
+                user_turn_strategies=strategies,
             ),
         )
 
