@@ -209,7 +209,9 @@ class RimeV1TTSService(WebsocketTTSService):
 
         # Keep spelled-out text in one aggregate so a split never breaks a tag.
         self._text_aggregator = SkipTagsAggregator(
-            [("spell(", ")")], aggregation_type=self._text_aggregation_mode
+            [("spell(", ")")],
+            aggregation_type=self._text_aggregation_mode,
+            language=self._text_aggregator.language,
         )
 
         self._api_key = api_key
@@ -498,7 +500,9 @@ class RimeV1TTSService(WebsocketTTSService):
         if self._is_streaming_tokens:
             return [text]
         aggregator = SkipTagsAggregator(
-            [("spell(", ")")], aggregation_type=TextAggregationMode.SENTENCE
+            [("spell(", ")")],
+            aggregation_type=TextAggregationMode.SENTENCE,
+            language=self.text_aggregation_language,
         )
         sentences = [
             self._prepare_text_for_tts(aggregate.text)
