@@ -291,3 +291,45 @@ async def test_an_error_carries_its_request_id(request_id, expected):
     service.push_error.assert_awaited_once_with(error_msg=expected)
     error_frame = service.append_to_audio_context.await_args.args[1]
     assert error_frame.error == expected
+
+
+@pytest.mark.asyncio
+async def test_dict_id_is_sent_in_the_websocket_config():
+    service = _service(dict_id="p_5cb7faa6")
+    service._websocket = _FakeWebsocket()
+
+    await service._send_config()
+
+    assert _sent_config(service)["dict_id"] == "p_5cb7faa6"
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_dict_id_update_resends_the_config():
+    service = _service()
+    service._websocket = _FakeWebsocket()
+
+    await service._update_settings(SarvamTTSService.Settings(dict_id="p_5cb7faa6"))
+
+    assert _sent_config(service)["dict_id"] == "p_5cb7faa6"
+
+
+@pytest.mark.asyncio
+async def test_dict_id_reaches_the_http_payload():
+    service = _http_service(_FakeSession(), dict_id="p_5cb7faa6")
+
+    payload = await _synthesize(service)
+
+    assert payload["dict_id"] == "p_5cb7faa6"
+
+
+@pytest.mark.asyncio
+async def test_no_dict_id_is_sent_by_default():
+    service = _service()
+    service._websocket = _FakeWebsocket()
+    http_service = _http_service(_FakeSession())
+
+    await service._send_config()
+    payload = await _synthesize(http_service)
+
+    assert "dict_id" not in _sent_config(service)
+    assert "dict_id" not in payload
