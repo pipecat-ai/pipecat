@@ -110,6 +110,7 @@ IMPORTS = {
     "xai_llm": ["from pipecat.services.xai.llm import GrokLLMService"],
     "groq_llm": ["from pipecat.services.groq.llm import GroqLLMService"],
     "inception_llm": ["from pipecat.services.inception.llm import InceptionLLMService"],
+    "llmtr_llm": ["from pipecat.services.llmtr.llm import LLMTRLLMService"],
     "mistral_llm": ["from pipecat.services.mistral.llm import MistralLLMService"],
     "novita_llm": ["from pipecat.services.novita.llm import NovitaLLMService"],
     "nvidia_llm": ["from pipecat.services.nvidia.llm import NvidiaLLMService"],

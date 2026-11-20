@@ -21,6 +21,7 @@ from pipecat.services.fireworks.llm import FireworksLLMService
 from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.groq.stt import GroqSTTService
 from pipecat.services.inception.llm import InceptionLLMService
+from pipecat.services.llmtr.llm import LLMTRLLMService
 from pipecat.services.mistral.llm import MistralLLMService
 from pipecat.services.nebius.llm import NebiusLLMService
 from pipecat.services.novita.llm import NovitaLLMService
@@ -50,6 +51,7 @@ PROVIDER_SERVICES = [
     GroqLLMService,
     GroqSTTService,
     InceptionLLMService,
+    LLMTRLLMService,
     MistralLLMService,
     NebiusLLMService,
     NovitaLLMService,
