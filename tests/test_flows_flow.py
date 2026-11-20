@@ -27,7 +27,11 @@ from pipecat.flows import (
 )
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
-from tests.flows_test_helpers import get_advertised_tool_handlers, make_mock_worker
+from tests.flows_test_helpers import (
+    get_advertised_tool_handlers,
+    get_advertised_tools,
+    make_mock_worker,
+)
 
 # --- A handlers module, as an application would write it ---
 
@@ -450,6 +454,36 @@ class TestConstruction(unittest.TestCase):
         post = self.flow.node("pizza")["post_actions"]
         self.assertEqual(post, [{"type": "tts_say", "text": "Thanks, {{ caller }}!"}])
 
+    def test_node_metadata(self):
+        cfg = config()
+        cfg.nodes["pizza"].metadata = {"graph_node": "n2", "node_type": "order"}
+        flow = make_flow(cfg)
+        self.assertEqual(flow.node("pizza")["metadata"], {"graph_node": "n2", "node_type": "order"})
+        self.assertNotIn("metadata", flow.node("initial"))
+
+    def test_function_metadata(self):
+        cfg = single_node({"name": "report", "transition_to": "next", "metadata": {"exit": "ok"}})
+        cfg.nodes["a"].functions.append(
+            FlowConfig.Function(
+                name="skip",
+                transition_only=True,
+                description="Skip ahead.",
+                transition_to="other",
+                metadata={"exit": "skipped"},
+            )
+        )
+        cfg.nodes["a"].functions.append(FlowConfig.Function(name="stay_quiet"))
+        cfg.global_functions.append(
+            FlowConfig.Function(name="get_delivery_estimate", metadata={"scope": "global"})
+        )
+        flow = make_flow(cfg)
+
+        direct, transition_only, plain = flow.node("a")["functions"]
+        self.assertEqual(direct.metadata, {"exit": "ok"})
+        self.assertEqual(transition_only.metadata, {"exit": "skipped"})
+        self.assertIsNone(plain.metadata)
+        self.assertEqual(flow.global_functions[0].metadata, {"scope": "global"})
+
     def test_global_functions(self):
         globals_ = self.flow.global_functions
         self.assertEqual([g.name for g in globals_], ["get_delivery_estimate"])
@@ -686,6 +720,23 @@ class TestWithFlowManager(unittest.IsolatedAsyncioTestCase):
         result = await self.invoke("start_over")
         self.assertEqual(result, {"status": "acknowledged"})
         self.assertEqual(flow_manager.current_node, "initial")
+
+    async def test_metadata_stays_out_of_the_llm_context(self):
+        cfg = config()
+        cfg.nodes["initial"].metadata = {"graph_node": "secret-node-id"}
+        cfg.nodes["initial"].functions[0].metadata = {"exit": "secret-exit-id"}
+        flow = make_flow(cfg)
+        flow_manager = self.make_manager(flow)
+        await flow_manager.initialize(flow.initial_node)
+
+        self.assertEqual(flow_manager.current_node, "initial")
+        queued = [
+            frame for call in self.mock_worker.queue_frames.call_args_list for frame in call.args[0]
+        ]
+        for frame in queued:
+            self.assertNotIn("secret-", repr(vars(frame)))
+        for schema in get_advertised_tools(self.mock_worker).standard_tools:
+            self.assertNotIn("secret-", repr(schema.to_default_dict()))
 
     def queued_messages(self) -> list[dict]:
         """Every message the manager has sent to the LLM context so far."""

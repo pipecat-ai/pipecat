@@ -66,7 +66,7 @@
     },
     "Function": {
       "additionalProperties": false,
-      "description": "A tool offered at a node.\n\nOrdinarily the entry names a Flows direct function in the handlers a\n:class:`~pipecat.flows.Flow` is constructed with, and the tool's\ndescription and parameters come from that function. A\n``transition_only`` entry is defined entirely here instead: it takes\nno parameters, runs no code, and moves the conversation to\n``transition_to`` when the LLM calls it.\n\nParameters:\n    name: The tool's name, as the LLM sees it. For an ordinary\n        entry, also the name of the direct function in the handlers.\n    transition_only: Whether the tool is defined here rather than in\n        code. Requires ``description`` and a ``transition_to`` that\n        names a node.\n    description: What the tool is for, for the LLM. Only a\n        ``transition_only`` entry has one; a direct function\n        describes itself in its docstring.\n    transition_to: Node to transition to after the tool completes,\n        or a :class:`FlowConfig.Branch`. Omitted for tools that stay\n        on the current node.",
+      "description": "A tool offered at a node.\n\nOrdinarily the entry names a Flows direct function in the handlers a\n:class:`~pipecat.flows.Flow` is constructed with, and the tool's\ndescription and parameters come from that function. A\n``transition_only`` entry is defined entirely here instead: it takes\nno parameters, runs no code, and moves the conversation to\n``transition_to`` when the LLM calls it.\n\nParameters:\n    name: The tool's name, as the LLM sees it. For an ordinary\n        entry, also the name of the direct function in the handlers.\n    transition_only: Whether the tool is defined here rather than in\n        code. Requires ``description`` and a ``transition_to`` that\n        names a node.\n    description: What the tool is for, for the LLM. Only a\n        ``transition_only`` entry has one; a direct function\n        describes itself in its docstring.\n    transition_to: Node to transition to after the tool completes,\n        or a :class:`FlowConfig.Branch`. Omitted for tools that stay\n        on the current node.\n    metadata: JSON data the application attaches to the tool. See\n        \"Metadata\" in :class:`FlowConfig`.",
       "else": {
         "not": {
           "required": [
@@ -120,6 +120,21 @@
           ],
           "default": null,
           "title": "Transition To"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
         }
       },
       "required": [
@@ -139,6 +154,7 @@
       "title": "Function",
       "type": "object"
     },
+    "JsonValue": {},
     "Message": {
       "additionalProperties": false,
       "description": "One message in a node's ``task_messages``.\n\nParameters:\n    role: Message role, e.g. ``developer`` or ``system``.\n    content: Message text. May contain ``{{ key }}`` placeholders;\n        see :class:`FlowConfig`.",
@@ -161,7 +177,7 @@
     },
     "Node": {
       "additionalProperties": false,
-      "description": "One node of the flow.\n\nParameters:\n    task_messages: What the LLM should do at this node.\n    role_message: The bot's role or personality, sent as the LLM's\n        system instruction on entering this node. It persists across\n        transitions until another node sets its own. May contain\n        ``{{ key }}`` placeholders; see :class:`FlowConfig`.\n    functions: Tools offered at this node, in addition to the\n        config's ``global_functions``.\n    pre_actions: Actions run before the LLM responds at this node.\n    post_actions: Actions run after the LLM responds at this node.\n    context_strategy: How the LLM context is updated on entering this\n        node. Defaults to the ``FlowManager``'s strategy.\n    respond_immediately: Whether the LLM responds as soon as the node\n        is entered. Defaults to True.",
+      "description": "One node of the flow.\n\nParameters:\n    task_messages: What the LLM should do at this node.\n    role_message: The bot's role or personality, sent as the LLM's\n        system instruction on entering this node. It persists across\n        transitions until another node sets its own. May contain\n        ``{{ key }}`` placeholders; see :class:`FlowConfig`.\n    functions: Tools offered at this node, in addition to the\n        config's ``global_functions``.\n    pre_actions: Actions run before the LLM responds at this node.\n    post_actions: Actions run after the LLM responds at this node.\n    context_strategy: How the LLM context is updated on entering this\n        node. Defaults to the ``FlowManager``'s strategy.\n    respond_immediately: Whether the LLM responds as soon as the node\n        is entered. Defaults to True.\n    metadata: JSON data the application attaches to the node. See\n        \"Metadata\" in :class:`FlowConfig`.",
       "properties": {
         "task_messages": {
           "items": {
@@ -223,6 +239,21 @@
           "default": true,
           "title": "Respond Immediately",
           "type": "boolean"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
         }
       },
       "required": [
@@ -233,7 +264,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "A conversation flow described as data.\n\nLoad one with :meth:`from_file` for a YAML or JSON file, :meth:`from_yaml`\nfor YAML text, :meth:`from_json` for JSON text, or Pydantic's\n``model_validate`` for a dict that is already parsed.\n\n``!include`` resolves paths on the application's file system and can read\nany file the process can read, so it belongs only in configs the\napplication ships. Load a config from another source, such as a request\nbody, with :meth:`from_yaml` and no ``base_dir``, which rejects\n``!include``, or with :meth:`from_json`.\n\nPrompt text may refer to the manager's state with ``{{ key }}``\nplaceholders: a node's ``role_message``, the ``content`` of its\n``task_messages``, and the ``text`` of a ``tts_say`` action.\n:class:`~pipecat.flows.FlowManager` fills them from ``flow_manager.state``\neach time it enters the node, so a value stored by a handler earlier in the\nconversation can appear in a later prompt. ``{{ order.size }}`` walks into\na stored mapping, and values are rendered with ``str()``. A key that is not\nin state raises :class:`~pipecat.flows.FlowError` when the node is entered.\nTo show the LLM a literal ``{{ key }}``, escape it as ``\\{{ key }}``.\n\nParameters:\n    initial_node: Name of the node the flow starts in.\n    nodes: The flow's nodes, keyed by name.\n    global_functions: Tools offered at every node.",
+  "description": "A conversation flow described as data.\n\nLoad one with :meth:`from_file` for a YAML or JSON file, :meth:`from_yaml`\nfor YAML text, :meth:`from_json` for JSON text, or Pydantic's\n``model_validate`` for a dict that is already parsed.\n\n``!include`` resolves paths on the application's file system and can read\nany file the process can read, so it belongs only in configs the\napplication ships. Load a config from another source, such as a request\nbody, with :meth:`from_yaml` and no ``base_dir``, which rejects\n``!include``, or with :meth:`from_json`.\n\nPrompt text may refer to the manager's state with ``{{ key }}``\nplaceholders: a node's ``role_message``, the ``content`` of its\n``task_messages``, and the ``text`` of a ``tts_say`` action.\n:class:`~pipecat.flows.FlowManager` fills them from ``flow_manager.state``\neach time it enters the node, so a value stored by a handler earlier in the\nconversation can appear in a later prompt. ``{{ order.size }}`` walks into\na stored mapping, and values are rendered with ``str()``. A key that is not\nin state raises :class:`~pipecat.flows.FlowError` when the node is entered.\nTo show the LLM a literal ``{{ key }}``, escape it as ``\\{{ key }}``.\n\nMetadata: a node and a function each take an optional ``metadata``\nmapping of JSON values, for whatever the application wants to keep with\nthem, such as the id of the element a node stands for in an editor. Flows\ncarries it and never acts on it, and it is never sent to the LLM. A\n:class:`~pipecat.flows.Flow` copies it onto the node configs and function\nschemas it builds.\n\nParameters:\n    initial_node: Name of the node the flow starts in.\n    nodes: The flow's nodes, keyed by name.\n    global_functions: Tools offered at every node.",
   "properties": {
     "initial_node": {
       "title": "Initial Node",

@@ -169,6 +169,73 @@ class TestFlowManager(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(mock_function.called)  # Shouldn't be called until function is used
         self.assertEqual(flow_manager._current_node, "test")
 
+    async def test_function_schema_metadata(self):
+        """Metadata is the schema's last field and stays out of the LLM's schema."""
+        handler = AsyncMock(return_value={"status": "success"})
+
+        positional = FlowsFunctionSchema("n", "d", {}, [], handler)
+        self.assertIs(positional.handler, handler)
+        self.assertIsNone(positional.metadata)
+
+        with_options = FlowsFunctionSchema("n", "d", {}, [], handler, True, 5.0)
+        self.assertTrue(with_options.cancel_on_interruption)
+        self.assertEqual(with_options.timeout_secs, 5.0)
+        self.assertIsNone(with_options.metadata)
+
+        schema = FlowsFunctionSchema(
+            name="n",
+            description="d",
+            properties={"size": {"type": "string"}},
+            required=["size"],
+            handler=handler,
+            metadata={"x": 1},
+        )
+        self.assertEqual(schema.metadata, {"x": 1})
+        function_schema = schema.to_function_schema()
+        self.assertFalse(hasattr(function_schema, "metadata"))
+        self.assertEqual(
+            function_schema.to_default_dict(),
+            {
+                "name": "n",
+                "description": "d",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"size": {"type": "string"}},
+                    "required": ["size"],
+                },
+            },
+        )
+
+    async def test_node_metadata_passes_through(self):
+        """A node with metadata is set as any other, and its tools are advertised without it."""
+        flow_manager = FlowManager(
+            worker=self.mock_worker,
+            llm=self.mock_llm,
+            context_aggregator=self.mock_context_aggregator,
+        )
+        node: NodeConfig = {
+            "name": "tagged",
+            "metadata": {"graph_node": "n1"},
+            "task_messages": [{"role": "developer", "content": "Test message"}],
+            "functions": [
+                FlowsFunctionSchema(
+                    name="test_function",
+                    description="Test function",
+                    properties={},
+                    required=[],
+                    handler=AsyncMock(return_value={"status": "success"}),
+                    metadata={"exit": "done"},
+                ),
+            ],
+        }
+
+        await flow_manager.initialize(node)
+
+        self.assertEqual(flow_manager.current_node, "tagged")
+        (tool,) = get_advertised_tools(self.mock_worker).standard_tools
+        self.assertEqual(tool.name, "test_function")
+        self.assertFalse(hasattr(tool, "metadata"))
+
     async def test_node_validation(self):
         """Test node configuration validation."""
         flow_manager = FlowManager(

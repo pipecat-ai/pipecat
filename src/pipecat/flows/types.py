@@ -202,6 +202,8 @@ class NodeConfig(TypedDict, total=False):
         context_strategy: Strategy for updating context during transitions.
         respond_immediately: Whether to run LLM inference as soon as the node is
             set (default: True).
+        metadata: Data the application attaches to the node. Flows carries it
+            and never acts on it, and it is never sent to the LLM.
 
     Example::
 
@@ -235,6 +237,7 @@ class NodeConfig(TypedDict, total=False):
     post_actions: list[ActionConfig]
     context_strategy: ContextStrategyConfig
     respond_immediately: bool
+    metadata: dict[str, Any]
 
 
 class _NoResponse:
@@ -385,6 +388,8 @@ class FlowsFunctionSchema:
             interruption occurs. Defaults to False.
         timeout_secs: Optional per-tool timeout in seconds, overriding the global
             ``function_call_timeout_secs``. Defaults to None (use global timeout).
+        metadata: Data the application attaches to the function. Flows carries
+            it and never acts on it, and it is never sent to the LLM.
     """
 
     name: str
@@ -394,6 +399,7 @@ class FlowsFunctionSchema:
     handler: FunctionHandler
     cancel_on_interruption: bool = False
     timeout_secs: float | None = None
+    metadata: dict[str, Any] | None = None
 
     def to_function_schema(self) -> FunctionSchema:
         """Convert to a standard FunctionSchema for use with LLMs.
