@@ -1,8 +1,8 @@
-# Verifying a caller, as a subflow. flow.yaml includes it; it is not a flow
-# to run on its own.
+# Verifying a caller, as a subflow. Nodes of flow.yaml run it; it is not a
+# flow to run on its own.
 #
 # A target here names a node of this file, or is `return`, which leaves the
-# subflow for the `return_to` of the include the caller came in through.
+# subflow for the `return_to` of the node that ran it.
 
 initial_node: ask_birth_date
 

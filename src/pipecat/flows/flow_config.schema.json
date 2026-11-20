@@ -66,7 +66,7 @@
     },
     "Function": {
       "additionalProperties": false,
-      "description": "A tool offered at a node.\n\nOrdinarily the entry names a Flows direct function in the handlers a\n:class:`~pipecat.flows.Flow` is constructed with, and the tool's\ndescription and parameters come from that function. A\n``transition_only`` entry is defined entirely here instead: it takes\nno parameters, runs no code, and moves the conversation to\n``transition_to`` when the LLM calls it.\n\nParameters:\n    name: The tool's name, as the LLM sees it. For an ordinary\n        entry, also the name of the direct function in the handlers.\n    transition_only: Whether the tool is defined here rather than in\n        code. Requires ``description`` and a ``transition_to`` that\n        names a node.\n    description: What the tool is for, for the LLM. Only a\n        ``transition_only`` entry has one; a direct function\n        describes itself in its docstring.\n    transition_to: Node to transition to after the tool completes,\n        or a :class:`FlowConfig.Branch`. Omitted for tools that stay\n        on the current node. A target may also name an include, or\n        be ``return`` inside a subflow; see \"Subflows\" in\n        :class:`FlowConfig`.\n    metadata: JSON data the application attaches to the tool. See\n        \"Metadata\" in :class:`FlowConfig`.",
+      "description": "A tool offered at a node.\n\nOrdinarily the entry names a Flows direct function in the handlers a\n:class:`~pipecat.flows.Flow` is constructed with, and the tool's\ndescription and parameters come from that function. A\n``transition_only`` entry is defined entirely here instead: it takes\nno parameters, runs no code, and moves the conversation to\n``transition_to`` when the LLM calls it.\n\nParameters:\n    name: The tool's name, as the LLM sees it. For an ordinary\n        entry, also the name of the direct function in the handlers.\n    transition_only: Whether the tool is defined here rather than in\n        code. Requires ``description`` and a ``transition_to`` that\n        names a node.\n    description: What the tool is for, for the LLM. Only a\n        ``transition_only`` entry has one; a direct function\n        describes itself in its docstring.\n    transition_to: Node to transition to after the tool completes,\n        or a :class:`FlowConfig.Branch`. Omitted for tools that stay\n        on the current node. Inside a subflow a target may also be\n        ``return``; see \"Subflows\" in :class:`FlowConfig`.\n    metadata: JSON data the application attaches to the tool. See\n        \"Metadata\" in :class:`FlowConfig`.",
       "else": {
         "not": {
           "required": [
@@ -154,26 +154,6 @@
       "title": "Function",
       "type": "object"
     },
-    "Include": {
-      "additionalProperties": false,
-      "description": "One use of a subflow.\n\nParameters:\n    flow: Id of the subflow, a key of the config's ``flows``.\n    return_to: Where ``return`` in the subflow leads: a node of the\n        config, or another include.",
-      "properties": {
-        "flow": {
-          "title": "Flow",
-          "type": "string"
-        },
-        "return_to": {
-          "title": "Return To",
-          "type": "string"
-        }
-      },
-      "required": [
-        "flow",
-        "return_to"
-      ],
-      "title": "Include",
-      "type": "object"
-    },
     "JsonValue": {},
     "Message": {
       "additionalProperties": false,
@@ -197,7 +177,27 @@
     },
     "Node": {
       "additionalProperties": false,
-      "description": "One node of the flow.\n\nParameters:\n    task_messages: What the LLM should do at this node.\n    role_message: The bot's role or personality, sent as the LLM's\n        system instruction on entering this node. It persists across\n        transitions until another node sets its own. May contain\n        ``{{ key }}`` placeholders; see :class:`FlowConfig`.\n    functions: Tools offered at this node, in addition to the\n        config's ``global_functions``.\n    pre_actions: Actions run before the LLM responds at this node.\n    post_actions: Actions run after the LLM responds at this node.\n    context_strategy: How the LLM context is updated on entering this\n        node. Defaults to the ``FlowManager``'s strategy.\n    respond_immediately: Whether the LLM responds as soon as the node\n        is entered. Defaults to True.\n    metadata: JSON data the application attaches to the node. See\n        \"Metadata\" in :class:`FlowConfig`.",
+      "description": "One node of the flow.\n\nA node either prompts the LLM, with ``task_messages`` and the fields\nthat go with them, or runs a subflow, with ``flow`` and ``return_to``\nin their place. See \"Subflows\" in :class:`FlowConfig`.\n\nParameters:\n    task_messages: What the LLM should do at this node. Required\n        unless the node runs a subflow.\n    role_message: The bot's role or personality, sent as the LLM's\n        system instruction on entering this node. It persists across\n        transitions until another node sets its own. May contain\n        ``{{ key }}`` placeholders; see :class:`FlowConfig`.\n    functions: Tools offered at this node, in addition to the\n        config's ``global_functions``.\n    pre_actions: Actions run before the LLM responds at this node.\n    post_actions: Actions run after the LLM responds at this node.\n    context_strategy: How the LLM context is updated on entering this\n        node. Defaults to the ``FlowManager``'s strategy.\n    respond_immediately: Whether the LLM responds as soon as the node\n        is entered. Defaults to True.\n    metadata: JSON data the application attaches to the node. See\n        \"Metadata\" in :class:`FlowConfig`.\n    flow: Id of the subflow this node runs, a key of the config's\n        ``flows``. A node that runs a subflow takes only\n        ``return_to`` and ``metadata`` besides.\n    return_to: The node that ``return`` in the subflow leads to. May\n        be omitted when the subflow never returns.",
+      "else": {
+        "properties": {
+          "return_to": {
+            "type": "null"
+          }
+        },
+        "required": [
+          "task_messages"
+        ]
+      },
+      "if": {
+        "properties": {
+          "flow": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "flow"
+        ]
+      },
       "properties": {
         "task_messages": {
           "items": {
@@ -274,17 +274,63 @@
           ],
           "default": null,
           "title": "Metadata"
+        },
+        "flow": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Flow"
+        },
+        "return_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Return To"
         }
       },
-      "required": [
-        "task_messages"
-      ],
+      "then": {
+        "properties": {
+          "task_messages": {
+            "maxItems": 0
+          },
+          "role_message": {
+            "type": "null"
+          },
+          "functions": {
+            "maxItems": 0
+          },
+          "pre_actions": {
+            "maxItems": 0
+          },
+          "post_actions": {
+            "maxItems": 0
+          },
+          "context_strategy": {
+            "type": "null"
+          },
+          "respond_immediately": {
+            "const": true
+          }
+        }
+      },
       "title": "Node",
       "type": "object"
     },
     "Subflow": {
       "additionalProperties": false,
-      "description": "A set of nodes that flows include.\n\nInside a subflow a function transitions to one of the subflow's own\nnodes, or to ``return``. See \"Subflows\" in :class:`FlowConfig`.\n\nParameters:\n    initial_node: Name of the node the subflow starts in.\n    nodes: The subflow's nodes, keyed by name.",
+      "description": "A set of nodes that a flow's nodes can run.\n\nInside a subflow a function transitions to one of the subflow's own\nnodes, or to ``return``. See \"Subflows\" in :class:`FlowConfig`.\n\nParameters:\n    initial_node: Name of the node the subflow starts in.\n    nodes: The subflow's nodes, keyed by name.",
       "properties": {
         "initial_node": {
           "title": "Initial Node",
@@ -308,7 +354,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "A conversation flow described as data.\n\nLoad one with :meth:`from_file` for a YAML or JSON file, :meth:`from_yaml`\nfor YAML text, :meth:`from_json` for JSON text, or Pydantic's\n``model_validate`` for a dict that is already parsed.\n\n``!include`` resolves paths on the application's file system and can read\nany file the process can read, so it belongs only in configs the\napplication ships. Load a config from another source, such as a request\nbody, with :meth:`from_yaml` and no ``base_dir``, which rejects\n``!include``, or with :meth:`from_json`.\n\nPrompt text may refer to the manager's state with ``{{ key }}``\nplaceholders: a node's ``role_message``, the ``content`` of its\n``task_messages``, and the ``text`` of a ``tts_say`` action.\n:class:`~pipecat.flows.FlowManager` fills them from ``flow_manager.state``\neach time it enters the node, so a value stored by a handler earlier in the\nconversation can appear in a later prompt. ``{{ order.size }}`` walks into\na stored mapping, and values are rendered with ``str()``. A key that is not\nin state raises :class:`~pipecat.flows.FlowError` when the node is entered.\nTo show the LLM a literal ``{{ key }}``, escape it as ``\\{{ key }}``.\n\nMetadata: a node and a function each take an optional ``metadata``\nmapping of JSON values, for whatever the application wants to keep with\nthem, such as the id of the element a node stands for in an editor. Flows\ncarries it and never acts on it, and it is never sent to the LLM. A\n:class:`~pipecat.flows.Flow` copies it onto the node configs and function\nschemas it builds, and :class:`~pipecat.flows.FlowManager` passes it to\n``on_node_entered`` handlers and to an RTVI client as the flow moves.\n\nSubflows: a set of nodes used by several flows, or several times in one,\nis written once as a subflow under ``flows`` and used through ``includes``.\nEach include is one use of a subflow, with the place its ``return`` leads::\n\n    initial_node: verify_caller\n    flows:\n      verification: !include verification.yaml\n    includes:\n      verify_caller:\n        flow: verification\n        return_to: book\n    nodes:\n      book:\n        ...\n\nA transition target, ``initial_node`` or ``return_to`` that names an\ninclude leads to the subflow's first node. Inside a subflow a target names\none of its own nodes, or is ``return``, which leads to the include's\n``return_to``; to return to two places, include the subflow twice. A\n:class:`~pipecat.flows.Flow` builds a subflow's nodes once per include,\nnamed ``<include>.<node>``, so everything before the dot is the include\nid; that is the name ``FlowManager.current_node`` reports. A config that\nuses subflows therefore cannot have a dot in a node name or include id.\nSubflows do not include other subflows, and ``global_functions`` are\noffered at their nodes too.\n\nParameters:\n    initial_node: Name of the node the flow starts in, or of an include\n        to start in its subflow.\n    nodes: The flow's nodes, keyed by name.\n    global_functions: Tools offered at every node.\n    flows: Subflows this flow includes, keyed by flow id.\n    includes: Each use of a subflow, keyed by include id.",
+  "description": "A conversation flow described as data.\n\nLoad one with :meth:`from_file` for a YAML or JSON file, :meth:`from_yaml`\nfor YAML text, :meth:`from_json` for JSON text, or Pydantic's\n``model_validate`` for a dict that is already parsed.\n\n``!include`` resolves paths on the application's file system and can read\nany file the process can read, so it belongs only in configs the\napplication ships. Load a config from another source, such as a request\nbody, with :meth:`from_yaml` and no ``base_dir``, which rejects\n``!include``, or with :meth:`from_json`.\n\nPrompt text may refer to the manager's state with ``{{ key }}``\nplaceholders: a node's ``role_message``, the ``content`` of its\n``task_messages``, and the ``text`` of a ``tts_say`` action.\n:class:`~pipecat.flows.FlowManager` fills them from ``flow_manager.state``\neach time it enters the node, so a value stored by a handler earlier in the\nconversation can appear in a later prompt. ``{{ order.size }}`` walks into\na stored mapping, and values are rendered with ``str()``. A key that is not\nin state raises :class:`~pipecat.flows.FlowError` when the node is entered.\nTo show the LLM a literal ``{{ key }}``, escape it as ``\\{{ key }}``.\n\nMetadata: a node and a function each take an optional ``metadata``\nmapping of JSON values, for whatever the application wants to keep with\nthem, such as the id of the element a node stands for in an editor. Flows\ncarries it and never acts on it, and it is never sent to the LLM. A\n:class:`~pipecat.flows.Flow` copies it onto the node configs and function\nschemas it builds, and :class:`~pipecat.flows.FlowManager` passes it to\n``on_node_entered`` handlers and to an RTVI client as the flow moves.\n\nSubflows: a set of nodes used by several flows, or several times in one,\nis written once as a subflow under ``flows``. A node runs it by naming it\nas its ``flow``, in place of prompts and functions of its own, and says\nwhere the subflow's ``return`` leads::\n\n    initial_node: verify_caller\n    flows:\n      verification: !include verification.yaml\n    nodes:\n      verify_caller:\n        flow: verification\n        return_to: book\n      book:\n        ...\n\nEntering such a node enters the subflow at its first node. Inside a\nsubflow a transition target names one of its own nodes, or is ``return``,\nwhich leads to the ``return_to`` of the node running it; to return to two\nplaces, run the subflow from two nodes. ``return_to`` may be omitted for a\nsubflow that never returns. A :class:`~pipecat.flows.Flow` builds a\nsubflow's nodes once for each node that runs it, named\n``<node>.<subflow node>``, so everything before the dot is the node that\nruns the subflow; that is the name ``FlowManager.current_node`` reports. A\nconfig that has subflows therefore cannot have a dot in a node name. A\nsubflow's nodes cannot run subflows, and ``global_functions`` are offered\nat them too.\n\nParameters:\n    initial_node: Name of the node the flow starts in.\n    nodes: The flow's nodes, keyed by name.\n    global_functions: Tools offered at every node.\n    flows: Subflows the flow's nodes can run, keyed by flow id.",
   "properties": {
     "initial_node": {
       "title": "Initial Node",
@@ -334,13 +380,6 @@
         "$ref": "#/$defs/Subflow"
       },
       "title": "Flows",
-      "type": "object"
-    },
-    "includes": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Include"
-      },
-      "title": "Includes",
       "type": "object"
     }
   },

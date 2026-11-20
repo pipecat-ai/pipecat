@@ -75,7 +75,7 @@ BUILT_IN_ACTIONS = BUILT_IN_ACTIONS_WITHOUT_HANDLER | {"function"}
 """Every action type the runtime provides without registration."""
 
 RETURN = "return"
-"""The transition target that, inside a subflow, leaves it for the include's ``return_to``."""
+"""The transition target that, inside a subflow, leads to the ``return_to`` of the node running it."""
 
 
 def case_key(value: Any) -> str:
@@ -124,38 +124,37 @@ class FlowConfig(BaseModel):
     ``on_node_entered`` handlers and to an RTVI client as the flow moves.
 
     Subflows: a set of nodes used by several flows, or several times in one,
-    is written once as a subflow under ``flows`` and used through ``includes``.
-    Each include is one use of a subflow, with the place its ``return`` leads::
+    is written once as a subflow under ``flows``. A node runs it by naming it
+    as its ``flow``, in place of prompts and functions of its own, and says
+    where the subflow's ``return`` leads::
 
         initial_node: verify_caller
         flows:
           verification: !include verification.yaml
-        includes:
+        nodes:
           verify_caller:
             flow: verification
             return_to: book
-        nodes:
           book:
             ...
 
-    A transition target, ``initial_node`` or ``return_to`` that names an
-    include leads to the subflow's first node. Inside a subflow a target names
-    one of its own nodes, or is ``return``, which leads to the include's
-    ``return_to``; to return to two places, include the subflow twice. A
-    :class:`~pipecat.flows.Flow` builds a subflow's nodes once per include,
-    named ``<include>.<node>``, so everything before the dot is the include
-    id; that is the name ``FlowManager.current_node`` reports. A config that
-    uses subflows therefore cannot have a dot in a node name or include id.
-    Subflows do not include other subflows, and ``global_functions`` are
-    offered at their nodes too.
+    Entering such a node enters the subflow at its first node. Inside a
+    subflow a transition target names one of its own nodes, or is ``return``,
+    which leads to the ``return_to`` of the node running it; to return to two
+    places, run the subflow from two nodes. ``return_to`` may be omitted for a
+    subflow that never returns. A :class:`~pipecat.flows.Flow` builds a
+    subflow's nodes once for each node that runs it, named
+    ``<node>.<subflow node>``, so everything before the dot is the node that
+    runs the subflow; that is the name ``FlowManager.current_node`` reports. A
+    config that has subflows therefore cannot have a dot in a node name. A
+    subflow's nodes cannot run subflows, and ``global_functions`` are offered
+    at them too.
 
     Parameters:
-        initial_node: Name of the node the flow starts in, or of an include
-            to start in its subflow.
+        initial_node: Name of the node the flow starts in.
         nodes: The flow's nodes, keyed by name.
         global_functions: Tools offered at every node.
-        flows: Subflows this flow includes, keyed by flow id.
-        includes: Each use of a subflow, keyed by include id.
+        flows: Subflows the flow's nodes can run, keyed by flow id.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -225,9 +224,8 @@ class FlowConfig(BaseModel):
                 describes itself in its docstring.
             transition_to: Node to transition to after the tool completes,
                 or a :class:`FlowConfig.Branch`. Omitted for tools that stay
-                on the current node. A target may also name an include, or
-                be ``return`` inside a subflow; see "Subflows" in
-                :class:`FlowConfig`.
+                on the current node. Inside a subflow a target may also be
+                ``return``; see "Subflows" in :class:`FlowConfig`.
             metadata: JSON data the application attaches to the tool. See
                 "Metadata" in :class:`FlowConfig`.
         """
@@ -325,8 +323,13 @@ class FlowConfig(BaseModel):
     class Node(BaseModel):
         """One node of the flow.
 
+        A node either prompts the LLM, with ``task_messages`` and the fields
+        that go with them, or runs a subflow, with ``flow`` and ``return_to``
+        in their place. See "Subflows" in :class:`FlowConfig`.
+
         Parameters:
-            task_messages: What the LLM should do at this node.
+            task_messages: What the LLM should do at this node. Required
+                unless the node runs a subflow.
             role_message: The bot's role or personality, sent as the LLM's
                 system instruction on entering this node. It persists across
                 transitions until another node sets its own. May contain
@@ -341,11 +344,36 @@ class FlowConfig(BaseModel):
                 is entered. Defaults to True.
             metadata: JSON data the application attaches to the node. See
                 "Metadata" in :class:`FlowConfig`.
+            flow: Id of the subflow this node runs, a key of the config's
+                ``flows``. A node that runs a subflow takes only
+                ``return_to`` and ``metadata`` besides.
+            return_to: The node that ``return`` in the subflow leads to. May
+                be omitted when the subflow never returns.
         """
 
-        model_config = ConfigDict(extra="forbid")
+        model_config = ConfigDict(
+            extra="forbid",
+            json_schema_extra={
+                "if": {"properties": {"flow": {"type": "string"}}, "required": ["flow"]},
+                "then": {
+                    "properties": {
+                        "task_messages": {"maxItems": 0},
+                        "role_message": {"type": "null"},
+                        "functions": {"maxItems": 0},
+                        "pre_actions": {"maxItems": 0},
+                        "post_actions": {"maxItems": 0},
+                        "context_strategy": {"type": "null"},
+                        "respond_immediately": {"const": True},
+                    }
+                },
+                "else": {
+                    "required": ["task_messages"],
+                    "properties": {"return_to": {"type": "null"}},
+                },
+            },
+        )
 
-        task_messages: "list[FlowConfig.Message]"
+        task_messages: "list[FlowConfig.Message]" = Field(default_factory=list)
         role_message: str | None = None
         functions: "list[FlowConfig.Function]" = Field(default_factory=list)
         pre_actions: "list[FlowConfig.Action]" = Field(default_factory=list)
@@ -353,9 +381,29 @@ class FlowConfig(BaseModel):
         context_strategy: Literal["append", "reset"] | None = None
         respond_immediately: bool = True
         metadata: dict[str, JsonValue] | None = None
+        flow: str | None = None
+        return_to: str | None = None
 
         @model_validator(mode="after")
-        def _check_unique_function_names(self) -> "FlowConfig.Node":
+        def _check_shape(self) -> "FlowConfig.Node":
+            if self.flow is None:
+                if "task_messages" not in self.model_fields_set:
+                    raise ValueError("a node needs 'task_messages', or a 'flow' to run")
+                if self.return_to is not None:
+                    raise ValueError("'return_to' applies only to a node that runs a 'flow'")
+            elif (
+                self.task_messages
+                or self.role_message is not None
+                or self.functions
+                or self.pre_actions
+                or self.post_actions
+                or self.context_strategy is not None
+                or not self.respond_immediately
+            ):
+                raise ValueError(
+                    f"a node that runs flow '{self.flow}' takes only 'flow', 'return_to' "
+                    "and 'metadata'"
+                )
             _check_unique([f.name for f in self.functions], "node")
             return self
 
@@ -364,7 +412,7 @@ class FlowConfig(BaseModel):
             return ContextStrategy(self.context_strategy) if self.context_strategy else None
 
     class Subflow(BaseModel):
-        """A set of nodes that flows include.
+        """A set of nodes that a flow's nodes can run.
 
         Inside a subflow a function transitions to one of the subflow's own
         nodes, or to ``return``. See "Subflows" in :class:`FlowConfig`.
@@ -386,59 +434,57 @@ class FlowConfig(BaseModel):
                     f"a subflow cannot have a node named '{RETURN}', which is how its "
                     "functions leave it"
                 )
-            _check_no_dots(self.nodes, "node")
+            _check_no_dots(self.nodes)
             if self.initial_node not in self.nodes:
                 raise ValueError(f"initial_node '{self.initial_node}' is not a defined node")
             targets = {*self.nodes, RETURN}
             for node_name, node in self.nodes.items():
+                if node.flow is not None:
+                    raise ValueError(
+                        f"node '{node_name}' runs a flow, which a subflow's nodes cannot do"
+                    )
                 for func in node.functions:
                     _check_targets(func, targets, f"node '{node_name}'")
             return self
 
-    class Include(BaseModel):
-        """One use of a subflow.
-
-        Parameters:
-            flow: Id of the subflow, a key of the config's ``flows``.
-            return_to: Where ``return`` in the subflow leads: a node of the
-                config, or another include.
-        """
-
-        model_config = ConfigDict(extra="forbid")
-
-        flow: str
-        return_to: str
+        def returns(self) -> bool:
+            """Whether any function in the subflow transitions to ``return``."""
+            return any(
+                RETURN in func.targets() for node in self.nodes.values() for func in node.functions
+            )
 
     initial_node: str
     nodes: dict[str, Node] = Field(min_length=1)
     global_functions: list[Function] = Field(default_factory=list)
     flows: dict[str, Subflow] = Field(default_factory=dict)
-    includes: dict[str, Include] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check_graph(self) -> "FlowConfig":
-        if self.flows or self.includes:
-            # A subflow's nodes are built as ``<include>.<node>``.
-            _check_no_dots(self.nodes, "node")
-            _check_no_dots(self.includes, "include")
-        for include_id, include in self.includes.items():
-            if include_id in self.nodes:
-                raise ValueError(f"include '{include_id}' has the same name as a node")
-            if include.flow not in self.flows:
-                raise ValueError(f"include '{include_id}' names unknown flow '{include.flow}'")
-        used = {include.flow for include in self.includes.values()}
-        for flow_id in self.flows:
-            if flow_id not in used:
-                raise ValueError(f"flow '{flow_id}' is not used by any include")
-
-        targets = {*self.nodes, *self.includes}
-        if self.initial_node not in targets:
+        if self.flows:
+            # A subflow's nodes are built as ``<node>.<subflow node>``.
+            _check_no_dots(self.nodes)
+        if self.initial_node not in self.nodes:
             raise ValueError(f"initial_node '{self.initial_node}' is not a defined node")
-        for include_id, include in self.includes.items():
-            if include.return_to not in targets:
-                raise ValueError(
-                    f"include '{include_id}' returns to unknown node '{include.return_to}'"
-                )
+
+        run: set[str] = set()
+        for node_name, node in self.nodes.items():
+            if node.flow is None:
+                continue
+            subflow = self.flows.get(node.flow)
+            if subflow is None:
+                raise ValueError(f"node '{node_name}' runs unknown flow '{node.flow}'")
+            run.add(node.flow)
+            if node.return_to is None:
+                if subflow.returns():
+                    raise ValueError(
+                        f"node '{node_name}' runs flow '{node.flow}', which returns, and "
+                        "needs a 'return_to'"
+                    )
+            elif node.return_to not in self.nodes:
+                raise ValueError(f"node '{node_name}' returns to unknown node '{node.return_to}'")
+        for flow_id in self.flows:
+            if flow_id not in run:
+                raise ValueError(f"flow '{flow_id}' is not run by any node")
 
         _check_unique([f.name for f in self.global_functions], "global_functions")
         global_names = {f.name for f in self.global_functions}
@@ -456,9 +502,9 @@ class FlowConfig(BaseModel):
                         )
         for node_name, node in self.nodes.items():
             for func in node.functions:
-                _check_targets(func, targets, f"node '{node_name}'")
+                _check_targets(func, self.nodes, f"node '{node_name}'")
         for func in self.global_functions:
-            _check_targets(func, targets, "global_functions")
+            _check_targets(func, self.nodes, "global_functions")
         return self
 
     @classmethod
@@ -528,12 +574,11 @@ def _check_unique(names: list[str], where: str) -> None:
         seen.add(name)
 
 
-def _check_no_dots(names: Iterable[str], kind: str) -> None:
+def _check_no_dots(names: Iterable[str]) -> None:
     for name in names:
         if "." in name:
             raise ValueError(
-                f"{kind} '{name}' has a '.' in its name, which a config that uses subflows "
-                "cannot have"
+                f"node '{name}' has a '.' in its name, which a config that has subflows cannot have"
             )
 
 

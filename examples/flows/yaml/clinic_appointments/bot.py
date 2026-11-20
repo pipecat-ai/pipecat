@@ -8,8 +8,8 @@
 
 flow.yaml books or cancels an appointment, and verifies the caller first
 either way. The verification steps are a subflow, verification.yaml, that
-flow.yaml includes twice: once returning to the booking node and once to the
-cancelling node. handlers.py holds the tools both files call.
+two nodes of flow.yaml run: one returns to the booking node and the other to
+the cancelling node. handlers.py holds the tools both files call.
 
 Requirements:
 - CARTESIA_API_KEY
@@ -120,7 +120,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     await runner.add_workers(worker)
 
-    # The flow is data: load it and the subflow it includes, then join them to
+    # The flow is data: load it and the subflow it runs, then join them to
     # the tools they name.
     config = FlowConfig.from_file(FLOW_CONFIG_PATH)
     flow = Flow(config, handlers=handlers)

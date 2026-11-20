@@ -20,9 +20,10 @@ and the config decides the next node. ``{{ key }}`` placeholders in prompts
 are left in place; :class:`~pipecat.flows.FlowManager` fills them from its
 state when it enters the node.
 
-A config's subflows are expanded here: each include's nodes are built under
-the name ``<include>.<node>``, and a transition into an include, or a
-``return`` out of one, is wired to the node it leads to.
+A config's subflows are expanded here: a subflow's nodes are built once for
+each node that runs it, under the name ``<node>.<subflow node>``, and a
+transition into such a node, or a ``return`` out of its subflow, is wired to
+the node it leads to.
 """
 
 import inspect
@@ -93,13 +94,14 @@ class Flow:
         self._handlers = list(handlers) if isinstance(handlers, (list, tuple)) else [handlers]
         self._problems: list[FlowProblem] = []
 
-        self._nodes: dict[str, NodeConfig] = {
-            name: self._build_node(name, node) for name, node in config.nodes.items()
-        }
-        for include_id, include in config.includes.items():
-            for name, node in config.flows[include.flow].nodes.items():
-                expanded = f"{include_id}.{name}"
-                self._nodes[expanded] = self._build_node(expanded, node, include=include_id)
+        self._nodes: dict[str, NodeConfig] = {}
+        for name, node in config.nodes.items():
+            if node.flow is None:
+                self._nodes[name] = self._build_node(name, node)
+                continue
+            for inner_name, inner in config.flows[node.flow].nodes.items():
+                built = f"{name}.{inner_name}"
+                self._nodes[built] = self._build_node(built, inner, parent=name)
         self._global_functions = [
             schema
             for ref in config.global_functions
@@ -132,12 +134,15 @@ class Flow:
         """The node config for ``name``.
 
         Args:
-            name: A node name from the config, or ``<include>.<node>`` for a
-                node of a subflow.
+            name: A node name from the config, or ``<node>.<subflow node>``
+                for a node of a subflow. For a node that runs a subflow, this
+                is the subflow's first node.
 
         Raises:
             ~pipecat.flows.FlowError: If the config has no such node.
         """
+        if name in self._config.nodes:
+            name = self._resolve(name)
         try:
             return self._nodes[name]
         except KeyError:
@@ -146,9 +151,9 @@ class Flow:
     # Building
 
     def _build_node(
-        self, name: str, node: "FlowConfig.Node", *, include: str | None = None
+        self, name: str, node: "FlowConfig.Node", *, parent: str | None = None
     ) -> NodeConfig:
-        """Build one node; ``include`` is the include it belongs to, if any."""
+        """Build one node; ``parent`` is the node running the subflow it is in, if any."""
         where = f"node '{name}'"
         config: NodeConfig = {
             "name": name,
@@ -161,7 +166,7 @@ class Flow:
             config["functions"] = [
                 schema
                 for ref in node.functions
-                if (schema := self._build_function(ref, where=where, node=name, include=include))
+                if (schema := self._build_function(ref, where=where, node=name, parent=parent))
             ]
         if node.pre_actions:
             config["pre_actions"] = [
@@ -186,7 +191,7 @@ class Flow:
         *,
         where: str,
         node: str | None,
-        include: str | None = None,
+        parent: str | None = None,
     ) -> FlowsFunctionSchema | None:
         """Build the schema for one function entry, or record why it cannot be built."""
         if ref.transition_only:
@@ -195,7 +200,7 @@ class Flow:
                 description=ref.description or "",
                 properties={},
                 required=[],
-                handler=self._make_transition_handler(ref, include),
+                handler=self._make_transition_handler(ref, parent),
                 metadata=ref.metadata,
             )
         function = self._lookup(ref.name, kind="tool", where=where, node=node)
@@ -222,7 +227,7 @@ class Flow:
             description=schema.description,
             properties=schema.properties,
             required=schema.required,
-            handler=self._make_handler(ref, wrapper, where, include),
+            handler=self._make_handler(ref, wrapper, where, parent),
             cancel_on_interruption=wrapper.cancel_on_interruption,
             timeout_secs=wrapper.timeout_secs,
             metadata=ref.metadata,
@@ -291,20 +296,24 @@ class Flow:
 
     # Calling
 
-    def _resolve(self, target: str, include: str | None = None) -> str:
+    def _resolve(self, target: str, parent: str | None = None) -> str:
         """The name of the built node a transition target leads to.
 
         Args:
             target: A target as the config writes it.
-            include: The include whose subflow the target is written in, or
+            parent: The node running the subflow the target is written in, or
                 None for the config's own nodes and global functions.
         """
-        if include is not None:
+        if parent is not None:
             if target != RETURN:
-                return f"{include}.{target}"
-            target = self._config.includes[include].return_to
-        if entered := self._config.includes.get(target):
-            return f"{target}.{self._config.flows[entered.flow].initial_node}"
+                return f"{parent}.{target}"
+            return_to = self._config.nodes[parent].return_to
+            if return_to is None:
+                raise FlowError(f"node '{parent}' runs a flow that returns, but has no return_to")
+            target = return_to
+        flow = self._config.nodes[target].flow
+        if flow is not None:
+            return f"{target}.{self._config.flows[flow].initial_node}"
         return target
 
     def _make_handler(
@@ -312,7 +321,7 @@ class Flow:
         ref: "FlowConfig.Function",
         wrapper: FlowsDirectFunctionWrapper,
         where: str,
-        include: str | None,
+        parent: str | None,
     ) -> Callable[[FlowArgs, "FlowManager"], Any]:
         async def handler(
             args: FlowArgs, flow_manager: "FlowManager"
@@ -321,28 +330,28 @@ class Flow:
             result, next_node = _check_contract(response, ref.name, where)
             if next_node is NO_RESPONSE:
                 return result, NO_RESPONSE
-            return result, self._destination(ref, result, where, include)
+            return result, self._destination(ref, result, where, parent)
 
         return handler
 
     def _make_transition_handler(
-        self, ref: "FlowConfig.Function", include: str | None
+        self, ref: "FlowConfig.Function", parent: str | None
     ) -> Callable[[FlowArgs, "FlowManager"], Any]:
         async def handler(
             args: FlowArgs, flow_manager: "FlowManager"
         ) -> ConsolidatedFunctionResult:
-            return None, self._nodes[self._resolve(ref.transition_to, include)]  # type: ignore[arg-type]
+            return None, self._nodes[self._resolve(ref.transition_to, parent)]  # type: ignore[arg-type]
 
         return handler
 
     def _destination(
-        self, ref: "FlowConfig.Function", result: Any, where: str, include: str | None
+        self, ref: "FlowConfig.Function", result: Any, where: str, parent: str | None
     ) -> NodeConfig | None:
         target = ref.transition_to
         if target is None:
             return None
         if isinstance(target, str):
-            return self._nodes[self._resolve(target, include)]
+            return self._nodes[self._resolve(target, parent)]
 
         if not isinstance(result, Mapping) or target.field not in result:
             raise FlowError(
@@ -353,7 +362,7 @@ class Flow:
         if node_name is None:
             logger.debug(f"{where} tool '{ref.name}': no branch case matched, staying")
             return None
-        return self._nodes[self._resolve(node_name, include)]
+        return self._nodes[self._resolve(node_name, parent)]
 
 
 def _check_contract(response: Any, name: str, where: str) -> tuple[Any, Any]:

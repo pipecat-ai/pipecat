@@ -664,18 +664,16 @@ def composed(**overrides) -> FlowConfig:
                 "nodes": {"anything_else": _node(_go("more", "return"))},
             },
         },
-        "includes": {
-            "verify": {"flow": "verification", "return_to": "book"},
-            "goodbye": {"flow": "closing", "return_to": "book"},
-        },
         "nodes": {
             "start": _node(_go("begin", "verify")),
+            "verify": {"flow": "verification", "return_to": "book"},
             "book": _node(
                 {
                     "name": "report",
                     "transition_to": {"field": "status", "cases": {"booked": "goodbye"}},
                 }
             ),
+            "goodbye": {"flow": "closing", "return_to": "book"},
         },
     }
     data.update(overrides)
@@ -692,7 +690,7 @@ class TestSubflows(unittest.IsolatedAsyncioTestCase):
         _, next_node = await schema.handler(args or {}, self.flow_manager)
         return next_node
 
-    def test_an_include_is_built_under_its_id(self):
+    def test_a_subflow_is_built_under_the_node_that_runs_it(self):
         flow = make_flow(composed())
         self.assertEqual(
             set(flow._nodes),
@@ -705,6 +703,11 @@ class TestSubflows(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(FlowError):
             flow.node("verification.ask")
 
+    def test_the_node_that_runs_a_subflow_is_its_first_node(self):
+        flow = make_flow(composed())
+        self.assertIs(flow.node("verify"), flow.node("verify.ask"))
+        self.assertIs(flow.node("goodbye"), flow.node("goodbye.anything_else"))
+
     def test_a_flow_without_subflows_builds_its_own_nodes_only(self):
         cfg = config()
         flow = make_flow(cfg)
@@ -712,41 +715,41 @@ class TestSubflows(unittest.IsolatedAsyncioTestCase):
         for name in cfg.nodes:
             self.assertEqual(flow.node(name)["name"], name)
 
-    async def test_entering_an_include_goes_to_its_first_node(self):
+    async def test_entering_a_node_that_runs_a_subflow_goes_to_its_first_node(self):
         flow = make_flow(composed())
         self.assertIs(await self.call(flow, "start"), flow.node("verify.ask"))
         self.assertIs(
             await self.call(flow, "book", {"status": "booked"}), flow.node("goodbye.anything_else")
         )
 
-    async def test_targets_inside_an_include_stay_inside_it(self):
+    async def test_targets_inside_a_subflow_stay_inside_it(self):
         flow = make_flow(composed())
         self.assertIs(await self.call(flow, "verify.ask"), flow.node("verify.check"))
         self.assertIs(
             await self.call(flow, "verify.check", {"flag": False}), flow.node("verify.ask")
         )
 
-    async def test_return_goes_to_the_includes_return_to(self):
+    async def test_return_goes_to_the_return_to_of_the_node_that_ran_it(self):
         flow = make_flow(composed())
         self.assertIs(await self.call(flow, "verify.check", {"flag": True}), flow.node("book"))
         self.assertIs(await self.call(flow, "goodbye.anything_else"), flow.node("book"))
 
-    async def test_return_to_another_include(self):
+    async def test_return_to_a_node_that_runs_a_subflow(self):
         cfg = composed()
-        cfg.includes["verify"].return_to = "goodbye"
+        cfg.nodes["verify"].return_to = "goodbye"
         flow = make_flow(cfg)
         self.assertIs(
             await self.call(flow, "verify.check", {"flag": True}),
             flow.node("goodbye.anything_else"),
         )
 
-    def test_initial_node_may_be_an_include(self):
+    def test_initial_node_may_run_a_subflow(self):
         flow = make_flow(composed(initial_node="verify"))
         self.assertIs(flow.initial_node, flow.node("verify.ask"))
 
-    async def test_one_subflow_included_twice(self):
+    async def test_one_subflow_run_by_two_nodes(self):
         cfg = composed()
-        cfg.includes["verify_again"] = FlowConfig.Include(flow="verification", return_to="start")
+        cfg.nodes["verify_again"] = FlowConfig.Node(flow="verification", return_to="start")
         flow = make_flow(cfg)
 
         self.assertIsNot(flow.node("verify.ask"), flow.node("verify_again.ask"))
@@ -757,7 +760,14 @@ class TestSubflows(unittest.IsolatedAsyncioTestCase):
             await self.call(flow, "verify_again.check", {"flag": True}), flow.node("start")
         )
 
-    async def test_global_function_may_enter_an_include(self):
+    def test_a_subflow_that_never_returns_needs_no_return_to(self):
+        cfg = composed()
+        cfg.flows["closing"].nodes["anything_else"].functions[0].transition_to = "anything_else"
+        cfg.nodes["goodbye"].return_to = None
+        flow = make_flow(FlowConfig.model_validate(cfg.model_dump()))
+        self.assertEqual(flow.node("goodbye")["name"], "goodbye.anything_else")
+
+    async def test_global_function_may_enter_a_subflow(self):
         flow = make_flow(composed(global_functions=[_go("reverify", "verify")]))
         _, next_node = await flow.global_functions[0].handler({}, self.flow_manager)
         self.assertIs(next_node, flow.node("verify.ask"))
@@ -773,15 +783,15 @@ class TestSubflows(unittest.IsolatedAsyncioTestCase):
         cfg = composed()
         cfg.flows["verification"].nodes["check"].functions[0].name = "no_such_tool"
         cfg.nodes["book"].functions[0].name = "also_missing"
-        cfg.includes["verify_again"] = FlowConfig.Include(flow="verification", return_to="start")
+        cfg.nodes["verify_again"] = FlowConfig.Node(flow="verification", return_to="start")
         with self.assertRaises(FlowReferenceError) as cm:
             make_flow(cfg)
         problems = [(p.code, p.node, p.function) for p in cm.exception.problems]
         self.assertEqual(
             problems,
             [
-                ("missing_tool", "book", "also_missing"),
                 ("missing_tool", "verify.check", "no_such_tool"),
+                ("missing_tool", "book", "also_missing"),
                 ("missing_tool", "verify_again.check", "no_such_tool"),
             ],
         )
@@ -807,11 +817,11 @@ class TestShippedExamples(unittest.TestCase):
         for example in examples:
             with self.subTest(example=example.name):
                 flow = self.build(example)
-                if not flow.config.includes:
+                if not flow.config.flows:
                     self.assertEqual(set(flow._nodes), set(flow.config.nodes))
                 self.assertIn("task_messages", flow.initial_node)
 
-    def test_clinic_appointments_includes_one_subflow_twice(self):
+    def test_clinic_appointments_runs_one_subflow_from_two_nodes(self):
         flow = self.build(self.EXAMPLES / "clinic_appointments")
         self.assertEqual(
             set(flow._nodes) - set(flow.config.nodes),

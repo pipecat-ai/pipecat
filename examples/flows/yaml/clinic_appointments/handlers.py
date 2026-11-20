@@ -9,7 +9,7 @@
 Each tool is a direct function that reports its outcome and returns
 ``(result, TRANSITION_IN_YAML)``; the YAML decides where the conversation goes.
 ``verify_birth_date`` is called from the subflow, so the same function serves
-both places the subflow is included.
+both nodes that run it.
 """
 
 from pipecat.flows import TRANSITION_IN_YAML, FlowManager

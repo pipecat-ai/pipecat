@@ -2,21 +2,13 @@
 # tools in handlers.py.
 #
 # Booking and cancelling both start by verifying the caller. Those steps are
-# a subflow, written once in verification.yaml and included twice below, each
-# include saying where the subflow's `return` leads.
+# a subflow, written once in verification.yaml and run by two nodes below,
+# each saying where the subflow's `return` leads.
 
 initial_node: greet
 
 flows:
   verification: !include verification.yaml
-
-includes:
-  verify_to_book:
-    flow: verification
-    return_to: book
-  verify_to_cancel:
-    flow: verification
-    return_to: cancel
 
 nodes:
   greet:
@@ -29,7 +21,6 @@ nodes:
           Greet the caller and ask whether they want to book an appointment or
           cancel one.
     functions:
-      # A target that names an include enters its subflow.
       - name: wants_to_book
         transition_only: true
         description: The caller wants to book an appointment.
@@ -38,6 +29,15 @@ nodes:
         transition_only: true
         description: The caller wants to cancel an appointment.
         transition_to: verify_to_cancel
+
+  # A node with a `flow` runs that subflow: entering it enters the subflow.
+  verify_to_book:
+    flow: verification
+    return_to: book
+
+  verify_to_cancel:
+    flow: verification
+    return_to: cancel
 
   book:
     task_messages:
