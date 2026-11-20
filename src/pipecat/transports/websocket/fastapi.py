@@ -42,7 +42,7 @@ from pipecat.utils.security.allowed_origins import default_allowed_origins, is_o
 
 try:
     from fastapi import WebSocket
-    from starlette.websockets import WebSocketState
+    from starlette.websockets import WebSocketDisconnect, WebSocketState
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -219,14 +219,24 @@ class FastAPIWebsocketClient:
         """Log the outcome of the WebSocket close task.
 
         Runs whether the close completed within ``ws_close_timeout`` or
-        afterwards, so an error raised by a slow close is still surfaced.
+        afterwards, so an error raised by a slow close is still surfaced. A
+        ``WebSocketDisconnect`` means the peer had already gone (the ASGI server
+        raised an ``OSError`` on the close send), so it is expected and logged at
+        DEBUG.
         """
         try:
             task.result()
         except asyncio.CancelledError:
             pass
+        except WebSocketDisconnect as e:
+            logger.debug(
+                f"{self} peer already disconnected while closing the websocket: "
+                f"{e.__class__.__name__} (code={e.code})"
+            )
         except Exception as e:
-            logger.error(f"{self} exception while closing the websocket: {e}")
+            logger.error(
+                f"{self} exception while closing the websocket: {e.__class__.__name__} ({e})"
+            )
 
     async def trigger_client_disconnected(self):
         """Trigger the client disconnected callback."""

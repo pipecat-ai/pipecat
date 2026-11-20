@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import AsyncMock, PropertyMock
 
 from loguru import logger
-from starlette.websockets import WebSocketState
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from pipecat.frames.frames import Frame, OutputAudioRawFrame, TextFrame
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -366,6 +366,56 @@ class TestDisconnectCloseTimeout(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(client._close_task.done())
         self.assertIsInstance(client._close_task.exception(), RuntimeError)
         self.assertIn("exception while closing the websocket", logs.getvalue())
+
+    async def test_close_after_peer_gone_logs_debug_not_error(self):
+        """A WebSocketDisconnect from close() (peer already gone) is logged at DEBUG."""
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        mock_ws.close = AsyncMock(side_effect=WebSocketDisconnect(code=1006))
+
+        client, _ = self._make_client(mock_ws, ws_close_timeout=5.0)
+
+        errors = io.StringIO()
+        error_id = logger.add(errors, level="ERROR", format="{message}")
+        try:
+            with self._capture_logs("DEBUG") as logs:
+                await client.disconnect()  # must not raise
+                await asyncio.sleep(0)  # let the done callback run
+        finally:
+            logger.remove(error_id)
+
+        self.assertEqual(errors.getvalue(), "")
+        self.assertIn("peer already disconnected", logs.getvalue())
+        self.assertIn("WebSocketDisconnect (code=1006)", logs.getvalue())
+
+    async def test_close_error_message_includes_exception_class(self):
+        """Any other close() exception stays at ERROR, with its class name and text."""
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        mock_ws.close = AsyncMock(side_effect=RuntimeError("boom"))
+
+        client, _ = self._make_client(mock_ws, ws_close_timeout=5.0)
+
+        with self._capture_logs("ERROR") as logs:
+            await client.disconnect()
+            await asyncio.sleep(0)
+
+        self.assertIn("exception while closing the websocket", logs.getvalue())
+        self.assertIn("RuntimeError (boom)", logs.getvalue())
+
+    async def test_close_success_logs_no_error(self):
+        """A close that succeeds logs nothing at ERROR."""
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        mock_ws.close = AsyncMock()
+
+        client, _ = self._make_client(mock_ws, ws_close_timeout=5.0)
+
+        with self._capture_logs("ERROR") as logs:
+            await client.disconnect()
+            await asyncio.sleep(0)
+
+        self.assertEqual(logs.getvalue(), "")
 
     async def test_transport_passes_ws_close_timeout_to_client(self):
         """The transport wires params.ws_close_timeout through to its client."""
