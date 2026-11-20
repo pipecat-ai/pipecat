@@ -58,6 +58,7 @@ from pipecat.flows.types import (
     FunctionHandler,
     LegacyFunctionHandler,
     NodeConfig,
+    NodeEntered,
     ZeroArgFunctionHandler,
     get_or_generate_node_name,
 )
@@ -75,6 +76,7 @@ from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext, No
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.transports.base_transport import BaseTransport
+from pipecat.utils.base_object import BaseObject
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 
 # A ``{{ key }}`` or ``{{ key.sub.key }}`` placeholder in a node's prompt text.
@@ -85,7 +87,7 @@ _PLACEHOLDER = re.compile(
 )
 
 
-class FlowManager:
+class FlowManager(BaseObject):
     r"""Manages conversation flows.
 
     The FlowManager orchestrates conversation flows by managing state transitions,
@@ -102,6 +104,20 @@ class FlowManager:
     a context reset. ``{{ order.size }}`` walks into a stored mapping, a
     key that is missing raises :class:`~pipecat.flows.FlowError` on entry,
     and ``\{{ key }}`` is left as the literal ``{{ key }}``.
+
+    Event handlers available:
+
+    - on_node_entered: Called each time the flow enters a node, including the
+      first node and a node it re-enters, with a
+      :class:`~pipecat.flows.NodeEntered`. Handlers run in order before the
+      node's LLM response starts, so they must be fast; create a task for
+      slow work.
+
+    Example::
+
+        @flow_manager.event_handler("on_node_entered")
+        async def on_node_entered(flow_manager, entered: NodeEntered):
+            ...
     """
 
     def __init__(
@@ -134,6 +150,8 @@ class FlowManager:
                 during initialization and automatically included alongside node-specific
                 functions.
         """
+        super().__init__()
+
         if worker is not None and task is not None:
             raise ValueError("Pass either 'worker' or 'task' (deprecated), not both.")
         if task is not None:
@@ -161,12 +179,15 @@ class FlowManager:
 
         self._state: dict[str, Any] = {}  # Internal state storage
         self._current_functions: set[str] = set()  # Track registered functions
+        self._current_function_metadata: dict[str, dict[str, Any]] = {}
         self._current_node: str | None = None
 
         self._showed_deprecation_warning_for_role_messages = False
         self._showed_deprecation_warning_for_reset_with_summary = False
         self._showed_deprecation_warning_for_zero_arg_handler = False
         self._showed_deprecation_warning_for_legacy_handler = False
+
+        self._register_event_handler("on_node_entered", sync=True)
 
     @property
     def state(self) -> dict[str, Any]:
@@ -564,7 +585,7 @@ class FlowManager:
             if next_node:
                 node_name = get_or_generate_node_name(next_node)
                 logger.debug(f"Transition to function-returned node: {node_name}")
-                await self._set_node(node_name, next_node)
+                await self._set_node(node_name, next_node, via=transition_info.get("function_name"))
         except Exception as e:
             logger.error(f"Error executing transition: {str(e)}")
             raise
@@ -670,7 +691,9 @@ class FlowManager:
                 ]
         return cast(NodeConfig, rendered)
 
-    async def _set_node(self, node_id: str, node_config: NodeConfig) -> None:
+    async def _set_node(
+        self, node_id: str, node_config: NodeConfig, *, via: str | None = None
+    ) -> None:
         """Set up a new conversation node and transition to it.
 
         Handles the complete node transition process in the following order:
@@ -679,12 +702,14 @@ class FlowManager:
         3. Register node functions
         4. Update LLM context with messages and tools
         5. Update state (current node and functions)
-        6. Trigger LLM completion with new context
-        7. Execute post-actions (if any)
+        6. Call ``on_node_entered`` handlers
+        7. Trigger LLM completion with new context
+        8. Execute post-actions (if any)
 
         Args:
             node_id: Identifier for the new node.
             node_config: Complete configuration for the node.
+            via: Name of the function whose call caused the move, if any.
 
         Raises:
             ~pipecat.flows.FlowTransitionError: If manager not initialized.
@@ -721,6 +746,7 @@ class FlowManager:
 
             # Build the node's function schemas (carrying handlers)
             new_functions: set[str] = set()
+            new_function_metadata: dict[str, dict[str, Any]] = {}
 
             # Mix in global functions that should be available at every node
             functions_list = self._global_functions + node_config.get("functions", [])
@@ -738,6 +764,8 @@ class FlowManager:
                     )
                 standard_functions.append(await self._create_function_schema(tool))
                 new_functions.add(tool.name)
+                if isinstance(tool, FlowsFunctionSchema) and tool.metadata is not None:
+                    new_function_metadata[tool.name] = tool.metadata
 
             formatted_tools = (
                 ToolsSchema(standard_tools=standard_functions) if standard_functions else NOT_GIVEN
@@ -770,9 +798,20 @@ class FlowManager:
             )
             logger.debug("Updated LLM context")
 
-            # Update state
+            # Update state. ``via`` is a function of the node being left, so
+            # its metadata is read before that node's functions are replaced.
+            entered = NodeEntered(
+                node=node_id,
+                previous_node=self._current_node,
+                function=via,
+                metadata=node_config.get("metadata"),
+                function_metadata=self._current_function_metadata.get(via) if via else None,
+            )
             self._current_node = node_id
             self._current_functions = new_functions
+            self._current_function_metadata = new_function_metadata
+
+            await self._call_event_handler("on_node_entered", entered)
 
             # Trigger completion with new context
             respond_immediately = node_config.get("respond_immediately", True)

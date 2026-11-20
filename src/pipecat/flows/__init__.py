@@ -25,6 +25,7 @@ from .exceptions import (
 )
 from .flow import Flow
 from .manager import FlowManager
+from .rtvi import announce_nodes
 from .types import (
     NO_RESPONSE,
     TRANSITION_IN_YAML,
@@ -39,6 +40,7 @@ from .types import (
     FlowsFunctionSchema,
     LegacyFunctionHandler,
     NodeConfig,
+    NodeEntered,
     ZeroArgFunctionHandler,
     flows_direct_function,
     flows_tool_options,
@@ -53,6 +55,7 @@ from .types import (
 __all__ = [
     # Flow Manager
     "FlowManager",
+    "announce_nodes",
     # Declarative config
     "FlowConfig",
     "Flow",
@@ -70,6 +73,7 @@ __all__ = [
     "LegacyFunctionHandler",
     "FlowsDirectFunction",
     "NodeConfig",
+    "NodeEntered",
     "ZeroArgFunctionHandler",
     "flows_tool_options",
     "flows_direct_function",

@@ -415,6 +415,27 @@ class FlowsFunctionSchema:
         )
 
 
+@dataclass
+class NodeEntered:
+    """Where a flow has just arrived, as passed to ``on_node_entered`` handlers.
+
+    Parameters:
+        node: The node entered, by name.
+        previous_node: The node the flow left, or None when this is the first
+            node.
+        function: The function whose call caused the move, or None when the
+            node was set directly (``initialize``, ``set_node_from_config``).
+        metadata: The entered node's ``metadata``, or None.
+        function_metadata: The ``metadata`` of ``function``, or None.
+    """
+
+    node: str
+    previous_node: str | None = None
+    function: str | None = None
+    metadata: dict[str, Any] | None = None
+    function_metadata: dict[str, Any] | None = None
+
+
 def flows_tool_options(
     *, cancel_on_interruption: bool = False, timeout_secs: float | None = None
 ) -> Callable[[Callable], Callable]:
