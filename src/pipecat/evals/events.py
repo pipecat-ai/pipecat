@@ -619,8 +619,15 @@ class EvalEventStream:
         self._observing = True
 
     def _interrupted(self) -> None:
-        """The bot reported an interruption: drop its pending output and wait for a fresh reply."""
-        self.drop_pending_bot_output("on interruption")
+        """The bot reported an interruption: drop its unfinished response and wait for a fresh reply.
+
+        The queue is left as it is. The bot reports the user's turn starting
+        just ahead of the interruption, and a driver may not have read those
+        reports yet. The interrupted response's text and spoken turn that
+        still arrive are held back until the bot's next response starts (see
+        ``_awaiting_reply``), and a send drops whatever is left before it.
+        """
+        self._text_buffer = []
         self._awaiting_reply = True
         self._bot_quiet.set()
 
