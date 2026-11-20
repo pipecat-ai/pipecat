@@ -8,11 +8,14 @@
 
 import unittest
 from collections.abc import Callable
+from unittest.mock import AsyncMock
 
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
+    FunctionCallFromLLM,
+    FunctionCallsStartedFrame,
     LLMServiceMetadataFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
@@ -20,7 +23,7 @@ from pipecat.frames.frames import (
     TextFrame,
     UserTurnInferenceCompletedFrame,
 )
-from pipecat.processors.aggregators.llm_context import NOT_GIVEN
+from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.base_llm_extension import BaseLLMExtension, LLMExtensionTool
 from pipecat.services.llm_service import LLMService
@@ -450,6 +453,60 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(set(service.get_llm_adapter().builtin_tools), set())
         self.assertIs(service._functions["helper"].handler, handler)
+
+    async def test_an_extension_tools_call_start_is_announced_only_if_the_tool_asks(self):
+        """Either way the call is run, and the tool's name is reserved."""
+
+        async def handler(params):
+            await params.result_callback("ok")
+
+        def tool(name: str, **kwargs) -> LLMExtensionTool:
+            schema = FunctionSchema(
+                name=name, description="", properties={}, required=[], handler=handler
+            )
+            return LLMExtensionTool(schema, **kwargs)
+
+        class Companion(BaseLLMExtension):
+            def builtin_tools(self, registered):
+                return [tool("quiet"), tool("announced", announce_call_start=True)]
+
+        service = _MockLLMService(extensions=[Companion()])
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+        service._call_event_handler = AsyncMock()
+        broadcast = []
+        run = []
+
+        async def record_broadcast(frame_cls, **kwargs):
+            broadcast.append(frame_cls(**kwargs))
+
+        async def record_run(runner_items):
+            run.extend(runner_item.function_name for runner_item in runner_items)
+
+        service.broadcast_frame = record_broadcast
+        service._run_parallel_function_calls = record_run
+        service._run_sequential_function_calls = record_run
+
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name=name, tool_call_id=name, arguments={}, context=LLMContext()
+                )
+                for name in ("quiet", "announced")
+            ]
+        )
+
+        (started,) = [f for f in broadcast if isinstance(f, FunctionCallsStartedFrame)]
+        self.assertEqual([c.function_name for c in started.function_calls], ["announced"])
+        (event,) = [
+            call.args
+            for call in service._call_event_handler.call_args_list
+            if call.args[0] == "on_function_calls_started"
+        ]
+        self.assertEqual([c.function_name for c in event[1]], ["announced"])
+        self.assertEqual(run, ["quiet", "announced"])
+        for name in ("quiet", "announced"):
+            with self.assertRaises(ValueError):
+                service.register_function(name, handler)
 
     async def test_a_settings_update_builds_and_adds_extensions(self):
         first = _Alpha(instruction="FIRST")

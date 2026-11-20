@@ -26,18 +26,26 @@ class LLMExtensionTool:
     """A tool an extension adds to the service's built-in tools.
 
     Built-in tools go to the model on every inference, beside the tools the
-    context advertises, and their calls stay inside the service: they are
-    left out of ``on_function_calls_started`` and the frames that report
-    calls to the pipeline.
+    context advertises. Once a tool is added its name is reserved: an
+    application cannot register a tool of its own under it.
 
     Parameters:
         schema: The tool, carrying its handler.
         cancel_on_interruption: Whether a call of the tool is cancelled when
             the user interrupts; ``False`` makes it an asynchronous tool.
+        announce_call_start: Whether the service announces a call of the tool
+            when it starts, with its ``on_function_calls_started`` event and
+            a ``FunctionCallsStartedFrame``, as it does for an application's
+            own tools. ``False``, the default, suits a tool that is the
+            extension's own mechanism, which the application and the rest of
+            the pipeline need not hear about. Either way, the call's
+            ``FunctionCallInProgressFrame`` and ``FunctionCallResultFrame``
+            are pushed, and the call and its result go into the context.
     """
 
     schema: FunctionSchema
     cancel_on_interruption: bool = True
+    announce_call_start: bool = False
 
 
 class BaseLLMExtension(BaseObject):

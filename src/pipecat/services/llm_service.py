@@ -467,6 +467,8 @@ class LLMService(AIService, Generic[TAdapter]):
         self._cancel_tool_names: set[str] = set()
         # The extensions' built-in tools currently advertised, by name.
         self._extension_tool_names: set[str] = set()
+        # Those of them whose calls are announced when they start.
+        self._announced_extension_tool_names: set[str] = set()
         # Cancel-tool names that collide with a user's own tool, warned about once.
         self._warned_cancel_collisions: set[str] = set()
         # The user's base system instruction, without composed addons. Captured
@@ -2093,10 +2095,13 @@ class LLMService(AIService, Generic[TAdapter]):
             await self.broadcast_frame(UserTurnResponseCancelFrame)
             return
 
-        # Exclude the built-in tools — they are internal mechanism and should
-        # not be surfaced to user-facing event handlers or frames.
-        builtin = self._cancel_tool_names | self._extension_tool_names
-        user_visible_calls = [fc for fc in function_calls if fc.function_name not in builtin]
+        # Exclude the built-in tools that are internal mechanism — they should
+        # not be surfaced to user-facing event handlers or frames. An
+        # extension's tool is one unless it asks for its calls to be announced.
+        internal = self._cancel_tool_names | (
+            self._extension_tool_names - self._announced_extension_tool_names
+        )
+        user_visible_calls = [fc for fc in function_calls if fc.function_name not in internal]
         if user_visible_calls:
             await self._call_event_handler("on_function_calls_started", user_visible_calls)
             await self.broadcast_frame(FunctionCallsStartedFrame, function_calls=user_visible_calls)
@@ -2457,6 +2462,7 @@ class LLMService(AIService, Generic[TAdapter]):
             self._adapter.builtin_tools.pop(stale, None)
             self._functions.pop(stale, None)
             self._extension_tool_names.discard(stale)
+            self._announced_extension_tool_names.discard(stale)
 
         for name, tool in wanted.items():
             if name in self._extension_tool_names or name in self._functions:
@@ -2469,6 +2475,8 @@ class LLMService(AIService, Generic[TAdapter]):
                 cancel_on_interruption=tool.cancel_on_interruption,
             )
             self._extension_tool_names.add(name)
+            if tool.announce_call_start:
+                self._announced_extension_tool_names.add(name)
 
     def _sync_cancel_tools(self) -> None:
         """Match the advertised cancel tools to the tools currently registered.

@@ -40,7 +40,13 @@ class BackendPairingLLMExtension(BaseLLMExtension):
         """
         super().__init__(**kwargs)
         self._instruction = instruction
-        self._tools = [LLMExtensionTool(tool, cancel_on_interruption=False) for tool in tools]
+        # A delegation is announced when it starts, as a call of the
+        # application's own tools is: the application may speak on it, and the
+        # pipeline counts it among the calls in progress.
+        self._tools = [
+            LLMExtensionTool(tool, cancel_on_interruption=False, announce_call_start=True)
+            for tool in tools
+        ]
 
     @property
     def system_instruction(self) -> str | None:
