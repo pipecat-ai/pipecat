@@ -193,10 +193,11 @@ class AssemblyAITTSService(WebsocketTTSService):
         # The wait an Error asked for before the next connection attempt.
         self._reconnect_delay = 0.0
 
-        # The server numbers requests from 0 per session, and each Flush and
-        # Cancel takes the next number. This is the number of the request text
-        # is being written to now.
+        # The current request ID starts at 0. IDs after Cancel are provisional
+        # until Audio or FlushDone establishes the server's next ID.
         self._next_flush_id = 0
+        self._cancels_pending = 0
+        self._rebase_flush_id = False
         # Flush ID -> context, for requests whose FlushDone is still due.
         self._requests: dict[int, str] = {}
         self._contexts: dict[str, _ContextState] = {}
@@ -358,6 +359,8 @@ class AssemblyAITTSService(WebsocketTTSService):
     def _reset_session_state(self):
         """Forget per-session state, which a new session doesn't carry over."""
         self._next_flush_id = 0
+        self._cancels_pending = 0
+        self._rebase_flush_id = False
         self._requests.clear()
         self._word_contexts.clear()
         self._session_id = None
@@ -474,6 +477,7 @@ class AssemblyAITTSService(WebsocketTTSService):
             self._requests.clear()
             if self._websocket and self._websocket.state is State.OPEN:
                 self._next_flush_id += 1
+                self._cancels_pending += 1
                 try:
                     await self._send({"type": "Cancel"})
                 except Exception as e:
@@ -512,6 +516,20 @@ class AssemblyAITTSService(WebsocketTTSService):
                 continue
 
             msg_type = msg.get("type")
+            if msg_type in ("Audio", "FlushDone"):
+                if self._cancels_pending:
+                    continue
+                if self._rebase_flush_id:
+                    if not self._requests:
+                        continue
+                    # Cancel may skip IDs. Requests sent after it have provisional
+                    # IDs until the first Audio or FlushDone establishes the base.
+                    shift = msg["flush_id"] - min(self._requests)
+                    self._requests = {
+                        flush_id + shift: owner for flush_id, owner in self._requests.items()
+                    }
+                    self._next_flush_id += shift
+                    self._rebase_flush_id = False
             if msg_type == "Audio":
                 await self._handle_audio(msg)
             elif msg_type == "FlushDone":
@@ -520,6 +538,10 @@ class AssemblyAITTSService(WebsocketTTSService):
                 await self._handle_word_boundaries(msg)
             elif msg_type == "Begin":
                 self._handle_begin(msg)
+            elif msg_type == "Cancelled":
+                if self._cancels_pending:
+                    self._cancels_pending -= 1
+                    self._rebase_flush_id = True
             elif msg_type == "Error":
                 await self._handle_error(msg)
             else:
