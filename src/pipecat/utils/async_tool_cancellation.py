@@ -16,7 +16,12 @@ tool apart takes the ``tool_call_id`` the conversation already carries, on the
 message that reported each call running.
 """
 
+from typing import TYPE_CHECKING
+
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+
+if TYPE_CHECKING:
+    from pipecat.adapters.llm.schemas.function_schema import FunctionCallHandler
 
 ASYNC_TOOL_CANCELLATION_INSTRUCTIONS = """ASYNC TOOL CANCELLATION:
 Some of your tools keep running in the background after you have replied, and some of \
@@ -52,7 +57,9 @@ def cancel_tool_name(function_name: str) -> str:
     return f"{CANCEL_TOOL_PREFIX}{function_name}"
 
 
-def build_cancel_tool_schema(function_name: str) -> FunctionSchema:
+def build_cancel_tool_schema(
+    function_name: str, handler: "FunctionCallHandler | None" = None
+) -> FunctionSchema:
     """Build the cancel tool for one cancellable tool.
 
     Which work to stop is carried by the tool the model picks, so a single
@@ -62,6 +69,7 @@ def build_cancel_tool_schema(function_name: str) -> FunctionSchema:
 
     Args:
         function_name: The tool whose calls this one cancels.
+        handler: The handler that runs when the model calls it.
 
     Returns:
         The schema to advertise alongside ``function_name``.
@@ -87,4 +95,5 @@ def build_cancel_tool_schema(function_name: str) -> FunctionSchema:
             },
         },
         required=[],
+        handler=handler,
     )
