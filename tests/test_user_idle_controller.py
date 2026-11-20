@@ -895,6 +895,21 @@ class TestUserWaiting(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.events, ["waiting"])
 
+    async def test_wait_for_user_during_an_async_function_call_starts_the_waiting_timer(self):
+        """An async call stays pending while it runs as background work."""
+        await self.controller.process_frame(
+            FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock()])
+        )
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self.controller.process_frame(UserStartedSpeakingFrame())
+        await self.controller.process_frame(UserStoppedSpeakingFrame())
+        await self.controller.wait_for_user()
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
+
     async def test_an_idle_timeout_update_does_not_arm_during_work(self):
         await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
         await self.controller.process_frame(BotStoppedSpeakingFrame())
