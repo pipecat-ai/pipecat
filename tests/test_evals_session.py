@@ -709,6 +709,58 @@ class TestBotTurn(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._responses(s), [])
 
 
+class TestInterruptionKeepsTheUsersTurn(unittest.IsolatedAsyncioTestCase):
+    """The bot's reports of the user's turn starting survive the interruption sent right behind them."""
+
+    async def _expect(self, messages: list[str], event: str) -> dict:
+        """Feed the bot's messages as the sink does, back to back, to a turn waiting for ``event``."""
+        s = _stream(bot_audio=True)
+        s.input_sent()
+        waiting = asyncio.create_task(s.next_event(event, time.monotonic() + 1))
+        await asyncio.sleep(0)
+        for msg_type in messages:
+            message = {"label": RTVI.MESSAGE_LABEL, "type": msg_type}
+            reported = s.frame_to_event(InputTransportMessageFrame(message=message))
+            if reported is not None:
+                await s.append(reported)
+        return await waiting
+
+    async def test_user_started_speaking_survives_the_interruption_behind_it(self):
+        matched = await self._expect(
+            ["user-started-speaking", "bot-interrupted"], "user_started_speaking"
+        )
+        self.assertEqual(matched["type"], "user_started_speaking")
+
+    async def test_vad_user_started_speaking_survives_both_reports_behind_it(self):
+        matched = await self._expect(
+            ["vad-user-started-speaking", "user-started-speaking", "bot-interrupted"],
+            "vad_user_started_speaking",
+        )
+        self.assertEqual(matched["type"], "vad_user_started_speaking")
+
+    async def test_bot_interrupted_still_matches(self):
+        matched = await self._expect(
+            ["user-started-speaking", "bot-interrupted"], "bot_interrupted"
+        )
+        self.assertEqual(matched["type"], "bot_interrupted")
+
+    async def test_the_interruption_still_drops_the_bots_output(self):
+        s = _stream(bot_audio=True)
+        s._queue.put_nowait({"type": "response", "text": "We open at"})
+        s._queue.put_nowait({"type": "user_started_speaking"})
+        s._interrupted()
+        self.assertEqual(s._queue.get_nowait(), {"type": "user_started_speaking"})
+        self.assertTrue(s._queue.empty())
+
+    async def test_a_send_still_drops_the_previous_turns_reports(self):
+        # Left queued, they would match the next turn's expectation.
+        s = _stream(bot_audio=True)
+        for kind in ("vad_user_started_speaking", "user_started_speaking"):
+            s._queue.put_nowait({"type": kind})
+        s.drop_pending_bot_output("before send")
+        self.assertTrue(s._queue.empty())
+
+
 class TestInterruptingSendDropsOpenBotTurn(unittest.IsolatedAsyncioTestCase):
     """A send over a speaking bot drops what its open turn holds of the bot's earlier speech."""
 

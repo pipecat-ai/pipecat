@@ -96,6 +96,11 @@ from pipecat.frames.frames import (
 # its reply to what comes next.
 _INTERRUPTION_EVENTS = ("user_started_speaking", "bot_interrupted")
 
+# The bot's reports of the user's turn starting. The bot sends each just ahead
+# of an interruption (a VAD start, then the turn's start, then bot-interrupted),
+# so on an interruption they describe the turn now starting, not stale output.
+_USER_TURN_STARTS = ("vad_user_started_speaking", "user_started_speaking")
+
 
 class EvalBotEndedError(Exception):
     """The bot ended the call before the awaited event arrived, so it never will."""
@@ -429,7 +434,7 @@ class EvalEventStream:
                 self._claimed.add(len(self._turn_log) - 1)
                 return event
 
-    def drop_pending_bot_output(self, why: str) -> None:
+    def drop_pending_bot_output(self, why: str, *, keep_user_turn: bool = False) -> None:
         """Drop the bot's queued output, so a later turn cannot match it.
 
         A queued ``user_transcription`` stays: a DTMF keypress reports its
@@ -439,6 +444,11 @@ class EvalEventStream:
 
         Args:
             why: What prompted the drop, for the trace.
+            keep_user_turn: Also keep the bot's reports of the user's turn
+                starting (``vad_user_started_speaking`` and
+                ``user_started_speaking``). An interruption keeps them: they
+                arrive just ahead of it and are about the turn it starts. A send
+                drops them, as the previous turn's.
         """
         self._text_buffer = []
         preserved: list[dict] = []
@@ -448,7 +458,8 @@ class EvalEventStream:
                 event = self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-            if event.get("type") == "user_transcription":
+            kind = event.get("type")
+            if kind == "user_transcription" or (keep_user_turn and kind in _USER_TURN_STARTS):
                 preserved.append(event)
             else:
                 dropped += 1
@@ -619,7 +630,7 @@ class EvalEventStream:
 
     def _interrupted(self) -> None:
         """The bot reported an interruption: drop its pending output and wait for a fresh reply."""
-        self.drop_pending_bot_output("on interruption")
+        self.drop_pending_bot_output("on interruption", keep_user_turn=True)
         self._awaiting_reply = True
         self._bot_quiet.set()
 
