@@ -284,6 +284,9 @@ class SarvamHttpTTSSettings(TTSSettings):
         temperature: Controls output randomness (0.01 to 1.0). Lower values = more
             deterministic, higher = more random. Defaults to 0.6.
             **Note:** Supported by bulbul:v3; ignored by bulbul:v4-flash.
+        dict_id: ID of a pronunciation dictionary to apply during synthesis. Create
+            dictionaries with Sarvam's ``/text-to-speech/pronunciation-dictionary``
+            endpoints. Defaults to None (no dictionary).
     """
 
     _aliases: ClassVar[dict[str, str]] = {
@@ -297,6 +300,7 @@ class SarvamHttpTTSSettings(TTSSettings):
     pitch: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     loudness: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     temperature: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -474,6 +478,7 @@ class SarvamHttpTTSService(TTSService):
             pitch=None,
             loudness=None,
             temperature=None,
+            dict_id=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -635,6 +640,8 @@ class SarvamHttpTTSService(TTSService):
                 payload["temperature"] = (
                     self._settings.temperature if self._settings.temperature is not None else 0.6
                 )
+            if self._settings.dict_id is not None:
+                payload["dict_id"] = self._settings.dict_id
 
             headers = {
                 "api-subscription-key": self._api_key,
@@ -894,6 +901,7 @@ class SarvamTTSService(InterruptibleTTSService):
             pitch=None,
             loudness=None,
             temperature=None,
+            dict_id=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -1151,6 +1159,8 @@ class SarvamTTSService(InterruptibleTTSService):
             config_data["loudness"] = self._settings.loudness
         if self._config.supports_temperature and self._settings.temperature is not None:
             config_data["temperature"] = self._settings.temperature
+        if self._settings.dict_id is not None:
+            config_data["dict_id"] = self._settings.dict_id
         logger.debug(f"Config being sent is {config_data}")
         config_message = {"type": "config", "data": config_data}
 
