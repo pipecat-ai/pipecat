@@ -8,8 +8,9 @@
 
 `RTVIClientTransport` connects to a bot that runs an RTVI *server* transport
 (e.g. the eval transport) and exchanges frames with it: the bot's RTVI server
-messages arrive as pipeline frames, and outgoing frames (audio, pre-built RTVI
-client messages) are sent to the bot. It is the client-side counterpart to a bot
+messages reach the pipeline as raw messages, ``InputTransportMessageFrame``s
+pushed downstream, and outgoing frames (audio, pre-built RTVI client messages)
+are sent to the bot. It is the client-side counterpart to a bot
 running an RTVI server transport, and the foundation for the eval harness and
 eval simulations (see ``docs/design/eval-simulations.md``).
 
@@ -62,6 +63,8 @@ class RTVIClientTransport(WebsocketClientTransport):
     - on_bot_ready: the bot answered the ``client-ready`` handshake with ``bot-ready``.
       The handler runs before any later message from the bot is dispatched, so
       it acts on what the bot reported before it hears anything else from it.
+      It runs in the loop that reads from the bot, so it must return quickly
+      and must not wait for anything the bot sends next.
 
     Example::
 

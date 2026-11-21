@@ -96,8 +96,9 @@ class EvalHarnessError(Exception):
 class EvalEventStream:
     """The bot's output as events: a queue the drivers read, fed by the pipeline.
 
-    The sink turns each frame from the bot into an event and appends it; the
-    drivers pop events as they wait for them. One rule runs through it: what
+    The sink hands it the bot's RTVI messages, each mapped to its event (see
+    :meth:`rtvi_message_to_event`), and the harness appends events of its own;
+    the drivers pop events as they wait for them. One rule runs through it: what
     the bot produced before the user's latest send is not the reply to it. An
     LLM response still streaming at the send, or cut by an interruption, is
     dropped until the bot's next ``llm-started``, and a spoken turn that began
