@@ -1,0 +1,1503 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipecat text flow</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --surface-2: #eef0f3;
+    --border: #d9dde3;
+    --text: #1d2229;
+    --muted: #6b7280;
+    --accent: #2f6fed;
+    --accent-soft: #e3ebfd;
+    --danger: #b42318;
+    --danger-soft: #fde8e6;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --diff-bg: #fff1b8;
+    --diff-fg: #6b4e00;
+    --spoken: #1f7a4d;  --spoken-soft: #dcf3e6;
+    --skipped: #7a5a1f; --skipped-soft: #f6ecd6;
+    --dropped: #9a2f2f; --dropped-soft: #f8dede;
+    --unspoken: #5a5f7a; --unspoken-soft: #e4e6f1;
+    --t1: #3b5bdb; --t1s: #e4e9fb;
+    --t2: #0b7285; --t2s: #d9f1f5;
+    --t3: #862e9c; --t3s: #f1e2f6;
+    --t4: #a61e4d; --t4s: #fbe1ea;
+    --t5: #5c940d; --t5s: #e8f3d5;
+    --t6: #d9480f; --t6s: #fde6d8;
+    --highlight: #fff7cc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121417; --surface: #1b1f24; --surface-2: #232830; --border: #323943;
+      --text: #e6e9ee; --muted: #9aa3ad; --accent: #6b9cff; --accent-soft: #1f2f52;
+      --danger: #ff8a80; --danger-soft: #3b1e1c;
+      --diff-bg: #4a3d0a; --diff-fg: #ffe28a;
+      --spoken: #7bd3a3; --spoken-soft: #173526;
+      --skipped: #e2bd7a; --skipped-soft: #3a2e16;
+      --dropped: #ff9b9b; --dropped-soft: #3f1d1d;
+      --unspoken: #b7bbd6; --unspoken-soft: #2a2d3f;
+      --t1: #9db2ff; --t1s: #1e2747; --t2: #7fd4e4; --t2s: #123238;
+      --t3: #d7a6e6; --t3s: #33203a; --t4: #f3a0bf; --t4s: #3d1a28;
+      --t5: #b8e07a; --t5s: #24311a; --t6: #ffab80; --t6s: #3d2316;
+      --highlight: #3a3418;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121417; --surface: #1b1f24; --surface-2: #232830; --border: #323943;
+    --text: #e6e9ee; --muted: #9aa3ad; --accent: #6b9cff; --accent-soft: #1f2f52;
+    --danger: #ff8a80; --danger-soft: #3b1e1c;
+    --diff-bg: #4a3d0a; --diff-fg: #ffe28a;
+    --spoken: #7bd3a3; --spoken-soft: #173526;
+    --skipped: #e2bd7a; --skipped-soft: #3a2e16;
+    --dropped: #ff9b9b; --dropped-soft: #3f1d1d;
+    --unspoken: #b7bbd6; --unspoken-soft: #2a2d3f;
+    --t1: #9db2ff; --t1s: #1e2747; --t2: #7fd4e4; --t2s: #123238;
+    --t3: #d7a6e6; --t3s: #33203a; --t4: #f3a0bf; --t4s: #3d1a28;
+    --t5: #b8e07a; --t5s: #24311a; --t6: #ffab80; --t6s: #3d2316;
+    --highlight: #3a3418;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--sans); }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  code, .mono { font-family: var(--mono); font-size: 12.5px; }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .01em; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  h3 { font-size: 13px; margin: 0 0 6px; font-weight: 600; }
+
+  .app { display: grid; grid-template-columns: 340px 1fr; min-height: 100vh; }
+  .sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 14px 14px 40px; overflow-y: auto; height: 100vh; position: sticky; top: 0; }
+  .main { padding: 14px 18px 60px; min-width: 0; }
+  @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; }
+    .sidebar { height: auto; position: static; border-right: 0; border-bottom: 1px solid var(--border); }
+  }
+
+  .topbar { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 14px; flex-wrap: wrap; }
+  .topbar textarea { flex: 1 1 420px; min-height: 64px; resize: vertical; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-family: var(--mono); font-size: 13px; }
+  .topbar .controls { display: flex; flex-direction: column; gap: 6px; }
+  .btn { padding: 7px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.small { padding: 3px 8px; font-size: 12px; }
+  .status { font-size: 12px; color: var(--muted); min-height: 16px; }
+
+  .banner { background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; }
+  .hidden { display: none !important; }
+
+  .section { margin-bottom: 22px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+
+  /* sidebar form */
+  .field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  .field input[type=text], .field input[type=number], .field select, .field textarea { padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); width: 100%; }
+  .field textarea { font-family: var(--mono); font-size: 12px; min-height: 60px; }
+  .check { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 6px; }
+  .row { display: flex; gap: 6px; }
+  .row > * { flex: 1; min-width: 0; }
+  .form-section { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-bottom: 10px; background: var(--surface); }
+  .form-section > summary { cursor: pointer; font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px; list-style: none; }
+  .form-section > summary::-webkit-details-marker { display: none; }
+  .form-section > summary::before { content: "▸"; color: var(--muted); font-size: 11px; }
+  .form-section[open] > summary::before { content: "▾"; }
+  .form-section > summary .spacer { flex: 1; }
+  .form-section .body { margin-top: 10px; }
+  .list-editor { display: flex; flex-direction: column; gap: 6px; }
+  .list-item { border: 1px dashed var(--border); border-radius: 6px; padding: 6px; background: var(--bg); }
+  .list-item .row { margin-bottom: 4px; }
+  .hint { font-size: 11.5px; color: var(--muted); margin: 2px 0 4px; }
+  .tiny { font-size: 11px; color: var(--muted); }
+  .x { padding: 2px 7px; font-size: 12px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); flex: 0 0 auto; }
+  .json-error { color: var(--danger); font-size: 12px; font-family: var(--mono); white-space: pre-wrap; }
+
+  /* badges */
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+  .badge.type { font-family: var(--mono); font-weight: 500; }
+  .outcome-spoken { color: var(--spoken); background: var(--spoken-soft); }
+  .outcome-skipped { color: var(--skipped); background: var(--skipped-soft); }
+  .outcome-dropped { color: var(--dropped); background: var(--dropped-soft); }
+  .outcome-unspoken { color: var(--unspoken); background: var(--unspoken-soft); }
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 6px; font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--border); cursor: pointer; font-family: var(--mono); }
+  .pill.kind-skip, .pill.kind-trim { color: var(--skipped); }
+  .pill.kind-drop, .pill.kind-error { color: var(--dropped); }
+  .pill .stage { color: var(--muted); }
+
+  /* flow */
+  .chunks { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chunk { font-family: var(--mono); font-size: 12.5px; padding: 2px 6px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border); white-space: pre; }
+  .flow { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .segments { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; }
+  .segment { position: relative; transition: box-shadow .12s, border-color .12s; }
+  .segment.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .segment .head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .segment .head .idx { font-family: var(--mono); color: var(--muted); font-size: 12px; }
+  .segment .head .by { font-size: 11px; color: var(--muted); margin-left: auto; }
+  .trow { display: grid; grid-template-columns: 78px 1fr; gap: 8px; align-items: baseline; padding: 4px 0; border-top: 1px solid var(--border); }
+  .trow:first-of-type { border-top: 0; }
+  .trow .lab { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .trow .val { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; }
+  .trow .val.none { color: var(--muted); font-style: italic; }
+  .d { background: var(--diff-bg); color: var(--diff-fg); border-radius: 2px; }
+  .events { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .event-detail { margin-top: 6px; font-family: var(--mono); font-size: 12px; background: var(--surface-2); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; word-break: break-word; }
+  .event-detail .arrow { color: var(--muted); }
+
+  /* consumers */
+  .consumers { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+  .message { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; background: var(--surface-2); padding: 8px 10px; border-radius: 8px; }
+  .contrib { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .contrib .chunk { cursor: pointer; }
+  .contrib .chunk.muted { opacity: .55; }
+  .lifecycle { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .lifecycle .status { font-size: 11px; font-family: var(--mono); color: var(--muted); }
+  .lifecycle .line { display: grid; grid-template-columns: 92px 1fr; gap: 6px; align-items: baseline; padding: 1px 0; font-family: var(--mono); font-size: 12.5px; }
+  .lifecycle .line .txt { white-space: pre-wrap; word-break: break-word; }
+  .acc { font-weight: 700; }
+  .rem { color: var(--muted); }
+  .req { padding: 6px 0; border-top: 1px solid var(--border); font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; }
+  .req:first-child { border-top: 0; }
+  .req.gap { color: var(--muted); font-style: italic; }
+  .tokens { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+  .tok { font-size: 11px; padding: 0 5px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); }
+  .tok .t { color: var(--muted); margin-left: 4px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; font-family: var(--mono); white-space: pre-wrap; word-break: break-word; }
+  th { font-family: var(--sans); font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .words-seg { margin-bottom: 12px; }
+
+  /* timeline */
+  .tl-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .chip { padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font-size: 12px; cursor: pointer; }
+  .chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .tl-controls input[type=range] { flex: 1 1 160px; }
+  .tl { max-height: 420px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .tl-row { display: grid; grid-template-columns: 44px 200px 220px 1fr; gap: 8px; padding: 3px 8px; font-family: var(--mono); font-size: 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .tl-row:hover { background: var(--surface-2); }
+  .tl-row.hl { background: var(--highlight); }
+  .tl-row.cur { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .tl-row .k-rtvi { color: var(--t3); }
+  .tl-row .k-provider { color: var(--t6); }
+  .tl-row .k-frame { color: var(--t2); }
+  .tl-row .seq { color: var(--muted); }
+  .tl-row .sum { white-space: pre-wrap; word-break: break-word; color: var(--muted); }
+  @media (max-width: 900px) { .tl-row { grid-template-columns: 40px 1fr; } .tl-row .sum { grid-column: 1 / -1; } }
+  .empty { color: var(--muted); font-style: italic; }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .sidebar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+
+  /* player + diagram */
+  .player { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .player input[type=range] { flex: 1 1 200px; }
+  .player select { padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+  .player .pbtn { min-width: 34px; }
+  .caption { min-height: 24px; font-size: 13px; margin-bottom: 10px; padding: 6px 10px; background: var(--surface-2); border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
+  .caption .who { font-weight: 600; }
+  .caption .t { color: var(--muted); font-family: var(--mono); font-size: 11.5px; margin-right: 8px; }
+  .diagram { overflow-x: auto; padding: 6px 2px 10px; }
+  .nodes { position: relative; display: grid; gap: 34px 46px; align-items: start; min-width: 1000px; }
+  .node { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; min-height: 110px; transition: box-shadow .15s, border-color .15s; position: relative; z-index: 1; min-width: 0; }
+  .node.src { border-color: var(--t2); box-shadow: 0 0 0 3px var(--t2s); }
+  .node.dst { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .node.side { background: var(--surface-2); }
+  .node .nh { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
+  .node .nh .name { font-weight: 600; font-size: 13px; }
+  .node .nh .sub { font-size: 11px; color: var(--muted); }
+  .node .nb { font-size: 12px; }
+  .node .lab { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 7px 0 2px; }
+  .buf { font-family: var(--mono); font-size: 12.5px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; min-height: 28px; white-space: pre-wrap; word-break: break-word; }
+  .buf .new { background: var(--accent-soft); color: var(--accent); border-radius: 2px; }
+  .buf .caret { display: inline-block; width: 1px; height: 13px; background: var(--accent); vertical-align: text-bottom; animation: blink 1s steps(2) infinite; margin-left: 1px; }
+  .buf.empty-buf { color: var(--muted); font-style: italic; font-family: var(--sans); }
+  @keyframes blink { to { visibility: hidden; } }
+  .fr { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); font-family: var(--mono); font-size: 12px; max-width: 100%; }
+  .packet .fr { flex-wrap: nowrap; }
+  .fr.hot { border-color: var(--accent); background: var(--accent-soft); }
+  .fr .fn { color: var(--muted); font-family: var(--sans); font-size: 11px; white-space: nowrap; }
+  .fr .ft { white-space: pre-wrap; word-break: break-word; }
+  .packet .fr .ft { white-space: pre; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+  .steps-list { margin: 2px 0 0; padding: 0; list-style: none; font-family: var(--mono); font-size: 12px; }
+  .steps-list li { padding: 2px 0; border-top: 1px dashed var(--border); white-space: pre-wrap; word-break: break-word; }
+  .steps-list li.skip, .steps-list li.trim { color: var(--skipped); }
+  .steps-list li.drop, .steps-list li.error { color: var(--dropped); }
+  .steps-list li .arrow, .steps-list li .k { color: var(--muted); }
+  .wchips { display: flex; flex-wrap: wrap; gap: 3px; }
+  .wc { font-family: var(--mono); font-size: 11.5px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); white-space: pre; }
+  .wc.hot { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .wc.seg { border-style: dashed; }
+  .wc .t { color: var(--muted); margin-left: 3px; font-size: 10.5px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--border); margin-right: 5px; vertical-align: middle; }
+  .dot.on { background: var(--spoken); box-shadow: 0 0 0 3px var(--spoken-soft); }
+  .chunkview { display: flex; flex-wrap: wrap; gap: 3px; }
+  .chunkview .chunk { transition: opacity .15s; }
+  .chunkview .chunk.rest { opacity: .4; }
+  .chunkview .chunk.cur { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .msgs { max-height: 150px; overflow: auto; }
+  .msg { display: grid; grid-template-columns: 96px 1fr; gap: 6px; font-family: var(--mono); font-size: 11.5px; padding: 1px 0; border-top: 1px dashed var(--border); white-space: pre-wrap; word-break: break-word; }
+  .msg .mt { color: var(--t3); }
+  .msg.hot { background: var(--accent-soft); }
+  .wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
+  .wires line, .wires path { stroke: var(--border); stroke-width: 2; fill: none; }
+  .wires .arr { fill: var(--border); }
+  .packet { position: absolute; left: 0; top: 0; z-index: 3; pointer-events: none; opacity: 0; }
+  .packet .fr { box-shadow: 0 4px 14px rgba(0,0,0,.18); }
+  .tl { position: relative; }
+  .tl-row .k-aggregate { color: var(--t5); } .tl-row .k-stage { color: var(--t4); }
+  .tl-row .sum.aggr { color: var(--text); }
+  .stream { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 400px); gap: 10px; align-items: start; }
+  @media (max-width: 1100px) { .stream { grid-template-columns: 1fr; } }
+  .detail { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; max-height: 300px; overflow: auto; font-size: 12px; }
+  .detail .dh { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; margin-bottom: 6px; }
+  .detail .dh .dl { font-weight: 600; font-family: var(--mono); }
+  .detail .dh .dk { font-size: 11px; color: var(--muted); }
+  .detail.preview { border-style: dashed; }
+  .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 1px 10px; font-family: var(--mono); font-size: 11.5px; }
+  .kv .k { color: var(--muted); white-space: nowrap; }
+  .kv .v { white-space: pre-wrap; word-break: break-word; }
+  .kv .v.null { color: var(--muted); font-style: italic; }
+  .kv .v.str { color: var(--t5); }
+  .kv .v.num { color: var(--t2); }
+  .kv .v.bool { color: var(--t3); }
+  .help { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--border); color: var(--muted); background: var(--surface); font: 600 10px/1 var(--sans); letter-spacing: 0; text-transform: none; margin-left: 6px; vertical-align: middle; cursor: help; flex: none; }
+  .help:hover, .help:focus { color: var(--accent); border-color: var(--accent); outline: none; }
+  th[data-tip], .trow .lab[data-tip], .chip[data-tip] { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+  #tip { position: fixed; z-index: 1000; max-width: 340px; padding: 8px 10px; border-radius: 8px; background: var(--text); color: var(--bg); font: 12px/1.45 var(--sans); letter-spacing: 0; text-transform: none; white-space: pre-wrap; pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,.25); opacity: 0; transition: opacity .12s; }
+  #tip.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <h1>Pipecat text flow</h1>
+      <button class="btn small" id="theme">Theme</button>
+    </div>
+    <div class="field">
+      <label for="preset">Preset</label>
+      <select id="preset"></select>
+      <div class="hint" id="preset-desc"></div>
+    </div>
+    <div class="field">
+      <label for="bot-path">Bot file <span class="help" data-tip="Trace a bot’s own text path. The file is imported and its bot(runner_args) is called with a stub transport and a runner that never starts, so its LLMTextProcessor, TTS service and RTVIObserver are captured as it builds them. The bot’s environment applies: the variables it reads must be set." tabindex="0">?</span></label>
+      <div class="row"><input type="text" id="bot-path" placeholder="path/to/bot.py" spellcheck="false"><button class="btn small" id="bot-load">Load</button></div>
+      <div class="hint" id="bot-desc"></div>
+    </div>
+    <div id="form"></div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <textarea id="text" spellcheck="false" placeholder="What the LLM would say…"></textarea>
+      <div class="controls">
+        <button class="btn primary" id="run">Run</button>
+        <button class="btn" id="text-load" data-tip="Load the LLM response from a text file on this computer">Open file</button>
+        <input type="file" id="text-file" accept=".txt,.md,text/*" style="display:none">
+        <button class="btn" id="share">Share</button>
+        <div class="status" id="status"></div>
+      </div>
+    </div>
+    <div class="banner hidden" id="banner"></div>
+
+    <section class="section">
+      <h2>Flow <span class="help" data-tip="Replays the run one step at a time. Each node is a real pipeline processor, or the stand-in LLM, TTS provider and client. The moving chip is the frame or message in flight. Play, use the arrow keys or drag the slider; the list below follows the current step and the panel to its right shows the full object." tabindex="0">?</span></h2>
+      <div class="card">
+        <div class="player">
+          <button class="btn small pbtn" id="pl-first" data-tip="Back to before the first step">&#9198;</button>
+          <button class="btn small pbtn" id="pl-prev" data-tip="Previous step (←)">&#8249;</button>
+          <button class="btn small pbtn primary" id="pl-play" data-tip="Play or pause (space)">&#9654;</button>
+          <button class="btn small pbtn" id="pl-next" data-tip="Next step (→)">&#8250;</button>
+          <button class="btn small pbtn" id="pl-last" data-tip="Jump to the last step">&#9197;</button>
+          <input type="range" id="pl-slider" min="-1" max="-1" value="-1">
+          <span class="tiny" id="pl-pos"></span>
+          <select id="pl-speed" data-tip="Step speeds advance at a fixed pace. Real time waits between steps as long as the run did.">
+            <option value="step:700">slow</option>
+            <option value="step:300" selected>normal</option>
+            <option value="step:110">fast</option>
+            <option value="real:0.25">real time &times;&frac14;</option>
+            <option value="real:1">real time</option>
+          </select>
+        </div>
+        <div class="caption" id="pl-caption">Press play, or step with the arrow keys.</div>
+        <div class="diagram"><div class="nodes" id="nodes"></div></div>
+        <div class="tl-controls" id="tl-controls" style="margin-top:12px"></div>
+        <div class="stream">
+          <div class="tl" id="tl" style="max-height:300px"></div>
+          <div class="detail" id="detail"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Segments <span class="help" data-tip="One card per AggregatedTextFrame, in the order the aggregator cut them from the LLM’s text, with what became of it downstream: what the context records, what clients see, and what the TTS was asked to speak." tabindex="0">?</span></h2>
+      <div class="legend">
+        <span><span class="badge outcome-spoken">spoken</span> sent to the provider</span>
+        <span><span class="badge outcome-skipped">skipped</span> a skipped text type</span>
+        <span><span class="badge outcome-dropped">dropped</span> removed by a transform, filter or trim</span>
+        <span><span class="badge outcome-unspoken">unspoken</span> marked skip_tts by the LLM</span>
+        <span><span class="d">&nbsp;diff&nbsp;</span> differs from the LLM text</span>
+      </div>
+      <div class="segments" id="segments"></div>
+    </section>
+
+    <section class="section">
+      <h2>Consumers <span class="help" data-tip="What finally reached each destination once the whole response was processed: the assistant message in the conversation context, the RTVI messages the client received, and the synthesis requests the TTS provider got." tabindex="0">?</span></h2>
+      <div class="consumers">
+        <div class="card"><h3>Context <span class="help" data-tip="The assistant message the LLMAssistantAggregator committed to the LLMContext at the end of the turn, and the per-segment parts it was concatenated from. Parts come from the frames’ raw_text, so markup stripped for speech is still recorded." tabindex="0">?</span></h3><div id="ctx"></div></div>
+        <div class="card"><h3>Client (RTVI) <span class="help" data-tip="Messages the RTVIObserver sent to the client: a bot-output per segment, with spoken progress as its words play, and, when enabled in the setup, the bot-llm and bot-tts lifecycle and deprecated text messages." tabindex="0">?</span></h3><div id="client"></div></div>
+        <div class="card"><h3>TTS provider <span class="help" data-tip="Each synthesis request the provider received, after the TTS service’s filters and transforms, with the word timestamps it reported back. The provider is the stand-in, or the bot’s own when the service runs live. Segments that were never sent say why." tabindex="0">?</span></h3><div id="provider"></div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Words <span class="help" data-tip="One table per spoken segment and one row per TTSTextFrame the TTS service emitted for a word the provider reported. The output transport releases each word when its timestamp comes due; the progress columns are what the AggregatedTextProgressFrame alongside it carried." tabindex="0">?</span></h2>
+      <div class="card" id="words"></div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+(() => {
+  // ---------- state ----------
+  const state = {
+    presets: [], catalog: [], setup: null, text: "", trace: null, bot: null,
+    kinds: { frame: true, aggregate: true, stage: true, provider: true, rtvi: true }, segFilter: "", pos: -1, runId: 0,
+  };
+  const $ = (id) => document.getElementById(id);
+
+  // ---------- helpers ----------
+  function el(tag, attrs = {}, ...children) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v == null) continue;
+      if (k === "class") n.className = v;
+      else if (k === "text") n.textContent = v;
+      else if (k === "html") n.innerHTML = v;
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (k === "checked" || k === "value" || k === "open") n[k] = v;
+      else n.setAttribute(k, v);
+    }
+    for (const c of children.flat()) {
+      if (c == null || c === false) continue;
+      n.append(c instanceof Node ? c : document.createTextNode(String(c)));
+    }
+    return n;
+  }
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+  const str = (v) => (v == null ? "" : String(v));
+  const typeHue = (() => {
+    const fixed = { sentence: 1, word: 2, token: 2, backchannel: 5 };
+    const seen = {}; let next = 3;
+    return (t) => {
+      if (fixed[t]) return fixed[t];
+      if (!seen[t]) { seen[t] = next; next = next >= 6 ? 3 : next + 1; }
+      return seen[t];
+    };
+  })();
+  // ---------- tooltips ----------
+  // One floating box, shown for whatever element under the pointer (or focus)
+  // carries a data-tip attribute.
+  const tipBox = el("div", { id: "tip", role: "tooltip" });
+  document.body.append(tipBox);
+  function showTip(target) {
+    const text = target.getAttribute("data-tip");
+    if (!text) return;
+    tipBox.textContent = text; tipBox.classList.add("show");
+    const r = target.getBoundingClientRect(), tw = tipBox.offsetWidth, th = tipBox.offsetHeight;
+    let x = r.left + r.width / 2 - tw / 2, y = r.bottom + 8;
+    if (y + th > innerHeight - 8) y = r.top - th - 8;
+    x = Math.max(8, Math.min(x, innerWidth - tw - 8));
+    tipBox.style.left = `${x}px`; tipBox.style.top = `${y}px`;
+  }
+  const hideTip = () => tipBox.classList.remove("show");
+  const tipTarget = (ev) => ev.target && ev.target.closest ? ev.target.closest("[data-tip]") : null;
+  document.addEventListener("mouseover", (ev) => { const t = tipTarget(ev); if (t) showTip(t); });
+  document.addEventListener("mouseout", (ev) => { const t = tipTarget(ev); if (t && !(ev.relatedTarget && t.contains(ev.relatedTarget))) hideTip(); });
+  document.addEventListener("focusin", (ev) => { const t = tipTarget(ev); if (t) showTip(t); });
+  document.addEventListener("focusout", hideTip);
+  document.addEventListener("scroll", hideTip, true);
+  const help = (text) => el("span", { class: "help", "data-tip": text, tabindex: 0, text: "?" });
+
+  function typeBadge(t) {
+    const h = typeHue(t);
+    return el("span", { class: "badge type", style: `color:var(--t${h});background:var(--t${h}s)`, text: t });
+  }
+  function outcomeBadge(o) { return el("span", { class: `badge outcome-${o || "spoken"}`, text: o || "spoken" }); }
+
+  // Character-level diff: marks chars of `b` that are not part of an LCS with `a`.
+  function diffSpans(a, b) {
+    a = str(a); b = str(b);
+    if (a === b || !a) return [el("span", { text: b })];
+    const n = a.length, m = b.length;
+    if (n * m > 400000) return [el("span", { text: b })];
+    const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    const keep = new Array(m).fill(false);
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (a[i] === b[j]) { keep[j] = true; i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++;
+    }
+    const out = []; let buf = "", mode = null;
+    const flush = () => { if (buf) out.push(mode ? el("span", { class: "d", text: buf }) : el("span", { text: buf })); buf = ""; };
+    for (let k = 0; k < m; k++) {
+      const d = !keep[k];
+      if (mode !== d) { flush(); mode = d; }
+      buf += b[k];
+    }
+    flush();
+    return out;
+  }
+
+  function setStatus(msg) { $("status").textContent = msg || ""; }
+  function showError(msg) { const b = $("banner"); if (!msg) { b.classList.add("hidden"); b.textContent = ""; } else { b.classList.remove("hidden"); b.textContent = msg; } }
+
+  // ---------- api ----------
+  async function api(path, body) {
+    const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : undefined);
+    if (!r.ok) {
+      let detail = r.statusText;
+      try { const j = await r.json(); detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail, null, 1); } catch (e) {}
+      throw new Error(`${r.status}: ${detail}`);
+    }
+    return r.json();
+  }
+
+  let timer = null;
+  function scheduleRun() { clearTimeout(timer); timer = setTimeout(run, 300); }
+
+  async function run() {
+    clearTimeout(timer);
+    if (!state.setup) return;
+    const id = ++state.runId;
+    setStatus("Running…");
+    try {
+      const trace = await api("/api/trace", { setup: state.setup, text: state.text });
+      if (id !== state.runId) return;
+      state.trace = trace; state.pos = -1; pause();
+      if (trace.bot) {
+        state.bot = trace.bot;
+        // The bot is imported again on every run; if it changed, so does what the form shows.
+        if (JSON.stringify(trace.setup) !== JSON.stringify(state.setup)) { state.setup = trace.setup; renderForm(); }
+      }
+      showError(trace.errors && trace.errors.length ? "Errors during the run:\n" + trace.errors.join("\n") : "");
+      render();
+      setStatus(`${trace.segments.length} segments · ${trace.timeline.length} events`);
+    } catch (e) {
+      if (id !== state.runId) return;
+      showError(String(e.message || e));
+      setStatus("Failed");
+    }
+  }
+
+  // ---------- bot ----------
+  async function loadBot(path) {
+    if (!path) return;
+    setStatus("Loading bot…");
+    try {
+      const res = await api("/api/bot", { path });
+      state.bot = res.bot;
+      $("preset").value = "";
+      $("preset-desc").textContent = "";
+      $("bot-desc").textContent = `${res.bot.pipeline.length} processors captured.`;
+      replaceSetup(res.setup, state.text || res.setup.sample_text);
+    } catch (e) {
+      showError("Could not load the bot: " + String(e.message || e));
+      setStatus("Failed");
+    }
+  }
+
+  // ---------- form ----------
+  function catalogEntry(name) { return state.catalog.find((t) => t.name === name); }
+  // Read-only lines for the parts a bot provides.
+  function ro(label, value) {
+    const text = value == null || value === "" || (Array.isArray(value) && !value.length) ? "none" : Array.isArray(value) ? value.join(", ") : value;
+    return el("div", { class: "field" }, el("label", { text: label }), el("div", { class: "mono", style: "font-size:12px;white-space:pre-wrap;word-break:break-word", text }));
+  }
+  function aggDesc(a) {
+    if (!a) return "simple → sentence";
+    let d = `${a.kind} → ${a.aggregation_type}`;
+    if (a.kind === "pattern_pair") d += "\n" + (a.patterns || []).map((p) => `${p.type}: ${p.start} … ${p.end} (${p.action})`).join("\n");
+    if (a.kind === "skip_tags") d += "\n" + (a.skip_tags || []).map((t) => `${t[0]} … ${t[1]}`).join("\n");
+    return d;
+  }
+  const tfDesc = (list) => (list || []).length ? list.map((t) => `${t.text_type}: ${t.name}`).join("\n") : "none";
+
+  function field(label, control, hint) {
+    return el("div", { class: "field" }, el("label", { text: label }), control, hint ? el("div", { class: "hint", text: hint }) : null);
+  }
+  function textInput(obj, key, { number = false, onInput } = {}) {
+    return el("input", {
+      type: number ? "number" : "text", value: str(obj[key]), step: number ? "any" : null,
+      oninput: (e) => { obj[key] = number ? Number(e.target.value) : e.target.value; (onInput || scheduleRun)(); },
+    });
+  }
+  function selectInput(obj, key, options, onChange) {
+    const s = el("select", { onchange: (e) => { obj[key] = e.target.value; (onChange || scheduleRun)(); } },
+      ...options.map((o) => el("option", { value: o, text: o })));
+    s.value = obj[key];
+    return s;
+  }
+  function checkbox(obj, key, label, onChange) {
+    return el("label", { class: "check" },
+      el("input", { type: "checkbox", checked: !!obj[key], onchange: (e) => { obj[key] = e.target.checked; (onChange || scheduleRun)(); } }),
+      label);
+  }
+  function listInput(obj, key, label, hint) {
+    const inp = el("input", { type: "text", value: (obj[key] || []).join(", "),
+      oninput: (e) => { obj[key] = e.target.value.split(",").map((s) => s.trim()).filter(Boolean); scheduleRun(); } });
+    return field(label, inp, hint);
+  }
+
+  function optionsEditor(spec, entry) {
+    const wrap = el("div");
+    if (!entry || !entry.options.length) return wrap;
+    spec.options = spec.options || {};
+    for (const opt of entry.options) {
+      if (!(opt.name in spec.options)) spec.options[opt.name] = clone(opt.default);
+      const o = spec.options;
+      if (opt.kind === "bool") wrap.append(checkbox(o, opt.name, opt.name));
+      else if (opt.kind === "int") wrap.append(field(opt.name, el("input", { type: "number", value: str(o[opt.name]),
+        oninput: (e) => { o[opt.name] = e.target.value === "" ? null : Number(e.target.value); scheduleRun(); } }), opt.description));
+      else if (opt.kind === "pairs") {
+        const list = el("div", { class: "list-editor" });
+        const redraw = () => {
+          list.replaceChildren();
+          (o[opt.name] || []).forEach((pair, i) => {
+            list.append(el("div", { class: "row" },
+              el("input", { type: "text", value: str(pair[0]), placeholder: "pattern", oninput: (e) => { pair[0] = e.target.value; scheduleRun(); } }),
+              el("input", { type: "text", value: str(pair[1]), placeholder: "replacement", oninput: (e) => { pair[1] = e.target.value; scheduleRun(); } }),
+              el("button", { class: "x", text: "×", onclick: () => { o[opt.name].splice(i, 1); redraw(); scheduleRun(); } })));
+          });
+          list.append(el("button", { class: "x", text: "+ pair", onclick: () => { (o[opt.name] = o[opt.name] || []).push(["", ""]); redraw(); } }));
+        };
+        redraw();
+        wrap.append(field(opt.name, list, opt.description));
+      } else wrap.append(field(opt.name, textInput(o, opt.name), opt.description));
+    }
+    return wrap;
+  }
+
+  function transformsEditor(list, label) {
+    const box = el("div", { class: "field" });
+    const redraw = () => {
+      box.replaceChildren(el("label", { text: label }));
+      const items = el("div", { class: "list-editor" });
+      list.forEach((spec, i) => {
+        const entry = catalogEntry(spec.name);
+        const optBox = el("div");
+        optBox.append(optionsEditor(spec, entry));
+        const nameSel = el("select", { onchange: (e) => { spec.name = e.target.value; spec.options = {}; optBox.replaceChildren(optionsEditor(spec, catalogEntry(spec.name))); hint.textContent = (catalogEntry(spec.name) || {}).description || ""; scheduleRun(); } },
+          ...state.catalog.map((t) => el("option", { value: t.name, text: t.name })));
+        nameSel.value = spec.name;
+        const hint = el("div", { class: "hint", text: entry ? entry.description : `Unknown transform "${spec.name}"` });
+        items.append(el("div", { class: "list-item" },
+          el("div", { class: "row" },
+            el("input", { type: "text", value: str(spec.text_type), placeholder: "text type or *", style: "flex:0 0 90px", oninput: (e) => { spec.text_type = e.target.value; scheduleRun(); } }),
+            nameSel,
+            el("button", { class: "x", text: "×", onclick: () => { list.splice(i, 1); redraw(); scheduleRun(); } })),
+          hint, optBox));
+      });
+      items.append(el("button", { class: "x", text: "+ transform", onclick: () => { list.push({ text_type: "*", name: state.catalog[0] ? state.catalog[0].name : "strip_markdown", options: {} }); redraw(); scheduleRun(); } }));
+      box.append(items);
+    };
+    redraw();
+    return box;
+  }
+
+  function aggregatorEditor(agg) {
+    const box = el("div");
+    const redraw = () => {
+      box.replaceChildren();
+      box.append(el("div", { class: "row" },
+        field("aggregator", selectInput(agg, "kind", ["simple", "pattern_pair", "skip_tags"], () => { redraw(); scheduleRun(); })),
+        field("produces", selectInput(agg, "aggregation_type", ["sentence", "word", "token"]))));
+      if (agg.kind === "pattern_pair") {
+        agg.patterns = agg.patterns || [];
+        const list = el("div", { class: "list-editor" });
+        const redrawP = () => {
+          list.replaceChildren();
+          agg.patterns.forEach((p, i) => list.append(el("div", { class: "list-item" },
+            el("div", { class: "row" },
+              el("input", { type: "text", value: str(p.type), placeholder: "type", oninput: (e) => { p.type = e.target.value; scheduleRun(); } }),
+              selectInput(p, "action", ["aggregate", "remove", "keep"]),
+              el("button", { class: "x", text: "×", onclick: () => { agg.patterns.splice(i, 1); redrawP(); scheduleRun(); } })),
+            el("div", { class: "row" },
+              el("input", { type: "text", value: str(p.start), placeholder: "<start>", oninput: (e) => { p.start = e.target.value; scheduleRun(); } }),
+              el("input", { type: "text", value: str(p.end), placeholder: "</end>", oninput: (e) => { p.end = e.target.value; scheduleRun(); } })))));
+          list.append(el("button", { class: "x", text: "+ pattern", onclick: () => { agg.patterns.push({ type: "custom", start: "<x>", end: "</x>", action: "aggregate" }); redrawP(); scheduleRun(); } }));
+        };
+        redrawP();
+        box.append(field("patterns", list, "Tagged spans become their own segments of the given type."));
+      }
+      if (agg.kind === "skip_tags") {
+        agg.skip_tags = agg.skip_tags || [];
+        const list = el("div", { class: "list-editor" });
+        const redrawT = () => {
+          list.replaceChildren();
+          agg.skip_tags.forEach((t, i) => list.append(el("div", { class: "row" },
+            el("input", { type: "text", value: str(t[0]), placeholder: "<start>", oninput: (e) => { t[0] = e.target.value; scheduleRun(); } }),
+            el("input", { type: "text", value: str(t[1]), placeholder: "</end>", oninput: (e) => { t[1] = e.target.value; scheduleRun(); } }),
+            el("button", { class: "x", text: "×", onclick: () => { agg.skip_tags.splice(i, 1); redrawT(); scheduleRun(); } }))));
+          list.append(el("button", { class: "x", text: "+ tag pair", onclick: () => { agg.skip_tags.push(["<x>", "</x>"]); redrawT(); scheduleRun(); } }));
+        };
+        redrawT();
+        box.append(field("skip tags", list, "Held back until the closing tag, so a span is never split."));
+      }
+    };
+    redraw();
+    return box;
+  }
+
+  function section(title, body, { open = true, toggle, tip } = {}) {
+    const sum = el("summary", {}, title, tip ? help(tip) : null, el("span", { class: "spacer" }));
+    if (toggle) sum.append(toggle);
+    return el("details", { class: "form-section", open }, sum, el("div", { class: "body" }, body));
+  }
+
+  function renderForm() {
+    const s = state.setup;
+    const form = $("form");
+    form.replaceChildren();
+    form.append(field("Setup name", textInput(s, "name")));
+    const fromBot = !!s.bot;
+
+    if (fromBot) {
+      const b = state.bot || { pipeline: [], traced: [], notes: [] };
+      const chips = el("div", { class: "wchips" });
+      b.pipeline.forEach((n, i) => chips.append(el("span", { class: "wc" + ((b.traced || []).includes(i) ? " hot" : ""), text: n, "data-tip": (b.traced || []).includes(i) ? "Run by the trace as the bot built it" : "In the bot’s pipeline; the trace stands in for it or leaves it out" })));
+      form.append(section("Bot", el("div", {},
+        el("div", { class: "hint", style: "word-break:break-all", text: s.bot }),
+        chips,
+        ...(b.notes || []).map((n) => el("div", { class: "hint", style: "color:var(--skipped)", text: n })),
+        el("div", { class: "hint", style: "margin-top:6px", text: "The sections below describe what the bot built. The file is imported again on every run, so edits to it show up here." })),
+        { tip: "The bot’s pipeline, in order. Highlighted processors are the bot’s own objects, traced as they are; the LLM and the transport are stand-ins, and so is the TTS provider unless the service runs live." }));
+    }
+
+    // LLMTextProcessor
+    const ltp = el("div");
+    const drawLtp = () => {
+      ltp.replaceChildren();
+      if (!s.llm_text_processor) { ltp.append(el("div", { class: "hint", text: "Off: the TTS service aggregates the LLM text itself." })); return; }
+      if (fromBot) { ltp.append(ro("aggregator", aggDesc(s.llm_text_processor.aggregator)), ro("transforms (reach every consumer)", tfDesc(s.llm_text_processor.transforms))); return; }
+      ltp.append(aggregatorEditor(s.llm_text_processor.aggregator));
+      ltp.append(transformsEditor(s.llm_text_processor.transforms = s.llm_text_processor.transforms || [], "transforms (reach every consumer)"));
+    };
+    drawLtp();
+    const ltpToggle = el("input", { type: "checkbox", checked: !!s.llm_text_processor, "data-tip": "Enable the LLMTextProcessor; off, the TTS service aggregates the LLM text itself",
+      onclick: (e) => e.stopPropagation(),
+      onchange: (e) => { s.llm_text_processor = e.target.checked ? { aggregator: { kind: "simple", aggregation_type: "sentence", patterns: [], skip_tags: [] }, transforms: [] } : null; drawLtp(); scheduleRun(); } });
+    form.append(section("LLMTextProcessor", ltp, { toggle: fromBot ? null : ltpToggle, tip: "The processor after the LLM that aggregates its text into segments and transforms them before anyone else sees them. Turn it off to let the TTS service aggregate instead." }));
+
+    // TTS
+    const t = s.tts;
+    t.tokenization = t.tokenization || {};
+    const ttsName = (fromBot && state.bot && state.bot.tts_service) || "TTS service";
+    if (fromBot && t.live == null) t.live = !!(state.bot && state.bot.tts_service);
+    const standIn = el("div", {},
+      checkbox(t, "word_timestamps", "provider reports word timestamps"),
+      field("delivery", selectInput(t, "delivery", ["http", "websocket"])));
+    const liveRow = fromBot ? checkbox(t, "live", `run ${ttsName} live, calling its provider`, () => { standIn.hidden = !!t.live; tokBox.hidden = !!t.live; scheduleRun(); }) : null;
+    if (liveRow) liveRow.dataset.tip = "Runs the bot’s own TTS service in the pipeline, so what its provider does with the text is what you see: its word timestamps and tokenization, its rewriting, its audio timing. On by default with a bot. It calls the provider for real and plays the audio at its real pace; turn it off for a quick offline run with the stand-in provider and the bot’s text handling.";
+    const ttsBody = el("div", {},
+      liveRow,
+      standIn,
+      el("div", { class: "row" },
+        fromBot ? ro("aggregation", t.aggregation_mode) : field("aggregation", selectInput(t, "aggregation_mode", ["sentence", "token"]))),
+      fromBot ? ro("skip text types", t.skip_text_types) : listInput(t, "skip_text_types", "skip text types", "Comma-separated. Never spoken, e.g. code."),
+      fromBot ? ro("transforms (speech only)", tfDesc(t.transforms)) : transformsEditor(t.transforms = t.transforms || [], "transforms (speech only)"),
+      fromBot ? ro("filters", t.markdown_filter ? "MarkdownTextFilter" : null) : checkbox(t, "markdown_filter", "deprecated MarkdownTextFilter"),
+      fromBot ? ro("append trailing space", String(!!t.append_trailing_space)) : checkbox(t, "append_trailing_space", "append trailing space"));
+    const tokBox = el("div", {},
+      el("div", { class: "hint", text: "Stand-in provider tokenization" }),
+      el("div", { class: "row" },
+        field("style", selectInput(t.tokenization, "style", ["words", "split_punctuation", "characters"])),
+        field("gap (s)", textInput(t.tokenization, "gap_s", { number: true }))),
+      checkbox(t.tokenization, "pre_merge_tokens", "pre-merge punctuation tokens"),
+      checkbox(t.tokenization, "includes_inter_frame_spaces", "tokens include their spaces"),
+      listInput(t.tokenization, "drop_words", "words the provider never reports"));
+    ttsBody.append(tokBox);
+    standIn.hidden = tokBox.hidden = !!t.live;
+    // Own aggregator when no LLMTextProcessor
+    const ownAgg = el("div");
+    const drawOwn = () => {
+      if (fromBot) { ownAgg.replaceChildren(s.llm_text_processor ? el("span") : ro("aggregator", aggDesc(t.aggregator))); return; }
+      ownAgg.replaceChildren(checkbox({ get v() { return !!t.aggregator; }, set v(x) { t.aggregator = x ? { kind: "simple", aggregation_type: "sentence", patterns: [], skip_tags: [] } : null; } }, "v", "custom TTS aggregator", () => { drawOwn(); scheduleRun(); }));
+      if (t.aggregator) ownAgg.append(aggregatorEditor(t.aggregator));
+    };
+    drawOwn();
+    ttsBody.append(ownAgg);
+    form.append(section("TTS service", ttsBody, { tip: "How the real TTSService base class treats each segment: aggregation mode, word timestamps, text types it skips, filters and transforms, and how the stand-in provider tokenizes what it is asked to speak. With a bot, the service can run live instead, calling its provider." }));
+
+    // RTVI
+    const r = s.rtvi;
+    form.append(section("RTVI observer", fromBot
+      ? el("div", {},
+        checkbox(r, "enabled", "enabled"),
+        ro("bot-llm / bot-tts messages", `${r.bot_llm ? "on" : "off"} / ${r.bot_tts ? "on" : "off"}`),
+        ro("skip text types", r.skip_text_types),
+        ro("bot output transforms (client only)", tfDesc(r.transforms)))
+      : el("div", {},
+        checkbox(r, "enabled", "enabled"),
+        checkbox(r, "bot_llm", "bot-llm messages: started/stopped and the deprecated bot-llm-text tokens"),
+        checkbox(r, "bot_tts", "bot-tts messages: started/stopped and the deprecated bot-tts-text words"),
+        listInput(r, "skip_text_types", "skip text types", "Never sent to the client."),
+        transformsEditor(r.transforms = r.transforms || [], "bot output transforms (client only)")),
+      { tip: "The RTVIObserver that turns pipeline frames into client messages. Choose which messages it sends and what it never shows the client." }));
+
+    // Chunking
+    const c = s.chunking;
+    const chunkBody = el("div");
+    const drawChunk = () => {
+      chunkBody.replaceChildren(
+        el("div", { class: "row" },
+          field("style", selectInput(c, "style", ["whole", "words", "characters", "custom"], () => { drawChunk(); scheduleRun(); })),
+          c.style === "characters" ? field("size", textInput(c, "size", { number: true })) : null,
+          field("interval (s)", textInput(c, "interval_s", { number: true }))));
+      if (c.style === "custom") chunkBody.append(field("chunks (one per line)", el("textarea", { value: (c.chunks || []).join("\n"), oninput: (e) => { c.chunks = e.target.value.split("\n"); scheduleRun(); } })));
+    };
+    drawChunk();
+    form.append(section("LLM streaming", chunkBody, { open: false, tip: "How the stand-in LLM streams the response: the chunk size and the pause between chunks. Spacing the chunks keeps the step order causal, as a streaming LLM would." }));
+
+    // JSON
+    const ta = el("textarea", { style: "min-height:180px", value: JSON.stringify(s, null, 2) });
+    const err = el("div", { class: "json-error" });
+    form.append(section("Setup JSON", el("div", {},
+      el("div", { class: "field" }, ta),
+      el("div", { class: "row" },
+        el("button", { class: "btn small", text: "Apply", onclick: () => {
+          try { const next = JSON.parse(ta.value); err.textContent = ""; replaceSetup(next, state.text); }
+          catch (e) { err.textContent = String(e.message || e); }
+        } }),
+        el("button", { class: "btn small", text: "Refresh", onclick: () => { ta.value = JSON.stringify(state.setup, null, 2); } })),
+      err), { open: false, tip: "The whole setup as JSON. Edit it here or copy it to reuse." }));
+  }
+
+  function replaceSetup(setup, text) {
+    state.setup = setup; state.text = text == null ? state.text : text;
+    $("text").value = state.text;
+    renderForm();
+    run();
+  }
+
+  // ---------- results ----------
+  function render() {
+    const tr = state.trace;
+    renderSegments(tr); renderContext(tr); renderClient(tr); renderProvider(tr); renderWords(tr); renderFlow(tr);
+  }
+
+  function textRow(label, value, prev, noneText, tip) {
+    const val = el("div", { class: "val" + (value == null ? " none" : "") });
+    if (value == null) val.textContent = noneText || "—";
+    else val.append(...(prev == null ? [el("span", { text: value })] : diffSpans(prev, value)));
+    return el("div", { class: "trow" }, el("div", { class: "lab", text: label, "data-tip": tip }), val);
+  }
+
+  function reasonFor(seg) {
+    const ev = (seg.events || []).find((e) => ["skip", "trim", "drop", "error"].includes(e.kind));
+    if (!ev) return seg.outcome === "unspoken" ? "not sent: skip_tts" : seg.outcome === "spoken" ? "spoken through its tokens" : "not sent";
+    const why = { skip: `not sent: skipped type ${ev.detail || seg.text_type}`, trim: "not sent: only whitespace", drop: `not sent: ${ev.name || "a transform"} left nothing`, error: `not sent: ${ev.detail || "transform failed"}` };
+    return why[ev.kind];
+  }
+
+  function renderSegments(tr) {
+    const box = $("segments"); box.replaceChildren();
+    if (!tr.segments.length) { box.append(el("div", { class: "empty", text: "No segments were produced." })); return; }
+    tr.segments.forEach((seg, i) => {
+      const card = el("div", { class: "card segment", "data-seg": seg.segment_id == null ? "" : seg.segment_id,
+        onmouseenter: () => highlightRows(seg.segment_id), onmouseleave: () => highlightRows(null) });
+      card.append(el("div", { class: "head" },
+        el("span", { class: "idx", text: `#${i + 1}` }), typeBadge(seg.text_type), outcomeBadge(seg.outcome),
+        el("span", { class: "by", text: `cut by ${seg.produced_by === "tts" ? "TTS service" : "LLMTextProcessor"}` + (seg.segment_id != null ? ` · id ${seg.segment_id}` : "") })));
+      const sent = (seg.rtvi_messages || []).slice(-1)[0];
+      const clientMissing = tr.setup && tr.setup.rtvi && tr.setup.rtvi.enabled === false ? "RTVI disabled" : "not sent to the client";
+      card.append(textRow("LLM text", seg.llm_text, null, null, "The frame’s raw_text: the LLM’s own characters for this segment, as the aggregator cut them."));
+      card.append(textRow("Context", seg.context_text, seg.llm_text, "nothing recorded", "What this segment contributed to the assistant message in the conversation context: the LLM spans of the words that were spoken, or the whole raw text when it was skipped or had no words."));
+      card.append(textRow("TTS text", seg.tts_text, seg.llm_text, reasonFor(seg), "What the TTS service actually sent to be spoken, after its filters and transforms, or why nothing was sent."));
+      card.append(textRow("Client text", sent ? (sent.data || {}).text : null, seg.llm_text, clientMissing, "The text of the bot-output message the client received for this segment, after the RTVI observer’s transforms."));
+      if ((seg.events || []).length) {
+        const evs = el("div", { class: "events" });
+        const details = el("div");
+        seg.events.forEach((e) => {
+          const pill = el("span", { class: `pill kind-${e.kind}`, "data-tip": e.seq != null ? "Click to show this step in the flow" : null }, el("span", { class: "stage", text: e.stage }), e.name || e.kind);
+          let shown = null;
+          pill.addEventListener("click", () => {
+            if (e.seq != null && state.trace) { const i = state.trace.timeline.findIndex((x) => x.seq === e.seq); if (i >= 0) { pause(); setPos(i); } }
+            if (shown) { shown.remove(); shown = null; return; }
+            shown = el("div", { class: "event-detail" },
+              `${e.stage} · ${e.kind}${e.name ? " · " + e.name : ""}\n`,
+              e.before != null ? [el("span", { text: JSON.stringify(e.before) }), el("span", { class: "arrow", text: " → " }), el("span", { text: e.after == null ? "(removed)" : JSON.stringify(e.after) })] : null,
+              e.detail ? `\n${e.detail}` : null);
+            details.append(shown);
+          });
+          evs.append(pill);
+        });
+        card.append(evs, details);
+      }
+      box.append(card);
+    });
+  }
+
+  function renderContext(tr) {
+    const box = $("ctx"); box.replaceChildren();
+    const msgs = tr.context_messages || [];
+    if (!msgs.length) box.append(el("div", { class: "empty", text: "Nothing reached the context." }));
+    msgs.forEach((m) => box.append(el("div", { class: "hint", text: m.role || "message" }), el("div", { class: "message", text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) })));
+    const parts = tr.segments.filter((s) => s.context_text != null);
+    if (parts.length) {
+      box.append(el("div", { class: "hint", style: "margin-top:8px", text: "Assembled from, in order:" }));
+      const c = el("div", { class: "contrib" });
+      parts.forEach((s) => c.append(el("span", { class: "chunk", text: s.context_text, "data-tip": `segment ${s.segment_id} (${s.text_type}); click to find it`, onclick: () => focusSegment(s.segment_id) })));
+      box.append(c);
+    }
+  }
+
+  function renderClient(tr) {
+    const box = $("client"); box.replaceChildren();
+    const msgs = tr.rtvi_messages || [];
+    if (!msgs.length) { box.append(el("div", { class: "empty", text: "No client messages (RTVI disabled)." })); return; }
+    [["bot-llm-text", "bot-llm-text (raw LLM tokens)"], ["bot-tts-text", "bot-tts-text (words as spoken)"]].forEach(([type, title]) => {
+      const ms = msgs.filter((m) => m.type === type);
+      if (!ms.length) return;
+      box.append(el("div", { class: "hint", text: title }));
+      const row = el("div", { class: "contrib" });
+      ms.forEach((m) => row.append(el("span", { class: "chunk", text: ((m.data || {}).text) })));
+      box.append(row);
+    });
+    const withOut = tr.segments.filter((s) => (s.rtvi_messages || []).length);
+    if (!withOut.length) box.append(el("div", { class: "empty", style: "margin-top:8px", text: "No bot-output segments." }));
+    withOut.forEach((s) => {
+      const lc = el("div", { class: "lifecycle" });
+      lc.append(el("div", { style: "display:flex;gap:6px;align-items:center;margin-bottom:3px" }, typeBadge(s.text_type), el("span", { class: "tiny", text: `segment ${s.segment_id} · bot-output` })));
+      s.rtvi_messages.forEach((m) => {
+        const d = m.data || {};
+        const p = d.spoken_progress;
+        const txt = el("span", { class: "txt" });
+        if (p && (p.accumulated_text != null || p.remaining_text != null)) txt.append(el("span", { class: "acc", text: str(p.accumulated_text) }), el("span", { class: "rem", text: str(p.remaining_text) }));
+        else txt.append(el("span", { text: str(d.text) }));
+        lc.append(el("div", { class: "line" }, el("span", { class: "status", text: d.spoken_status || m.type }), txt));
+      });
+      lc.addEventListener("click", () => focusSegment(s.segment_id));
+      box.append(lc);
+    });
+    const other = {};
+    msgs.forEach((m) => { if (!["bot-llm-text", "bot-tts-text", "bot-output"].includes(m.type)) other[m.type] = (other[m.type] || 0) + 1; });
+    const keys = Object.keys(other);
+    if (keys.length) box.append(el("div", { class: "tiny", style: "margin-top:8px", text: "also: " + keys.map((k) => `${k} ×${other[k]}`).join(", ") }));
+  }
+
+  function renderProvider(tr) {
+    const box = $("provider"); box.replaceChildren();
+    const reqs = tr.provider_requests || [];
+    let ri = 0; let any = false;
+    tr.segments.forEach((s) => {
+      if (s.tts_text != null) {
+        const req = reqs[ri] && reqs[ri].text === s.tts_text ? reqs[ri++] : reqs.find((r) => r.text === s.tts_text) || { text: s.tts_text, tokens: [] };
+        const r = el("div", { class: "req", onclick: () => focusSegment(s.segment_id) }, el("span", { text: req.text }));
+        if (req.tokens && req.tokens.length) {
+          const t = el("div", { class: "tokens" });
+          req.tokens.forEach((tk) => t.append(el("span", { class: "tok" }, tk[0], el("span", { class: "t", text: Number(tk[1]).toFixed(2) }))));
+          r.append(t);
+        }
+        box.append(r); any = true;
+      } else if (s.outcome !== "spoken") {
+        box.append(el("div", { class: "req gap", text: `(${reasonFor(s)}) ${s.segment_text}`, onclick: () => focusSegment(s.segment_id) }));
+      }
+    });
+    // Requests not matched to a segment (streaming tokens, extra requests).
+    for (let k = ri; k < reqs.length; k++) {
+      const extra = reqs[k];
+      if (!tr.segments.some((s) => s.tts_text === extra.text)) {
+        box.append(el("div", { class: "req", text: extra.text }));
+      }
+    }
+    if (!any && !tr.segments.length) box.append(el("div", { class: "empty", text: "Nothing was sent." }));
+  }
+
+  function renderWords(tr) {
+    const box = $("words"); box.replaceChildren();
+    const segs = tr.segments.filter((s) => (s.words || []).length);
+    if (!segs.length) { box.append(el("div", { class: "empty", text: tr.setup && tr.setup.tts && !tr.setup.tts.live && tr.setup.tts.word_timestamps === false ? "The provider reports no word timestamps, so each segment arrives whole after synthesis." : tr.setup && tr.setup.tts && tr.setup.tts.live ? "The live service reported no word timestamps, so each segment arrives whole after synthesis." : "No word events." })); return; }
+    segs.forEach((s) => {
+      const w = el("div", { class: "words-seg" });
+      w.append(el("div", { style: "display:flex;gap:6px;align-items:center;margin-bottom:4px" }, typeBadge(s.text_type), el("span", { class: "tiny", text: `segment ${s.segment_id} · "${s.segment_text}"` })));
+      const table = el("table", {}, el("tr", {},
+      el("th", { text: "provider token", "data-tip": "The word as the provider reported it, in the text it was asked to speak." }),
+      el("th", { text: "LLM span", "data-tip": "The slice of the LLM’s raw text this token stands for, after the service aligned the provider’s words to the segment. This is what the context gets for the word." }),
+      el("th", { text: "spoken so far", "data-tip": "accumulated_text from the progress frame: the segment text already spoken once this word played." }),
+      el("th", { text: "remaining", "data-tip": "remaining_text from the progress frame: the segment text still to come. Spoken so far plus remaining always equals the segment text." })));
+      s.words.forEach((x) => table.append(el("tr", {},
+        el("td", { text: x.text }), el("td", { text: x.llm_text == null ? "" : x.llm_text }),
+        el("td", {}, el("span", { class: "acc", text: str(x.accumulated) })), el("td", {}, el("span", { class: "rem", text: str(x.remaining) })))));
+      w.append(table);
+      box.append(w);
+    });
+  }
+
+  // ---------- flow ----------
+  const NODE_INFO = {
+    llm: ["LLM", "stand-in: streams the response",
+      "Stand-in LLM. Streams the response as LLMTextFrame chunks, spaced by the streaming interval, between LLMFullResponseStart and End frames."],
+    llm_text_processor: ["LLMTextProcessor", "",
+      "The real LLMTextProcessor. Feeds each chunk character by character into its text aggregator; when the aggregator cuts (a sentence, a pattern pair…) it applies its transforms and pushes an AggregatedTextFrame. This is the first split: the frame’s raw_text goes to the context, its text to everyone else."],
+    tts: ["TTSService", "",
+      "The real TTSService base class with a stand-in provider, or the bot’s own service when run live. Takes a segment, trims it, skips configured text types, applies its own transforms (the second split: only the provider hears them), sends it to the provider and relays the reported words as TTSTextFrames with timestamps."],
+    transport: ["Output transport", "plays audio, releases words on time",
+      "Output transport. Receives the audio and the timestamped TTSTextFrames, holds each word until its timestamp comes due on the audio clock, then releases it downstream with an AggregatedTextProgressFrame. Also reports when the bot starts and stops speaking."],
+    context: ["Context aggregator", "LLMAssistantAggregator",
+      "LLMAssistantAggregator. Collects the released words, as their LLM spans, into the assistant turn and commits the message to the LLMContext when the turn ends."],
+    provider: ["TTS provider", "stand-in",
+      "The TTS provider. The stand-in answers each request with silent audio and word timestamps, tokenized as the setup describes and offset by the audio already generated in the same context. When the bot’s service runs live, this is its real provider."],
+    client: ["Client", "via RTVIObserver",
+      "The RTVI client as the RTVIObserver sees it: the messages it would receive, built from frames the output transport pushed."],
+  };
+  const player = { timer: null, playing: false, resize: null };
+  const q = (v) => JSON.stringify(v == null ? "" : String(v));
+  const nodeName = (n) => (NODE_INFO[n] ? NODE_INFO[n][0] : n);
+
+  function segNo(id) { const tr = state.trace; const i = tr ? tr.segments.findIndex((s) => s.segment_id === id) : -1; return i >= 0 ? `#${i + 1}` : `id ${id}`; }
+
+  function flowLayout(tr) {
+    const main = ["llm"];
+    if (tr.setup.llm_text_processor) main.push("llm_text_processor");
+    main.push("tts", "transport", "context");
+    const side = { tts: "provider" };
+    if (tr.setup.rtvi && tr.setup.rtvi.enabled) side.transport = "client";
+    return { main, side };
+  }
+
+  // Replays the timeline into what each node holds at a step.
+  function initialFlow() {
+    return {
+      llm: { chunk: -1, started: false, ended: false },
+      llm_text_processor: { buffer: "", chunk: "", cut: null, steps: [], count: 0, ended: false, aggregates: false },
+      tts: { buffer: "", chunk: "", cut: null, steps: [], count: 0, ended: false, aggregates: false, segment: null, request: null, words: [], speaking: false },
+      provider: { requests: [] },
+      transport: { queue: [], playing: null, progress: null, speaking: false, audio: 0 },
+      context: { text: "", part: null, messages: [], ended: false },
+      client: { messages: [], llm: "", tts: [], out: {}, order: [] },
+    };
+  }
+  function contextPart(st, d) { if (d.context_part != null) { st.context.text = d.context_so_far || ""; st.context.part = d.context_part; } }
+  function dropQueued(st, kind, id, text) {
+    const qu = st.transport.queue;
+    const i = qu.findIndex((x) => x.kind === kind && x.id === id && (text == null || x.text === text));
+    return i >= 0 ? qu.splice(i, 1)[0] : null;
+  }
+  function applyEntry(st, e) {
+    const d = e.data || {};
+    if (e.kind === "aggregate") {
+      const n = st[e.source]; if (!n) return;
+      n.aggregates = true; n.buffer = d.buffer || "";
+      if (d.action === "append") { n.chunk = d.chunk || ""; n.cut = null; n.steps = []; }
+      else if (d.action === "cut" || d.action === "flush") {
+        n.chunk = ""; n.cut = { text: d.text, type: d.text_type, action: d.action }; n.steps = []; n.count++;
+        // The TTS handles what it cuts itself; there is no frame hop to show it arriving.
+        if (e.source === "tts") { n.segment = { text: d.text, type: d.text_type, own: true }; n.request = null; n.words = []; }
+      }
+      else n.chunk = "";
+      return;
+    }
+    if (e.kind === "stage") { const n = st[e.source]; if (n) n.steps.push(d); return; }
+    if (e.kind === "provider") { st.provider.requests.push({ text: d.text, tokens: d.tokens || [], seg: e.segment_id }); st.tts.request = d.text; return; }
+    if (e.kind === "rtvi") {
+      const m = Object.assign({ type: e.label, seq: e.seq }, d);
+      st.client.messages.push(m);
+      if (e.label === "bot-llm-text") st.client.llm += d.text || "";
+      if (e.label === "bot-tts-text") st.client.tts.push(d.text || "");
+      if (e.label === "bot-output" && e.segment_id != null) { if (!(e.segment_id in st.client.out)) st.client.order.push(e.segment_id); st.client.out[e.segment_id] = m; }
+      return;
+    }
+    const L = e.label, src = e.source, dst = e.destination;
+    if (L === "LLMFullResponseStartFrame") { if (src === "llm") st.llm.started = true; }
+    else if (L === "LLMFullResponseEndFrame") { if (src === "llm") st.llm.ended = true; if (st[dst]) st[dst].ended = true; }
+    else if (L === "LLMTextFrame") { if (src === "llm") st.llm.chunk++; }
+    else if (L === "AggregatedTextFrame") {
+      if (dst === "tts") { st.tts.segment = { id: e.segment_id, text: d.text, type: d.text_type, raw: d.raw_text, skip: !!d.skip_tts }; st.tts.steps = []; st.tts.request = null; st.tts.words = []; }
+      else if (dst === "transport") st.transport.queue.push({ kind: "segment", id: e.segment_id, text: d.text, type: d.text_type });
+      else if (dst === "context") { dropQueued(st, "segment", e.segment_id); contextPart(st, d); }
+    } else if (L === "TTSTextFrame") {
+      if (dst === "transport") { st.tts.words.push({ text: d.text, pts: d.pts_s }); st.transport.queue.push({ kind: "word", id: e.segment_id, text: d.text, pts: d.pts_s }); }
+      else if (dst === "context") { st.transport.playing = dropQueued(st, "word", e.segment_id, d.text) || { text: d.text, pts: d.pts_s }; if (st.transport.progress && st.transport.progress.seg !== e.segment_id) st.transport.progress = null; contextPart(st, d); }
+    } else if (L === "AggregatedTextProgressFrame") { if (dst === "context") st.transport.progress = { acc: d.accumulated, rem: d.remaining, seg: e.segment_id }; }
+    else if (L === "TTSAudioRawFrame") st.transport.audio += d.duration_s || 0;
+    else if (L === "TTSStartedFrame") { if (dst === "transport") st.tts.speaking = true; }
+    else if (L === "TTSStoppedFrame") { if (dst === "transport") st.tts.speaking = false; }
+    else if (L === "BotStartedSpeakingFrame") st.transport.speaking = true;
+    else if (L === "BotStoppedSpeakingFrame") { st.transport.speaking = false; st.transport.playing = null; st.transport.progress = null; }
+    else if (L === "LLMContextAssistantTurnFrame") { st.context.messages.push(d.text || ""); st.context.text = ""; st.context.part = null; }
+  }
+  function flowStateAt(tr, pos) { const st = initialFlow(); for (let i = 0; i <= pos && i < tr.timeline.length; i++) applyEntry(st, tr.timeline[i]); return st; }
+
+  // What a step means, in words.
+  function describe(e) {
+    const d = e.data || {}, who = nodeName(e.source), to = nodeName(e.destination);
+    if (e.kind === "aggregate") {
+      if (d.action === "append") return [who, ` appends ${q(d.chunk)} to its aggregator; the buffer is now ${q(d.buffer)}`];
+      if (d.action === "cut") return [who, ` cuts a ${d.text_type} out of the buffer: ${q(d.text)}${d.buffer ? `, keeping ${q(d.buffer)}` : ""}`];
+      if (d.action === "flush") return [who, ` flushes what is left at the end of the response: ${q(d.text)} (${d.text_type})`];
+      return [who, `: the buffer settles to ${q(d.buffer)} once the chunk is consumed`];
+    }
+    if (e.kind === "stage") {
+      const k = d.kind;
+      if (k === "transform" || k === "filter") return [who, ` ${k} ${d.name}: ${q(d.before)} → ${q(d.after)}`];
+      if (k === "skip") return [who, ` leaves ${q(d.before)} unspoken: ${d.detail} is a skipped text type, so it is passed on as is`];
+      if (k === "trim") return [who, ` drops ${q(d.before)}: nothing left to say after trimming whitespace`];
+      if (k === "drop") return [who, ` drops ${q(d.before)}: the transforms left nothing to say`];
+      return [who, ` error: ${d.detail}`];
+    }
+    if (e.kind === "provider") return ["TTSService", ` asks the provider to speak ${q(d.text)}` + (d.tokens && d.tokens.length ? `; it reports ${d.tokens.length} word timestamp${d.tokens.length === 1 ? "" : "s"}` : "")];
+    if (e.kind === "rtvi") {
+      if (e.label === "bot-output") { const p = d.spoken_progress; return ["Client", ` gets bot-output (${d.spoken_status}) for segment ${segNo(e.segment_id)}: ${q(d.text)}` + (p && p.accumulated_text != null ? ` — spoken ${q(p.accumulated_text)}, left ${q(p.remaining_text)}` : "")]; }
+      if (d.text != null) return ["Client", ` gets ${e.label}: ${q(d.text)}`];
+      return ["Client", ` gets ${e.label}`];
+    }
+    switch (e.label) {
+      case "LLMTextFrame": return ["LLM", ` streams ${q(d.text)} to ${to}`];
+      case "LLMFullResponseStartFrame": return [who, ` → ${to}: the response starts`];
+      case "LLMFullResponseEndFrame": return [who, ` → ${to}: the response has ended`];
+      case "AggregatedTextFrame":
+        if (e.destination === "tts") return [who, ` hands ${to} a ${d.text_type} segment: ${q(d.text)}` + (d.raw_text != null ? ` (LLM text ${q(d.raw_text)})` : "")];
+        if (e.destination === "transport") return [who, ` announces segment ${segNo(e.segment_id)} ${q(d.text)} to the transport` + (d.skip_tts ? ", marked skip_tts" : "")];
+        return ["Transport", ` releases segment ${segNo(e.segment_id)} ${q(d.text)}` + (d.context_part != null ? `; the context records ${q(d.context_part)}` : "")];
+      case "TTSTextFrame":
+        if (e.destination === "transport") return ["TTSService", ` reports word ${q(d.text)}` + (d.pts_s != null ? ` at ${Number(d.pts_s).toFixed(3)}s; the transport holds it until then` : "")];
+        return ["Transport", ` plays ${q(d.text)} and releases it` + (d.context_part != null ? `; the context records ${q(d.context_part)}` : "")];
+      case "AggregatedTextProgressFrame":
+        if (e.destination === "context") return ["Progress", `: ${q(d.accumulated)} spoken, ${q(d.remaining)} to go`];
+        return [who, ` → ${to}: progress ${q(d.accumulated)} | ${q(d.remaining)}`];
+      case "TTSAudioRawFrame": return [who, ` → ${to}: ${Number(d.duration_s || 0).toFixed(2)}s of audio`];
+      case "TTSStartedFrame": return [who, ` → ${to}: synthesis started`];
+      case "TTSStoppedFrame": return [who, ` → ${to}: synthesis stopped`];
+      case "BotStartedSpeakingFrame": return ["Transport", ": the bot started speaking"];
+      case "BotStoppedSpeakingFrame": return ["Transport", ": the bot stopped speaking"];
+      case "LLMContextAssistantTurnFrame": return ["Context aggregator", ` commits the assistant turn: ${q(d.text)}`];
+      case "ErrorFrame": return [who, ` error: ${d.error}`];
+    }
+    return [who, ` → ${to}: ${e.label} ${e.summary || ""}`];
+  }
+
+  // ---- node views ----
+  const lab = (t, tip) => el("div", { class: "lab" }, t, tip ? help(tip) : null);
+  function bufBox(buffer, chunk, caret = true) {
+    const b = el("div", { class: "buf" });
+    if (!buffer) { b.classList.add("empty-buf"); b.textContent = "empty"; return b; }
+    if (chunk && buffer.endsWith(chunk)) b.append(el("span", { text: buffer.slice(0, buffer.length - chunk.length) }), el("span", { class: "new", text: chunk }));
+    else b.append(el("span", { text: buffer }));
+    if (caret) b.append(el("span", { class: "caret" }));
+    return b;
+  }
+  function frameChip(name, text, type, hot) {
+    return el("span", { class: "fr" + (hot ? " hot" : "") }, el("span", { class: "fn", text: name }), el("span", { class: "ft", text: text == null ? "" : JSON.stringify(text) }), type ? typeBadge(type) : null);
+  }
+  function stepsList(steps) {
+    const ul = el("ul", { class: "steps-list" });
+    steps.forEach((x) => {
+      const li = el("li", { class: x.kind });
+      if (x.kind === "error") li.append(el("span", { class: "k", text: "error " }), x.detail || "");
+      else if (x.kind === "skip") li.append(el("span", { class: "k", text: "skip " }), `${x.detail || ""} is a skipped type: passed on unspoken`);
+      else li.append(el("span", { class: "k", text: `${x.kind} ${x.name || ""} ` }), JSON.stringify(x.before == null ? "" : x.before), el("span", { class: "arrow", text: " → " }), x.after == null ? "(removed)" : JSON.stringify(x.after));
+      ul.append(li);
+    });
+    return ul;
+  }
+  function aggName(a) { return a.kind === "pattern_pair" ? `PatternPairAggregator (${(a.patterns || []).map((p) => p.type).join(", ") || "no patterns"})` : a.kind === "skip_tags" ? "SkipTagsAggregator" : "SimpleTextAggregator"; }
+  function aggregatorView(n, body, hotCut, withSteps = true) {
+    body.append(lab("aggregator buffer", "Text waiting in the text aggregator: the chunks are appended character by character until the aggregator finds a place to cut."), bufBox(n.buffer, n.chunk));
+    if (n.cut) {
+      body.append(lab(n.cut.action === "flush" ? "flushed at end of response" : "cut out", n.cut.action === "flush" ? "Whatever was left in the buffer when the response ended becomes a last segment." : "The AggregatedTextFrame the aggregator just produced, pushed downstream."), frameChip("AggregatedTextFrame", n.cut.text, n.cut.type, hotCut));
+      if (withSteps && n.steps.length) body.append(stepsList(n.steps));
+    }
+  }
+
+  function renderNodeBody(name, st, tr, cur) {
+    const body = el("div", { class: "nb" }); const s = tr.setup; let sub = NODE_INFO[name][1];
+    const hot = cur && (cur.source === name || cur.destination === name);
+    if (name === "llm") {
+      const n = st.llm, view = el("div", { class: "chunkview" });
+      (tr.chunks || []).forEach((c, i) => view.append(el("span", { class: "chunk" + (i === n.chunk ? " cur" : i > n.chunk ? " rest" : ""), text: c })));
+      body.append(view);
+      sub = `${tr.chunks.length} chunk${tr.chunks.length === 1 ? "" : "s"} · ${n.ended ? "response ended" : n.started ? "streaming" : "waiting"}`;
+    } else if (name === "llm_text_processor") {
+      const n = st.llm_text_processor, spec = s.llm_text_processor;
+      sub = `${aggName(spec.aggregator)} → ${spec.aggregator.aggregation_type}` + ((spec.transforms || []).length ? ` · transforms: ${spec.transforms.map((t) => t.name).join(", ")}` : "");
+      aggregatorView(n, body, hot && cur.kind === "aggregate");
+      if (!n.cut && n.ended && !n.buffer) body.append(el("div", { class: "tiny", style: "margin-top:6px", text: `done: ${n.count} segment${n.count === 1 ? "" : "s"}` }));
+    } else if (name === "tts") {
+      const n = st.tts, t = s.tts;
+      sub = `${t.aggregation_mode} mode · ` + (t.live ? `live ${(tr.bot && tr.bot.tts_service) || "service"}` : `${t.word_timestamps ? "word timestamps" : "no word timestamps"} · ${t.delivery}`) + ((t.skip_text_types || []).length ? ` · skips ${t.skip_text_types.join(", ")}` : "") + ((t.transforms || []).length ? ` · transforms: ${t.transforms.map((x) => x.name).join(", ")}` : "") + (t.markdown_filter ? " · markdown filter" : "");
+      if (n.aggregates || !s.llm_text_processor) aggregatorView(n, body, hot && cur.kind === "aggregate", false);
+      if (n.segment) {
+        if (!n.segment.own) body.append(lab("segment in", "The AggregatedTextFrame the TTS service received."), frameChip("AggregatedTextFrame", n.segment.text, n.segment.type, hot && cur.label === "AggregatedTextFrame" && cur.destination === "tts"));
+        if (n.steps.length) body.append(stepsList(n.steps));
+        if (n.request != null) body.append(lab("sent to the provider", "The text the service asked the provider to synthesize, after trimming, skipping and its transforms."), el("div", { class: "buf", text: n.request }));
+        if (n.words.length) {
+          const w = el("div", { class: "wchips" });
+          n.words.forEach((x, i) => w.append(el("span", { class: "wc" + (hot && cur.label === "TTSTextFrame" && cur.source === "tts" && i === n.words.length - 1 ? " hot" : "") }, x.text, x.pts != null ? el("span", { class: "t", text: Number(x.pts).toFixed(2) }) : null)));
+          body.append(lab("words reported → transport", "TTSTextFrames the service emitted from the provider’s word timestamps, pushed downstream for the transport to release on time."), w);
+        }
+      } else body.append(el("div", { class: "tiny", style: "margin-top:4px", text: n.ended ? "response ended" : "waiting for a segment" }));
+    } else if (name === "provider") {
+      const n = st.provider;
+      if (!n.requests.length) body.append(el("div", { class: "tiny", text: "no requests yet" }));
+      n.requests.forEach((r, i) => {
+        const last = i === n.requests.length - 1;
+        const box = el("div", { class: "req" + (last && hot ? " hot" : "") }, el("span", { text: r.text }));
+        if (r.tokens.length) { const t = el("div", { class: "tokens" }); r.tokens.forEach((tk) => t.append(el("span", { class: "tok" }, tk[0], el("span", { class: "t", text: Number(tk[1]).toFixed(2) })))); box.append(t); }
+        body.append(box);
+      });
+      sub = `${n.requests.length} request${n.requests.length === 1 ? "" : "s"}` + (s.tts.live ? ` · live, behind ${(tr.bot && tr.bot.tts_service) || "the bot’s service"}` : s.tts.word_timestamps ? " · reports word timestamps" : " · no word timestamps");
+    } else if (name === "transport") {
+      const n = st.transport;
+      body.append(el("div", {}, el("span", { class: "dot" + (n.speaking ? " on" : "") }), n.speaking ? "bot speaking" : "silent", el("span", { class: "tiny", text: ` · ${n.audio.toFixed(2)}s of audio received` })));
+      if (n.queue.length) {
+        const w = el("div", { class: "wchips" });
+        n.queue.forEach((x) => w.append(el("span", { class: "wc" + (x.kind === "segment" ? " seg" : ""), "data-tip": x.kind === "segment" ? "segment announcement, released with its first word" : "word, released at its timestamp" }, x.kind === "segment" ? [el("span", { class: "t", text: "segment " }), x.text] : x.text, x.pts != null ? el("span", { class: "t", text: Number(x.pts).toFixed(2) }) : null)));
+        body.append(lab("held until their time", "Words, and segment announcements, the transport keeps until the audio clock reaches their timestamp."), w);
+      }
+      if (n.playing) body.append(lab("playing now", "The word whose timestamp just came due: the transport released it downstream."), el("span", { class: "wc hot" }, n.playing.text, n.playing.pts != null ? el("span", { class: "t", text: Number(n.playing.pts).toFixed(2) }) : null));
+      if (n.progress) body.append(lab(`progress on segment ${segNo(n.progress.seg)}`), el("div", { class: "mono" }, el("span", { class: "acc", text: str(n.progress.acc) }), el("span", { class: "rem", text: str(n.progress.rem) })));
+    } else if (name === "context") {
+      const n = st.context;
+      body.append(lab("assistant turn so far", "The text the assistant aggregator has collected from released words so far, as it will be recorded."));
+      const b = el("div", { class: "buf" });
+      if (!n.text) { b.classList.add("empty-buf"); b.textContent = n.messages.length ? "committed" : "nothing yet"; }
+      else if (n.part && n.text.endsWith(n.part)) b.append(el("span", { text: n.text.slice(0, n.text.length - n.part.length) }), el("span", { class: "new", text: n.part }));
+      else b.textContent = n.text;
+      body.append(b);
+      n.messages.forEach((m) => body.append(lab("committed message", "The assistant message added to the LLMContext when the turn ended."), el("div", { class: "message", text: m })));
+    } else if (name === "client") {
+      const n = st.client;
+      if (n.llm) body.append(lab("bot-llm-text so far"), el("div", { class: "mono", style: "white-space:pre-wrap;word-break:break-word", text: n.llm }));
+      if (n.tts.length) body.append(lab("bot-tts-text so far"), el("div", { class: "mono", style: "white-space:pre-wrap;word-break:break-word", text: n.tts.join(" | ") }));
+      if (n.order.length) {
+        body.append(lab("bot-output, latest per segment", "The latest bot-output message for each segment: its text and spoken status, with accumulated and remaining progress while it plays."));
+        n.order.forEach((id) => {
+          const m = n.out[id], p = m.spoken_progress, txt = el("span", { class: "txt" });
+          if (p && (p.accumulated_text != null || p.remaining_text != null)) txt.append(el("span", { class: "acc", text: str(p.accumulated_text) }), el("span", { class: "rem", text: str(p.remaining_text) }));
+          else txt.append(el("span", { text: str(m.text) }));
+          body.append(el("div", { class: "msg" + (cur && cur.kind === "rtvi" && cur.seq === m.seq ? " hot" : "") }, el("span", { class: "mt", text: `${segNo(id)} ${m.spoken_status || ""}` }), txt));
+        });
+      }
+      const last = n.messages.slice(-3).map((m) => m.type);
+      if (last.length) body.append(el("div", { class: "tiny", style: "margin-top:6px", text: `${n.messages.length} messages · latest: ${last.join(", ")}` }));
+      else body.append(el("div", { class: "tiny", text: "nothing yet" }));
+    }
+    return [sub, body];
+  }
+
+  function renderFlow(tr) {
+    pause();
+    const { main, side } = flowLayout(tr);
+    const box = $("nodes"); box.replaceChildren();
+    box.style.gridTemplateColumns = `repeat(${main.length}, minmax(170px, 1fr))`;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "wires"); box.append(svg);
+    main.forEach((name, col) => {
+      box.append(el("div", { class: "node", id: `node-${name}`, style: `grid-column:${col + 1};grid-row:1` }));
+      if (side[name]) box.append(el("div", { class: "node side", id: `node-${side[name]}`, style: `grid-column:${col + 1};grid-row:2` }));
+    });
+    box.append(el("div", { class: "packet", id: "packet" }));
+    if (player.resize) player.resize.disconnect();
+    player.resize = new ResizeObserver(() => drawWires(tr));
+    player.resize.observe(box);
+    const slider = $("pl-slider"); slider.max = tr.timeline.length - 1; slider.min = -1;
+    renderStepList(tr);
+    setPos(-1, true);
+    drawWires(tr);
+  }
+
+  function rectOf(name) {
+    const box = $("nodes").getBoundingClientRect(), r = document.getElementById(`node-${name}`);
+    if (!r) return null;
+    const b = r.getBoundingClientRect();
+    return { x: b.left - box.left, y: b.top - box.top, w: b.width, h: b.height, cx: b.left - box.left + b.width / 2, cy: b.top - box.top + b.height / 2 };
+  }
+  function anchor(from, to) {
+    const a = rectOf(from), b = rectOf(to); if (!a || !b) return null;
+    const sameRow = Math.abs(a.y - b.y) < 20;
+    if (sameRow) return a.x < b.x ? { x: a.x + a.w, y: a.cy } : { x: a.x, y: a.cy };
+    return a.y < b.y ? { x: a.cx, y: a.y + a.h } : { x: a.cx, y: a.y };
+  }
+  function drawWires(tr) {
+    const svg = $("nodes").querySelector("svg.wires"); if (!svg) return;
+    svg.replaceChildren();
+    const ns = "http://www.w3.org/2000/svg";
+    const defs = document.createElementNS(ns, "defs");
+    defs.innerHTML = '<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arr"/></marker>';
+    svg.append(defs);
+    const wire = (from, to, both) => {
+      const a = anchor(from, to), b = anchor(to, from); if (!a || !b) return;
+      const l = document.createElementNS(ns, "line");
+      l.setAttribute("x1", a.x); l.setAttribute("y1", a.y); l.setAttribute("x2", b.x); l.setAttribute("y2", b.y);
+      l.setAttribute("marker-end", "url(#arr)"); if (both) l.setAttribute("marker-start", "url(#arr)");
+      svg.append(l);
+    };
+    const { main, side } = flowLayout(tr);
+    for (let i = 0; i + 1 < main.length; i++) wire(main[i], main[i + 1]);
+    for (const [from, to] of Object.entries(side)) wire(from, to, to === "provider");
+  }
+
+  function packetEnds(e) {
+    if (e.kind === "frame") return [e.source, e.destination];
+    if (e.kind === "provider") return ["tts", "provider"];
+    if (e.kind === "rtvi") return [e.label.startsWith("bot-llm") ? "llm" : "transport", "client"];
+    return [null, null];
+  }
+  function animatePacket(e, ms) {
+    const p = $("packet"); if (!p) return;
+    const [from, to] = packetEnds(e);
+    if (!from || !to || from === to || !rectOf(from) || !rectOf(to)) { p.style.opacity = 0; return; }
+    const a = anchor(from, to), b = anchor(to, from);
+    const d = e.data || {};
+    const text = d.text != null ? d.text : d.accumulated != null ? d.accumulated : d.duration_s != null ? `${Number(d.duration_s).toFixed(2)}s audio` : null;
+    p.replaceChildren(frameChip(e.kind === "provider" ? "run_tts" : e.label, text, null, true));
+    p.style.opacity = 1;
+    const pw = p.offsetWidth, ph = p.offsetHeight;
+    p.animate([{ transform: `translate(${a.x - pw / 2}px, ${a.y - ph / 2}px)` }, { transform: `translate(${b.x - pw / 2}px, ${b.y - ph / 2}px)` }],
+      { duration: Math.max(140, Math.min(420, ms * 0.8)), easing: "ease-in-out", fill: "forwards" });
+  }
+
+  // ---- step list ----
+  function visibleIndexes() {
+    const tr = state.trace; if (!tr) return [];
+    const out = [];
+    tr.timeline.forEach((e, i) => { if (state.kinds[e.kind] !== false && (!state.segFilter || String(e.segment_id) === state.segFilter)) out.push(i); });
+    return out;
+  }
+  function renderStepList(tr) {
+    const ctl = $("tl-controls"); ctl.replaceChildren();
+    const KIND_TIPS = {
+      frame: "A frame moving from one processor to the next.",
+      aggregate: "The text aggregator appending a chunk, cutting a segment or flushing at the end.",
+      stage: "Something a processor did to a segment: a transform, trim, skip, drop or error.",
+      provider: "A synthesis request reaching the TTS provider.",
+      rtvi: "A message sent to the client.",
+    };
+    for (const k of ["frame", "aggregate", "stage", "provider", "rtvi"]) {
+      ctl.append(el("button", { class: "chip" + (state.kinds[k] ? " on" : ""), text: k, "data-tip": KIND_TIPS[k] + " Click to show or hide these steps.", onclick: () => { state.kinds[k] = !state.kinds[k]; renderStepList(tr); } }));
+    }
+    const segSel = el("select", { "data-tip": "Show only the steps about one segment.", onchange: (e) => { state.segFilter = e.target.value; renderStepList(tr); } },
+      el("option", { value: "", text: "all segments" }),
+      ...tr.segments.filter((s) => s.segment_id != null).map((s, i) => el("option", { value: String(s.segment_id), text: `#${i + 1} ${s.segment_text.slice(0, 24)}` })));
+    segSel.value = state.segFilter;
+    ctl.append(segSel, el("span", { class: "tiny", text: `${visibleIndexes().length} of ${tr.timeline.length} steps shown` }));
+    const list = $("tl"); list.replaceChildren();
+    const shown = new Set(visibleIndexes());
+    if (!shown.size) list.append(el("div", { class: "empty", style: "padding:8px", text: "No steps match." }));
+    tr.timeline.forEach((e, i) => {
+      if (!shown.has(i)) return;
+      const where = e.kind === "aggregate" || e.kind === "stage" ? nodeName(e.source) : `${e.source} → ${e.destination}`;
+      list.append(el("div", { class: "tl-row" + (i === state.pos ? " cur" : ""), "data-i": i, "data-seg": e.segment_id == null ? "" : e.segment_id, onclick: () => setPos(i),
+        onmouseenter: () => { if (i !== state.pos) renderDetail(e, true); }, onmouseleave: () => renderDetail(state.pos >= 0 ? tr.timeline[state.pos] : null) },
+        el("span", { class: "seq", text: `${e.t.toFixed(2)}s` }),
+        el("span", { class: `k-${e.kind}`, text: where }),
+        el("span", { text: e.label }),
+        el("span", { class: "sum" + (e.kind === "aggregate" ? " aggr" : ""), text: e.summary || "" })));
+    });
+  }
+
+  // ---- step detail ----
+  function kvTable(obj) {
+    const t = el("div", { class: "kv" });
+    for (const [k, v] of Object.entries(obj || {})) {
+      const cls = v == null ? "null" : typeof v === "string" ? "str" : typeof v === "number" ? "num" : typeof v === "boolean" ? "bool" : "";
+      t.append(el("span", { class: "k", text: k }), el("span", { class: `v ${cls}`, text: v == null ? "null" : typeof v === "string" ? JSON.stringify(v) : JSON.stringify(v, null, 1) }));
+    }
+    return t;
+  }
+  function renderDetail(e, preview) {
+    const box = $("detail"); box.replaceChildren(); box.classList.toggle("preview", !!preview);
+    if (!e) { box.append(el("div", { class: "empty", text: "The current step's full frame, message or action shows here. Hover a row to peek at another." })); return; }
+    const d = e.data || {};
+    const where = e.kind === "aggregate" || e.kind === "stage" ? nodeName(e.source) : `${e.source} → ${e.destination}`;
+    box.append(el("div", { class: "dh" }, el("span", { class: "dl", text: e.label }), el("span", { class: "dk", text: `${e.kind} · ${where} · ${e.t.toFixed(3)}s · step ${e.seq}` + (e.segment_id != null ? ` · segment ${segNo(e.segment_id)}` : "") })));
+    if (e.kind === "frame" && d.frame) {
+      box.append(el("div", { class: "lab", text: `${e.label} fields` }), kvTable(d.frame));
+      const extra = {};
+      for (const k of ["duration_s", "pts_s", "context_part", "context_so_far"]) if (k in d) extra[k] = d[k];
+      if (Object.keys(extra).length) box.append(el("div", { class: "lab", text: "derived" }), kvTable(extra));
+    } else if (e.kind === "rtvi") {
+      box.append(el("div", { class: "lab", text: "message data" }), kvTable(d));
+    } else if (e.kind === "provider") {
+      const { tokens, ...rest } = d;
+      box.append(el("div", { class: "lab", text: "request" }), kvTable(rest));
+      if (tokens && tokens.length) box.append(el("div", { class: "lab", text: "word timestamps" }), kvTable(Object.fromEntries(tokens.map((t) => [t[0], Number(t[1]).toFixed(3) + "s"]))));
+    } else {
+      box.append(el("div", { class: "lab", text: e.kind === "aggregate" ? "aggregator" : "action" }), kvTable(d));
+    }
+  }
+
+  // ---- player ----
+  function stepDelay(i) {
+    const [mode, v] = $("pl-speed").value.split(":");
+    if (mode === "step") return Number(v);
+    const tl = state.trace.timeline;
+    const dt = i + 1 < tl.length && i >= 0 ? (tl[i + 1].t - tl[i].t) * 1000 / Number(v) : 300;
+    return Math.max(70, Math.min(2500, dt));
+  }
+  function play() {
+    if (!state.trace || !state.trace.timeline.length) return;
+    if (state.pos >= state.trace.timeline.length - 1) setPos(-1);
+    player.playing = true; $("pl-play").innerHTML = "&#10074;&#10074;";
+    tick();
+  }
+  function tick() {
+    if (!player.playing) return;
+    const tl = state.trace.timeline;
+    if (state.pos >= tl.length - 1) { pause(); return; }
+    setPos(state.pos + 1);
+    player.timer = setTimeout(tick, stepDelay(state.pos));
+  }
+  function pause() { player.playing = false; clearTimeout(player.timer); const b = $("pl-play"); if (b) b.innerHTML = "&#9654;"; }
+  function stepVisible(dir) {
+    const vis = visibleIndexes(); if (!vis.length) return;
+    if (dir > 0) { const n = vis.find((i) => i > state.pos); setPos(n == null ? vis[vis.length - 1] : n); }
+    else { const p = [...vis].reverse().find((i) => i < state.pos); setPos(p == null ? -1 : p); }
+  }
+
+  function setPos(i, silent) {
+    const tr = state.trace; if (!tr) return;
+    state.pos = Math.max(-1, Math.min(tr.timeline.length - 1, i));
+    const cur = state.pos >= 0 ? tr.timeline[state.pos] : null;
+    const st = flowStateAt(tr, state.pos);
+    const { main, side } = flowLayout(tr);
+    const [from, to] = cur ? packetEnds(cur) : [null, null];
+    for (const name of [...main, ...Object.values(side)]) {
+      const node = document.getElementById(`node-${name}`); if (!node) continue;
+      const [sub, body] = renderNodeBody(name, st, tr, cur);
+      node.replaceChildren(el("div", { class: "nh" }, el("span", { class: "name" }, NODE_INFO[name][0], help(NODE_INFO[name][2])), el("span", { class: "sub", text: sub })), body);
+      const involved = cur && (cur.source === name || cur.destination === name || from === name || to === name);
+      node.classList.toggle("src", !!(involved && (from === name || (cur.kind !== "frame" && cur.source === name)) && to !== name));
+      node.classList.toggle("dst", !!(involved && (to === name || cur.kind === "aggregate" || cur.kind === "stage") && !(from === name && to !== name)));
+    }
+    const cap = $("pl-caption"); cap.replaceChildren();
+    if (cur) { const [who, what] = describe(cur); cap.append(el("span", { class: "t", text: `${cur.t.toFixed(2)}s` }), el("span", { class: "who", text: who }), what); }
+    else cap.append(tr.timeline.length ? "Before anything happens. Press play, or step with the arrow keys." : "Nothing happened.");
+    if (cur) animatePacket(cur, silent ? 0 : stepDelay(state.pos)); else { const p = $("packet"); if (p) p.style.opacity = 0; }
+    $("pl-slider").value = state.pos;
+    $("pl-pos").textContent = `${state.pos + 1} / ${tr.timeline.length}`;
+    renderDetail(cur);
+    const box = $("tl"); let curRow = null;
+    box.querySelectorAll(".tl-row").forEach((r) => { const on = Number(r.dataset.i) === state.pos; r.classList.toggle("cur", on); if (on) curRow = r; });
+    if (curRow) {
+      const top = curRow.offsetTop, h = curRow.offsetHeight;
+      if (top < box.scrollTop) box.scrollTop = top; else if (top + h > box.scrollTop + box.clientHeight) box.scrollTop = top + h - box.clientHeight;
+    }
+    activateSegment(cur ? cur.segment_id : null);
+  }
+
+  function activateSegment(id) {
+    document.querySelectorAll(".segment").forEach((c) => c.classList.toggle("active", id != null && c.dataset.seg === String(id)));
+  }
+  function focusSegment(id) {
+    activateSegment(id);
+    const c = id == null ? null : document.querySelector(`.segment[data-seg="${id}"]`);
+    if (c) c.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+  function highlightRows(id) {
+    $("tl").querySelectorAll(".tl-row").forEach((r) => r.classList.toggle("hl", id != null && r.dataset.seg === String(id)));
+  }
+  function initPlayer() {
+    $("pl-play").addEventListener("click", () => (player.playing ? pause() : play()));
+    $("pl-prev").addEventListener("click", () => { pause(); stepVisible(-1); });
+    $("pl-next").addEventListener("click", () => { pause(); stepVisible(1); });
+    $("pl-first").addEventListener("click", () => { pause(); setPos(-1); });
+    $("pl-last").addEventListener("click", () => { pause(); if (state.trace) setPos(state.trace.timeline.length - 1); });
+    $("pl-slider").addEventListener("input", (e) => { pause(); setPos(Number(e.target.value)); });
+    document.addEventListener("keydown", (e) => {
+      const tag = (e.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "ArrowRight") { e.preventDefault(); pause(); stepVisible(1); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); pause(); stepVisible(-1); }
+      else if (e.key === " ") { e.preventDefault(); player.playing ? pause() : play(); }
+      else if (e.key === "Home") { e.preventDefault(); pause(); setPos(-1); }
+      else if (e.key === "End") { e.preventDefault(); pause(); if (state.trace) setPos(state.trace.timeline.length - 1); }
+    });
+  }
+
+  // ---------- share ----------
+  function encodeShare() {
+    const json = JSON.stringify({ setup: state.setup, text: state.text });
+    return btoa(unescape(encodeURIComponent(json)));
+  }
+  function decodeShare(hash) {
+    try { return JSON.parse(decodeURIComponent(escape(atob(hash)))); } catch (e) { return null; }
+  }
+
+  // ---------- init ----------
+  async function init() {
+    const wanted = new URLSearchParams(location.search).get("theme");
+    if (wanted === "light" || wanted === "dark") document.documentElement.dataset.theme = wanted;
+    $("theme").addEventListener("click", () => {
+      const root = document.documentElement;
+      const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      root.dataset.theme = dark ? "light" : "dark";
+    });
+    $("text").addEventListener("input", (e) => { state.text = e.target.value; scheduleRun(); });
+    initPlayer();
+    $("run").addEventListener("click", run);
+    $("text-load").addEventListener("click", () => $("text-file").click());
+    $("text-file").addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        state.text = (await file.text()).replace(/\r\n/g, "\n").replace(/\n+$/, "");
+        $("text").value = state.text;
+        setStatus(`Loaded ${file.name}`);
+        run();
+      } catch (err) { showError("Could not read the file: " + String(err.message || err)); }
+      e.target.value = "";
+    });
+    $("share").addEventListener("click", async () => {
+      const url = location.origin + location.pathname + "#" + encodeShare();
+      history.replaceState(null, "", "#" + encodeShare());
+      try { await navigator.clipboard.writeText(url); setStatus("Link copied"); } catch (e) { setStatus("Link is in the address bar"); }
+    });
+    try {
+      [state.presets, state.catalog] = await Promise.all([api("/api/presets"), api("/api/transforms")]);
+    } catch (e) { showError("Could not load presets: " + e.message); return; }
+    const sel = $("preset");
+    state.presets.forEach((p) => sel.append(el("option", { value: p.name, text: p.name })));
+    sel.append(el("option", { value: "", text: "(custom)" }));
+    sel.addEventListener("change", () => {
+      const p = state.presets.find((x) => x.name === sel.value);
+      if (!p) return;
+      state.bot = null; $("bot-desc").textContent = "";
+      $("preset-desc").textContent = p.description || "";
+      replaceSetup(clone(p), p.sample_text || "");
+    });
+    $("bot-load").addEventListener("click", () => loadBot($("bot-path").value.trim()));
+    $("bot-path").addEventListener("keydown", (e) => { if (e.key === "Enter") loadBot($("bot-path").value.trim()); });
+    const config = await api("/api/config").catch(() => ({}));
+    const shared = location.hash.length > 1 ? decodeShare(location.hash.slice(1)) : null;
+    if (shared && shared.setup) {
+      sel.value = state.presets.some((p) => p.name === shared.setup.name) ? shared.setup.name : "";
+      $("preset-desc").textContent = "Restored from the shared link.";
+      replaceSetup(shared.setup, shared.text || "");
+    } else if (config.bot) {
+      $("bot-path").value = config.bot;
+      sel.value = "";
+      await loadBot(config.bot);
+    } else {
+      const p = state.presets.find((x) => x.name === "code-helper") || state.presets[0];
+      if (!p) { showError("No presets available."); return; }
+      sel.value = p.name;
+      $("preset-desc").textContent = p.description || "";
+      replaceSetup(clone(p), p.sample_text || "");
+    }
+  }
+  init();
+})();
+</script>
+</body>
+</html>
