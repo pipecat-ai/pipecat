@@ -30,6 +30,7 @@ from pipecat.classifiers.llm.classifier import DEFAULT_INSTRUCTIONS, LLMClassifi
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
+    InterruptionFrame,
     MetricsFrame,
     StopFrame,
     SystemFrame,
@@ -83,7 +84,8 @@ class TTSGate(FrameProcessor):
     Placed right after the TTS service. TTS frames are buffered while the
     decision is pending; every other frame passes through. A conversation
     verdict releases the buffered frames in order, a voicemail verdict
-    discards them, since they were meant for a person.
+    discards them, since they were meant for a person. An interruption
+    discards the interruptible ones, since the reply they belong to was cut off.
     """
 
     def __init__(self, conversation_notifier: BaseNotifier, voicemail_notifier: BaseNotifier):
@@ -132,7 +134,10 @@ class TTSGate(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if self._gating_active and isinstance(
+        if isinstance(frame, InterruptionFrame) and self._gating_active:
+            self._frame_buffer = [(f, d) for f, d in self._frame_buffer if not f.interruptible]
+            await self.push_frame(frame, direction)
+        elif self._gating_active and isinstance(
             frame, (TTSStartedFrame, TTSStoppedFrame, TTSTextFrame, TTSAudioRawFrame)
         ):
             self._frame_buffer.append((frame, direction))
