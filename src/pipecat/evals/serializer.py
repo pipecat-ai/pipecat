@@ -337,31 +337,6 @@ class EvalSerializer(FrameSerializer):
         )
 
 
-# The bot's reports about *the user it is talking to* (i.e. about the harness):
-# its raw VAD, turn-level speaking, and the transcription of what it heard. The
-# harness surfaces these as scenario events, but does not let them drive its own
-# pipeline. They are kept as raw messages (mapped to events by the sink) for two
-# reasons: a ``TranscriptionFrame`` in the eval pipeline already means "our STT
-# transcribed the bot's audio" (the ``response``), and the VAD/speaking frames are
-# computed locally by the harness's own user aggregator from the bot's audio (a
-# different signal than the bot's VAD on the harness's audio). Routing the reports
-# as messages keeps both sides available without colliding by frame type.
-_REPORTED_EVENT_TYPES = frozenset(
-    {
-        "user-started-speaking",
-        "user-stopped-speaking",
-        "vad-user-started-speaking",
-        "vad-user-stopped-speaking",
-        # What the bot said, read for its backchannels, and what the user said:
-        # its transcriptions and backchannels.
-        "bot-output",
-        "user-input",
-        # The bot's conversation flow entering a node.
-        "flow-node-entered",
-    }
-)
-
-
 @deprecated(
     "`RTVIEvalSerializer` is deprecated since 1.9.0 and will be removed in 2.0.0. "
     "Use `EvalSerializer` instead."
@@ -375,20 +350,15 @@ class RTVIEvalSerializer(EvalSerializer):
 
 
 class EvalClientSerializer(RTVIClientSerializer):
-    """The harness's serializer: RTVI client messages, plus the eval's own.
+    """The harness's serializer: RTVI client messages, plus the bot's audio.
 
     ``eval-bot-audio`` becomes an ``InputAudioRawFrame`` so the harness's STT
-    can transcribe what the bot actually said. The bot's reports about the
-    harness (its transcription, VAD, and speaking messages) stay raw messages
-    rather than becoming frames, so they cannot be mistaken for what the
-    harness computes from the bot's audio. Its reports about its own output
-    (speaking, interrupted, its LLM's and TTS's text, function calls) arrive
-    raw too, from ``RTVIClientSerializer``. So does ``eval-bot-image``, which
-    has no frame on the harness's side to become. The bot's ``metrics`` stay
-    raw messages too, so the sink can report them as
-    they were sent, and so does a ``server-message``, whose data is the bot's
-    own. The deprecated ``user-transcription`` is dropped:
-    ``user-input`` carries the same transcriptions.
+    can transcribe what the bot actually said. Every other message from the
+    bot stays a raw message, as ``RTVIClientSerializer`` keeps it, and the
+    event stream maps the ones a scenario reads to its events. Its reports
+    about the harness (its VAD, speaking and transcription of the harness's
+    speech) can't be mistaken for what the harness computes from the bot's
+    audio that way, and its reports about itself for the harness's own output.
     """
 
     def __init__(self, **kwargs):
@@ -403,47 +373,33 @@ class EvalClientSerializer(RTVIClientSerializer):
         self._resampler = None
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
-        """Deserialize an RTVI server message, handling the eval-specific types.
+        """Deserialize an RTVI server message: the bot's audio as audio, any other raw.
 
         Args:
             data: JSON text (or bytes) sent by the bot.
 
         Returns:
-            The corresponding frame, or ``None`` to drop the message.
+            An ``InputAudioRawFrame`` for the bot's audio, the bot's message as an
+            ``InputTransportMessageFrame`` otherwise, or ``None`` if it is not an
+            RTVI message.
         """
         try:
             message = json.loads(data)
         except (json.JSONDecodeError, TypeError):
             return await super().deserialize(data)
 
-        if isinstance(message, dict) and message.get("label") == RTVI.MESSAGE_LABEL:
-            msg_type = message.get("type")
-            if msg_type == EVAL_BOT_AUDIO_TYPE:
-                payload = message.get("data") or {}
-                audio = base64.b64decode(payload.get("audio", ""))
-                sample_rate = int(payload.get("sampleRate", 0))
-                if sample_rate and sample_rate != EVAL_STT_SAMPLE_RATE and audio:
-                    audio = await self._resample(audio, sample_rate)
-                    sample_rate = EVAL_STT_SAMPLE_RATE
-                return InputAudioRawFrame(
-                    audio=audio,
-                    sample_rate=sample_rate,
-                    num_channels=1,
-                )
-            if msg_type == "user-transcription":
-                return None
-            if (
-                msg_type in _REPORTED_EVENT_TYPES
-                or msg_type == EVAL_BOT_IMAGE_TYPE
-                # The bot's metrics, reported as sent: no per-metric mapping
-                # here to fall behind the protocol.
-                or msg_type == "metrics"
-                # A message of the bot's own making, for the scenario to read.
-                or msg_type == "server-message"
-            ):
-                # Kept as the raw message so the sink maps it to a scenario event;
-                # see the class docstring for why these aren't frames.
-                return InputTransportMessageFrame(message=message)
+        if (
+            isinstance(message, dict)
+            and message.get("label") == RTVI.MESSAGE_LABEL
+            and message.get("type") == EVAL_BOT_AUDIO_TYPE
+        ):
+            payload = message.get("data") or {}
+            audio = base64.b64decode(payload.get("audio", ""))
+            sample_rate = int(payload.get("sampleRate", 0))
+            if sample_rate and sample_rate != EVAL_STT_SAMPLE_RATE and audio:
+                audio = await self._resample(audio, sample_rate)
+                sample_rate = EVAL_STT_SAMPLE_RATE
+            return InputAudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=1)
 
         return await super().deserialize(data)
 

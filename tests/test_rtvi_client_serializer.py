@@ -87,9 +87,13 @@ class TestRTVIClientDeserialize(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(frame.message["type"], msg_type)
             self.assertEqual(frame.message["data"], data)
 
-    async def test_unknown_and_non_rtvi_dropped(self):
-        self.assertIsNone(await self.s.deserialize(_server("bot-ready", {"version": "2.0.0"})))
-        self.assertIsNone(await self.s.deserialize(_server("metrics", {})))
+    async def test_every_rtvi_message_stays_raw(self):
+        for msg_type in ("bot-ready", "metrics", "server-message"):
+            frame = await self.s.deserialize(_server(msg_type, {}))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["type"], msg_type)
+
+    async def test_non_rtvi_dropped(self):
         self.assertIsNone(
             await self.s.deserialize(json.dumps({"type": "bot-llm-text"}))
         )  # no label
