@@ -8,7 +8,9 @@
 
 The harness sets per-connection query flags. ``skip_tts`` silences the
 bot's speech for the session (text mode), applied before
-``on_client_connected`` so a greeting made there is silent too.
+``on_client_connected`` so a greeting made there is silent too. The bot's raw
+LLM and TTS text messages, which the harness reads the bot's text from, are
+turned on there as well.
 ``capture_bot_audio`` forwards the bot's synthesized audio to the harness,
 for transcription and the recording. ``capture_bot_images`` reports each
 image the bot outputs, by size and format. ``trigger_disconnect`` fires the bot's
@@ -38,6 +40,7 @@ from pipecat.frames.frames import (
     UserImageRequestFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.transports.websocket.server import (
     SingleClientWebsocketServerInputTransport,
     SingleClientWebsocketServerOutputTransport,
@@ -155,6 +158,10 @@ class EvalTransport(SingleClientWebsocketServerTransport):
             skip_tts = _query_flag(websocket, SKIP_TTS_QUERY_PARAM)
             logger.debug(f"{self}: configuring eval LLM output with {skip_tts=}")
             await self._input.push_frame(LLMConfigureOutputFrame(skip_tts=skip_tts))
+            # The harness reads the bot's text from the raw text messages, off by default.
+            await self._input.push_frame(
+                RTVIConfigureObserverFrame(llm_raw_text_enabled=True, tts_raw_text_enabled=True)
+            )
 
         await super()._on_client_connected(websocket)
 

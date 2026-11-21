@@ -88,18 +88,26 @@ class RTVIConfigureObserverFrame(SystemFrame):
             started/stopped speaking messages, or ``None`` to leave it unchanged.
         bot_llm_marker_enabled: Whether the observer should emit the sideband
             markers the bot's LLM produces, or ``None`` to leave it unchanged.
+        llm_raw_text_enabled: Whether the observer should emit the LLM's raw text
+            messages (``llm-raw-text``), or ``None`` to leave it unchanged.
+        tts_raw_text_enabled: Whether the observer should emit the TTS's raw text
+            messages (``tts-raw-text``), or ``None`` to leave it unchanged.
     """
 
     function_call_report_level: dict[str, RTVIFunctionCallReportLevel] | None = None
     vad_user_speaking_enabled: bool | None = None
     bot_llm_marker_enabled: bool | None = None
+    llm_raw_text_enabled: bool | None = None
+    tts_raw_text_enabled: bool | None = None
 
     def __str__(self):
         """String representation of the observer-config frame."""
         return (
             f"{self.name}(function_call_report_level: {self.function_call_report_level}, "
             f"vad_user_speaking_enabled: {self.vad_user_speaking_enabled}, "
-            f"bot_llm_marker_enabled: {self.bot_llm_marker_enabled})"
+            f"bot_llm_marker_enabled: {self.bot_llm_marker_enabled}, "
+            f"llm_raw_text_enabled: {self.llm_raw_text_enabled}, "
+            f"tts_raw_text_enabled: {self.tts_raw_text_enabled})"
         )
 
 

@@ -151,8 +151,8 @@ class TestFramesToEvents(unittest.TestCase):
     def test_a_reply_carries_the_time_of_its_first_token(self):
         s = _stream(bot_audio=False)
         s.frame_to_event(_bot_report("bot-llm-started"))
-        s.frame_to_event(_bot_report("bot-llm-text", {"text": "Hello "}))
-        s.frame_to_event(_bot_report("bot-llm-text", {"text": "world"}))
+        s.frame_to_event(_bot_report("llm-raw-text", {"text": "Hello "}))
+        s.frame_to_event(_bot_report("llm-raw-text", {"text": "world"}))
         event = s.frame_to_event(_bot_report("bot-llm-stopped"))
         self.assertIn("started_at", event)
         self.assertLessEqual(event["started_at"], s.elapsed())
@@ -164,7 +164,7 @@ class TestFramesToEvents(unittest.TestCase):
     def test_llm_marker_is_its_own_event(self):
         s = _stream(bot_audio=False)
         s.frame_to_event(_bot_report("bot-llm-started"))
-        s.frame_to_event(_bot_report("bot-llm-text", {"text": "Hello"}))
+        s.frame_to_event(_bot_report("llm-raw-text", {"text": "Hello"}))
         self.assertEqual(
             s.frame_to_event(
                 _bot_report(
@@ -203,8 +203,8 @@ class TestFramesToEvents(unittest.TestCase):
     def test_llm_lifecycle_aggregates_text(self):
         s = _stream(bot_audio=False)
         self.assertEqual(s.frame_to_event(_bot_report("bot-llm-started")), {"type": "llm_started"})
-        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": "Hello "})))
-        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": "world"})))
+        self.assertIsNone(s.frame_to_event(_bot_report("llm-raw-text", {"text": "Hello "})))
+        self.assertIsNone(s.frame_to_event(_bot_report("llm-raw-text", {"text": "world"})))
         self.assertEqual(
             self._bare(s.frame_to_event(_bot_report("bot-llm-stopped"))),
             {"type": "llm_response", "text": "Hello world"},
@@ -216,18 +216,31 @@ class TestFramesToEvents(unittest.TestCase):
             message={"label": RTVI.MESSAGE_LABEL, "type": "bot-interrupted"}
         )
         s.frame_to_event(_bot_report("bot-llm-started"))
-        s.frame_to_event(_bot_report("bot-llm-text", {"text": "Tell me about Paris"}))
+        s.frame_to_event(_bot_report("llm-raw-text", {"text": "Tell me about Paris"}))
         self.assertEqual(s.frame_to_event(interrupt), {"type": "bot_interrupted"})
         # Straggler from the interrupted response is dropped.
-        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": " what would"})))
+        self.assertIsNone(s.frame_to_event(_bot_report("llm-raw-text", {"text": " what would"})))
         self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-stopped")))
         # The genuinely new response.
         s.frame_to_event(_bot_report("bot-llm-started"))
-        s.frame_to_event(_bot_report("bot-llm-text", {"text": "Tokyo"}))
+        s.frame_to_event(_bot_report("llm-raw-text", {"text": "Tokyo"}))
         self.assertEqual(
             self._bare(s.frame_to_event(_bot_report("bot-llm-stopped"))),
             {"type": "llm_response", "text": "Tokyo"},
         )
+
+    def test_the_deprecated_text_messages_are_no_events(self):
+        # The bot still sends them alongside the raw text messages the stream
+        # reads, so its text isn't counted twice.
+        s = _stream(bot_audio=True)
+        s.frame_to_event(_bot_report("bot-llm-started"))
+        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": "Hello"})))
+        s.frame_to_event(_bot_report("llm-raw-text", {"text": "Hello"}))
+        self.assertEqual(
+            self._bare(s.frame_to_event(_bot_report("bot-llm-stopped"))),
+            {"type": "llm_response", "text": "Hello"},
+        )
+        self.assertIsNone(s.frame_to_event(_bot_report("bot-tts-text", {"text": "Hello"})))
 
     def test_the_deprecated_user_transcription_is_no_event(self):
         # user-input carries the same transcriptions.
@@ -411,7 +424,7 @@ class TestFramesToEvents(unittest.TestCase):
         )
         self.assertEqual(s.frame_to_event(msg), {"type": "user_started_speaking"})
         self.assertEqual(s._text_buffer, [])
-        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": " and welcome"})))
+        self.assertIsNone(s.frame_to_event(_bot_report("llm-raw-text", {"text": " and welcome"})))
         self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-stopped")))
         self.assertEqual(s._queue.get_nowait(), {"type": "user_transcription", "transcript": "hi"})
         self.assertTrue(s._queue.empty())
@@ -436,7 +449,7 @@ class TestFramesToEvents(unittest.TestCase):
 
     def test_tts_text_only_in_audio_mode(self):
         def tts(text):
-            return _bot_report("bot-tts-text", {"text": text})
+            return _bot_report("tts-raw-text", {"text": text})
 
         self.assertIsNone(_stream(bot_audio=False).frame_to_event(tts("x")))
         self.assertEqual(
@@ -1793,7 +1806,7 @@ def _bot_response(*texts: str) -> list:
     """One of the bot's LLM responses, as the raw reports the serializer keeps them as."""
     return [
         _bot_report("bot-llm-started"),
-        *[_bot_report("bot-llm-text", {"text": t}) for t in texts],
+        *[_bot_report("llm-raw-text", {"text": t}) for t in texts],
         _bot_report("bot-llm-stopped"),
     ]
 
@@ -1842,7 +1855,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         await self._push(
             sink,
             *_bot_response("Hello"),
-            _bot_report("bot-tts-text", {"text": "Hello"}),
+            _bot_report("tts-raw-text", {"text": "Hello"}),
             _bot_report("bot-started-speaking"),
             _bot_report(
                 "llm-function-call-in-progress", {"function_name": "f", "tool_call_id": "c"}
@@ -1891,7 +1904,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         await self._push(
             sink,
             _bot_report("bot-llm-started"),
-            _bot_report("bot-llm-text", {"text": "Let me check."}),
+            _bot_report("llm-raw-text", {"text": "Let me check."}),
             _bot_report(
                 "llm-function-call-in-progress", {"function_name": "f", "tool_call_id": "c"}
             ),
@@ -2333,7 +2346,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.server.on_text(
             "what is the capital of France?",
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "Paris"}),
+            _rtvi("llm-raw-text", {"text": "Paris"}),
             _rtvi("bot-llm-stopped"),
         )
         scenario = EvalScriptScenario(
@@ -2397,10 +2410,10 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.server.on_text(
             "weather?",
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "Let me check on that. "}),
+            _rtvi("llm-raw-text", {"text": "Let me check on that. "}),
             _rtvi("bot-llm-stopped"),
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "It is sunny in Paris."}),
+            _rtvi("llm-raw-text", {"text": "It is sunny in Paris."}),
             _rtvi("bot-llm-stopped"),
         )
         scenario = EvalScriptScenario(
@@ -2437,7 +2450,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
                 "user-input", {"text": " Germany?", "input_type": "transcription", "final": True}
             ),
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "Berlin."}),
+            _rtvi("llm-raw-text", {"text": "Berlin."}),
             _rtvi("bot-llm-stopped"),
         )
         scenario = EvalScriptScenario(
@@ -2695,7 +2708,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.server.on_text(
             "hi",
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "Paris"}),
+            _rtvi("llm-raw-text", {"text": "Paris"}),
             _rtvi("bot-llm-stopped"),
         )
         scenario = EvalScriptScenario(
@@ -2722,13 +2735,13 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.server.on_text(
             "first",
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "Paris"}),
+            _rtvi("llm-raw-text", {"text": "Paris"}),
             _rtvi("bot-llm-stopped"),
         )
         self.server.on_text(
             "second",
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "Berlin"}),
+            _rtvi("llm-raw-text", {"text": "Berlin"}),
             _rtvi("bot-llm-stopped"),
         )
         return EvalScriptScenario(
@@ -2789,7 +2802,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.server.on_text(
             "hello",
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "Hi there"}),
+            _rtvi("llm-raw-text", {"text": "Hi there"}),
             _rtvi("bot-llm-marker", {"text": "◐", "kind": "short", "raw": "◐ Hi there"}),
             _rtvi("bot-llm-stopped"),
         )
@@ -2929,7 +2942,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.server.on_text(
             "second",
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "ok"}),
+            _rtvi("llm-raw-text", {"text": "ok"}),
             _rtvi("bot-llm-stopped"),
         )
         scenario = EvalScriptScenario(
@@ -3032,7 +3045,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
         self.server.on_text(
             "hello there",
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "Hi!"}),
+            _rtvi("llm-raw-text", {"text": "Hi!"}),
             _rtvi("bot-llm-stopped"),
         )
         scenario = EvalScriptScenario(
@@ -3254,7 +3267,7 @@ class TestProgressEvent(unittest.IsolatedAsyncioTestCase):
         self.server.on_text(
             "hi",
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "hello"}),
+            _rtvi("llm-raw-text", {"text": "hello"}),
             _rtvi("bot-llm-stopped"),
         )
 
@@ -3432,13 +3445,13 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_text_simulation_runs_to_end_call(self):
         self.server.greeting = [
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "Hello! How can I help?"}),
+            _rtvi("llm-raw-text", {"text": "Hello! How can I help?"}),
             _rtvi("bot-llm-stopped"),
         ]
         self.server.on_text(
             "What is the capital of Germany?",
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "The capital of Germany is Berlin."}),
+            _rtvi("llm-raw-text", {"text": "The capital of Germany is Berlin."}),
             _rtvi("bot-llm-stopped"),
         )
         persona = _ScriptedPersonaLLM(
@@ -3525,7 +3538,7 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
 
         self.server.greeting = [
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "Hello!"}),
+            _rtvi("llm-raw-text", {"text": "Hello!"}),
             _rtvi("bot-llm-stopped"),
         ]
         persona = _ScriptedPersonaLLM({"Hello!": ("end_call", {"success": True, "reason": "ok"})})
@@ -3553,13 +3566,13 @@ class TestSimulationIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_the_bot_hanging_up_ends_the_run(self):
         self.server.greeting = [
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "How many in your party?"}),
+            _rtvi("llm-raw-text", {"text": "How many in your party?"}),
             _rtvi("bot-llm-stopped"),
         ]
         self.server.on_text(
             "Two, please.",
             _rtvi("bot-llm-started"),
-            _rtvi("bot-llm-text", {"text": "Booked. Goodbye!"}),
+            _rtvi("llm-raw-text", {"text": "Booked. Goodbye!"}),
             _rtvi("bot-llm-stopped"),
         )
         self.server.close_after = "Two, please."
@@ -3605,7 +3618,7 @@ class TestAudioSupportCheck(unittest.IsolatedAsyncioTestCase):
                         data["capabilities"] = capabilities
                     await ws.send(_rtvi("bot-ready", data))
                     await ws.send(_rtvi("bot-llm-started"))
-                    await ws.send(_rtvi("bot-llm-text", {"text": "Welcome!"}))
+                    await ws.send(_rtvi("llm-raw-text", {"text": "Welcome!"}))
                     await ws.send(_rtvi("bot-llm-stopped"))
 
         return bot

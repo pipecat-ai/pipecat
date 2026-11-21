@@ -1222,7 +1222,7 @@ class TestSimulationEarlyEndings(unittest.IsolatedAsyncioTestCase):
                     InputTransportMessageFrame(
                         message={
                             "label": RTVI.MESSAGE_LABEL,
-                            "type": "bot-llm-text",
+                            "type": "llm-raw-text",
                             "data": {"text": "token "},
                         }
                     )

@@ -23,13 +23,13 @@ scenario ``event:``             RTVI server message(s)
 ``vad_user_stopped_speaking``   ``vad-user-stopped-speaking`` (raw VAD, ungated by turn detection)
 ``user_transcription``          ``user-input`` of type ``transcription`` (final only)
 ``llm_started``                 ``bot-llm-started``
-``llm_response``                the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
+``llm_response``                the LLM text: ``llm-raw-text`` joined at ``bot-llm-stopped``
 ``llm_marker``                  ``bot-llm-marker``: the sideband marker the LLM emitted in a
                                 response, such as a turn-completion marker or the
                                 silent mark of a reply dropped unspoken, with its
                                 ``kind`` and the response's raw text; sent when the
                                 response ends, only on request
-``tts_response``                the TTS's spoken text: one segment per ``bot-tts-text``
+``tts_response``                the TTS's spoken text: one segment per ``tts-raw-text``
                                 (audio modality only)
 ``response``                    the harness's own transcription of the bot's audio
                                 (audio modality only); ``llm_response`` in text modality
@@ -570,11 +570,11 @@ class EvalEventStream:
             return {"type": "bot_started_speaking"}
         elif msg_type == "bot-stopped-speaking":
             return {"type": "bot_stopped_speaking"}
-        elif msg_type == "bot-tts-text":
+        elif msg_type == "tts-raw-text":
             if self._bot_audio:
                 return self._segment_event("tts_response", data.get("text", ""))
             return None
-        elif msg_type in ("bot-llm-started", "bot-llm-text", "bot-llm-marker", "bot-llm-stopped"):
+        elif msg_type in ("bot-llm-started", "llm-raw-text", "bot-llm-marker", "bot-llm-stopped"):
             return self._llm_report_to_event(msg_type, data)
         elif msg_type == "llm-function-call-in-progress":
             # The name and arguments may be absent at the bot's default report level.
@@ -639,7 +639,7 @@ class EvalEventStream:
             if msg_type == "bot-llm-stopped":
                 self._text_buffer = []
             return None
-        if msg_type == "bot-llm-text":
+        if msg_type == "llm-raw-text":
             if not self._text_buffer:
                 self._llm_text_at = self.elapsed()
             self._text_buffer.append(data.get("text", ""))

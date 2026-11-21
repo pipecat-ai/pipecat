@@ -527,6 +527,12 @@ class RTVIObserver(BaseObserver):
         if frame.bot_llm_marker_enabled is not None:
             self._params.bot_llm_marker_enabled = frame.bot_llm_marker_enabled
             logger.debug(f"{self}: bot_llm_marker_enabled set to {frame.bot_llm_marker_enabled}")
+        if frame.llm_raw_text_enabled is not None:
+            self._params.llm_raw_text_enabled = frame.llm_raw_text_enabled
+            logger.debug(f"{self}: llm_raw_text_enabled set to {frame.llm_raw_text_enabled}")
+        if frame.tts_raw_text_enabled is not None:
+            self._params.tts_raw_text_enabled = frame.tts_raw_text_enabled
+            logger.debug(f"{self}: tts_raw_text_enabled set to {frame.tts_raw_text_enabled}")
 
     async def _logger_sink(self, message):
         """Logger sink so we can send system logs to RTVI clients."""

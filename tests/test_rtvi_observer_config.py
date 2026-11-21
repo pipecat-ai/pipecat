@@ -69,6 +69,20 @@ class TestRTVIConfigureObserver(unittest.TestCase):
         observer._apply_config(RTVIConfigureObserverFrame(bot_llm_marker_enabled=None))
         self.assertTrue(observer._params.bot_llm_marker_enabled)
 
+    def test_enables_raw_text_at_runtime(self):
+        # Off by default; a config frame enables the LLM's and the TTS's raw text live.
+        observer = RTVIObserver(params=RTVIObserverParams())
+        self.assertFalse(observer._params.llm_raw_text_enabled)
+        self.assertFalse(observer._params.tts_raw_text_enabled)
+        observer._apply_config(
+            RTVIConfigureObserverFrame(llm_raw_text_enabled=True, tts_raw_text_enabled=True)
+        )
+        self.assertTrue(observer._params.llm_raw_text_enabled)
+        self.assertTrue(observer._params.tts_raw_text_enabled)
+        observer._apply_config(RTVIConfigureObserverFrame())
+        self.assertTrue(observer._params.llm_raw_text_enabled)
+        self.assertTrue(observer._params.tts_raw_text_enabled)
+
 
 class TestRTVIObserverLLMMarkers(unittest.IsolatedAsyncioTestCase):
     async def _push(self, observer: RTVIObserver, frame) -> list:
