@@ -18,6 +18,7 @@ The tests use unittest.IsolatedAsyncioTestCase for async support and
 include mocked dependencies for PipelineTask and LLM services.
 """
 
+import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
@@ -1650,6 +1651,46 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
                 },
             ],
         )
+
+    async def test_rtvi_message_leaves_out_metadata_that_is_not_json(self):
+        handle = object()
+        booking = self.node("booking", metadata={"handle": handle})
+        start = self.node(
+            "start",
+            self.edge("begin", booking, metadata={"callback": print}),
+            metadata={"step": 1},
+        )
+        flow_manager, entered = self.make_manager()
+
+        with patch("pipecat.flows.manager.logger") as mock_logger:
+            await flow_manager.initialize(start)
+            await self.invoke("begin")
+
+        # Handlers get the metadata as the application wrote it.
+        self.assertEqual(entered[1].metadata, {"handle": handle})
+        self.assertEqual(entered[1].function_metadata, {"callback": print})
+
+        messages = self.rtvi_messages(self.mock_worker)
+        self.assertEqual(
+            messages,
+            [
+                {"type": "flows", "event": "node", "node": "start", "metadata": {"step": 1}},
+                {
+                    "type": "flows",
+                    "event": "node",
+                    "node": "booking",
+                    "previous_node": "start",
+                    "function": "begin",
+                },
+            ],
+        )
+        # What a transport's serializer does with the message.
+        json.dumps(messages)
+
+        warnings = [call.args[0] for call in mock_logger.warning.call_args_list]
+        self.assertEqual(len(warnings), 2)
+        self.assertIn("Node 'booking': metadata is not JSON-serializable", warnings[0])
+        self.assertIn("Node 'booking': function_metadata is not JSON-serializable", warnings[1])
 
     async def test_rtvi_message_follows_the_handlers_and_precedes_the_llm_run(self):
         calls = MagicMock()

@@ -573,7 +573,7 @@ suite:
   # scenarios asserting on node transitions, function calls, and context
   # strategies. The Python bots pick their LLM from $LLM_PROVIDER (default
   # openai_responses; hello_world always uses Google); the YAML bots use
-  # OpenAI.
+  # OpenAI, except clinic_appointments, which uses Google.
   #
   - bot: flows/python/hello_world.py
     scenarios: [scripted/hello_world]
@@ -593,6 +593,8 @@ suite:
     scenarios: [scripted/patient_intake]
   - bot: flows/yaml/restaurant_reservation/bot.py
     scenarios: [scripted/restaurant_reservation]
+  - bot: flows/yaml/clinic_appointments/bot.py
+    scenarios: [scripted/clinic_appointments]
   # Constructs and switches between OpenAI, Google, and Anthropic, so all
   # three API keys must be set.
   - bot: flows/python/llm_switching.py

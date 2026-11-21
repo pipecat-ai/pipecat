@@ -26,6 +26,7 @@ The flow manager coordinates all aspects of a conversation, including:
 
 import asyncio
 import inspect
+import json
 import re
 from collections.abc import Callable, Mapping
 from typing import Any, cast
@@ -88,6 +89,14 @@ _PLACEHOLDER = re.compile(
 )
 
 
+def _is_json_serializable(value: Any) -> bool:
+    try:
+        json.dumps(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 class FlowManager(BaseObject):
     r"""Manages conversation flows.
 
@@ -139,7 +148,8 @@ class FlowManager(BaseObject):
     those of :class:`~pipecat.flows.NodeEntered`, and one with no value is
     left out. The message is sent whenever the worker has RTVI enabled, so
     keep anything the end user should not see out of node names, function
-    names and metadata.
+    names and metadata. Metadata that is not JSON-serializable is left out of
+    the message, with a warning; ``on_node_entered`` handlers still receive it.
     """
 
     def __init__(
@@ -668,8 +678,15 @@ class FlowManager(BaseObject):
         message: dict[str, Any] = {"type": "flows", "event": "node", "node": entered.node}
         for field in ("previous_node", "function", "metadata", "function_metadata", "parent"):
             value = getattr(entered, field)
-            if value is not None:
-                message[field] = value
+            if value is None:
+                continue
+            if field in ("metadata", "function_metadata") and not _is_json_serializable(value):
+                logger.warning(
+                    f"Node '{entered.node}': {field} is not JSON-serializable, so it is left "
+                    "out of the RTVI message"
+                )
+                continue
+            message[field] = value
         return message
 
     def _render_node(self, node_id: str, node_config: NodeConfig) -> NodeConfig:
