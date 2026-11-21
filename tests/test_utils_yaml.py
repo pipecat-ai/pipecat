@@ -77,6 +77,33 @@ class TestIncludeLoader(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             yaml.load("x: !include nope.yaml\n", include_loader(d))
 
+    def test_include_cycle_raises(self):
+        d = _tmpdir()
+        (d / "a.yaml").write_text("b: !include b.yaml\n", encoding="utf-8")
+        (d / "b.yaml").write_text("a: !include a.yaml\n", encoding="utf-8")
+        with self.assertRaises(yaml.constructor.ConstructorError) as cm:
+            yaml.load("top: !include a.yaml\n", include_loader(d))
+        self.assertIn("!include cycle", str(cm.exception))
+        self.assertIn("a.yaml", str(cm.exception))
+        self.assertIn("b.yaml", str(cm.exception))
+
+    def test_file_that_includes_itself_raises(self):
+        d = _tmpdir()
+        (d / "self.yaml").write_text("me: !include self.yaml\n", encoding="utf-8")
+        with self.assertRaises(yaml.constructor.ConstructorError) as cm:
+            yaml.load("top: !include self.yaml\n", include_loader(d))
+        self.assertIn("!include cycle", str(cm.exception))
+
+    def test_a_file_may_be_included_more_than_once(self):
+        d = _tmpdir()
+        (d / "leaf.yaml").write_text("x: 1\n", encoding="utf-8")
+        (d / "middle.yaml").write_text("leaf: !include leaf.yaml\n", encoding="utf-8")
+        data = yaml.load(
+            "a: !include leaf.yaml\nb: !include leaf.yaml\nc: !include middle.yaml\n",
+            include_loader(d),
+        )
+        self.assertEqual(data, {"a": {"x": 1}, "b": {"x": 1}, "c": {"leaf": {"x": 1}}})
+
     def test_non_scalar_node_raises(self):
         d = _tmpdir()
         with self.assertRaises(yaml.constructor.ConstructorError) as cm:

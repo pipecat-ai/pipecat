@@ -203,8 +203,11 @@ class NodeConfig(TypedDict, total=False):
         respond_immediately: Whether to run LLM inference as soon as the node is
             set (default: True).
         metadata: JSON-serializable data the application attaches to the
-            node. Flows never acts on it and never sends it to the LLM; an
-            RTVI client receives it when the node is entered.
+            node. Flows never acts on it and never sends it to the LLM. An
+            RTVI client receives it when the node is entered, so keep anything
+            the end user should not see out of it.
+        parent: For a node of a subflow, the name of the node that runs the
+            subflow. :class:`~pipecat.flows.Flow` sets it.
 
     Example::
 
@@ -239,6 +242,7 @@ class NodeConfig(TypedDict, total=False):
     context_strategy: ContextStrategyConfig
     respond_immediately: bool
     metadata: dict[str, Any]
+    parent: str
 
 
 class _NoResponse:
@@ -390,8 +394,9 @@ class FlowsFunctionSchema:
         timeout_secs: Optional per-tool timeout in seconds, overriding the global
             ``function_call_timeout_secs``. Defaults to None (use global timeout).
         metadata: JSON-serializable data the application attaches to the
-            function. Flows never acts on it and never sends it to the LLM; an
-            RTVI client receives it when the function's call enters a node.
+            function. Flows never acts on it and never sends it to the LLM. An
+            RTVI client receives it when the function's call enters a node, so
+            keep anything the end user should not see out of it.
     """
 
     name: str
@@ -429,6 +434,8 @@ class NodeEntered:
             node was set directly (``initialize``, ``set_node_from_config``).
         metadata: The entered node's ``metadata``, or None.
         function_metadata: The ``metadata`` of ``function``, or None.
+        parent: When the entered node is a node of a subflow, the name of the
+            node that runs the subflow; None otherwise.
     """
 
     node: str
@@ -436,6 +443,7 @@ class NodeEntered:
     function: str | None = None
     metadata: dict[str, Any] | None = None
     function_metadata: dict[str, Any] | None = None
+    parent: str | None = None
 
 
 def flows_tool_options(

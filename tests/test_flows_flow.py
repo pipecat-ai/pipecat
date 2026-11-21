@@ -4,7 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import importlib.util
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, PropertyMock
 
@@ -23,6 +25,7 @@ from pipecat.flows import (
     FlowReferenceError,
     FlowsFunctionSchema,
     NodeConfig,
+    NodeEntered,
     flows_tool_options,
 )
 from pipecat.services.llm_service import FunctionCallParams
@@ -625,6 +628,215 @@ class TestBranches(unittest.IsolatedAsyncioTestCase):
         self.assertIn("has no such field", str(cm.exception))
 
 
+def _node(*functions: dict, **extras) -> dict:
+    node: dict = {"task_messages": [{"role": "developer", "content": "hi"}], **extras}
+    if functions:
+        node["functions"] = list(functions)
+    return node
+
+
+def _go(name: str, target: str) -> dict:
+    return {"name": name, "transition_only": True, "description": "Go.", "transition_to": target}
+
+
+def composed(**overrides) -> FlowConfig:
+    """A flow that verifies the caller in a subflow, books, and closes in another."""
+    data = {
+        "initial_node": "start",
+        "flows": {
+            "verification": {
+                "initial_node": "ask",
+                "nodes": {
+                    "ask": _node(_go("answered", "check"), metadata={"step": "ask"}),
+                    "check": _node(
+                        {
+                            "name": "report_flag",
+                            "transition_to": {
+                                "field": "flag",
+                                "cases": {"true": "return", "false": "ask"},
+                            },
+                        }
+                    ),
+                },
+            },
+            "closing": {
+                "initial_node": "anything_else",
+                "nodes": {"anything_else": _node(_go("more", "return"))},
+            },
+        },
+        "nodes": {
+            "start": _node(_go("begin", "verify")),
+            "verify": {"flow": "verification", "return_to": "book"},
+            "book": _node(
+                {
+                    "name": "report",
+                    "transition_to": {"field": "status", "cases": {"booked": "goodbye"}},
+                }
+            ),
+            "goodbye": {"flow": "closing", "return_to": "book"},
+        },
+    }
+    data.update(overrides)
+    return FlowConfig.model_validate(data)
+
+
+class TestSubflows(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.flow_manager = SimpleNamespace(state={})
+
+    async def call(self, flow: Flow, node: str, args: dict | None = None) -> NodeConfig | None:
+        """The node the first function of ``node`` leads to."""
+        schema = flow.node(node)["functions"][0]
+        _, next_node = await schema.handler(args or {}, self.flow_manager)
+        return next_node
+
+    def test_a_subflow_is_built_under_the_node_that_runs_it(self):
+        flow = make_flow(composed())
+        self.assertEqual(
+            set(flow._nodes),
+            {"start", "book", "verify.ask", "verify.check", "goodbye.anything_else"},
+        )
+        self.assertEqual(flow.node("verify.ask")["name"], "verify.ask")
+        self.assertEqual(flow.node("verify.ask")["metadata"], {"step": "ask"})
+        with self.assertRaises(FlowError):
+            flow.node("ask")
+        with self.assertRaises(FlowError):
+            flow.node("verification.ask")
+
+    def test_a_subflow_node_names_the_node_that_runs_it(self):
+        flow = make_flow(composed())
+        self.assertEqual(flow.node("verify.ask")["parent"], "verify")
+        self.assertEqual(flow.node("verify.check")["parent"], "verify")
+        self.assertEqual(flow.node("goodbye.anything_else")["parent"], "goodbye")
+        self.assertNotIn("parent", flow.node("start"))
+        self.assertNotIn("parent", flow.node("book"))
+
+    def test_the_node_that_runs_a_subflow_is_its_first_node(self):
+        flow = make_flow(composed())
+        self.assertIs(flow.node("verify"), flow.node("verify.ask"))
+        self.assertIs(flow.node("goodbye"), flow.node("goodbye.anything_else"))
+
+    def test_a_flow_without_subflows_builds_its_own_nodes_only(self):
+        cfg = config()
+        flow = make_flow(cfg)
+        self.assertEqual(set(flow._nodes), set(cfg.nodes))
+        for name in cfg.nodes:
+            self.assertEqual(flow.node(name)["name"], name)
+
+    async def test_entering_a_node_that_runs_a_subflow_goes_to_its_first_node(self):
+        flow = make_flow(composed())
+        self.assertIs(await self.call(flow, "start"), flow.node("verify.ask"))
+        self.assertIs(
+            await self.call(flow, "book", {"status": "booked"}), flow.node("goodbye.anything_else")
+        )
+
+    async def test_targets_inside_a_subflow_stay_inside_it(self):
+        flow = make_flow(composed())
+        self.assertIs(await self.call(flow, "verify.ask"), flow.node("verify.check"))
+        self.assertIs(
+            await self.call(flow, "verify.check", {"flag": False}), flow.node("verify.ask")
+        )
+
+    async def test_return_goes_to_the_return_to_of_the_node_that_ran_it(self):
+        flow = make_flow(composed())
+        self.assertIs(await self.call(flow, "verify.check", {"flag": True}), flow.node("book"))
+        self.assertIs(await self.call(flow, "goodbye.anything_else"), flow.node("book"))
+
+    async def test_return_to_a_node_that_runs_a_subflow(self):
+        cfg = composed()
+        cfg.nodes["verify"].return_to = "goodbye"
+        flow = make_flow(cfg)
+        self.assertIs(
+            await self.call(flow, "verify.check", {"flag": True}),
+            flow.node("goodbye.anything_else"),
+        )
+
+    def test_initial_node_may_run_a_subflow(self):
+        flow = make_flow(composed(initial_node="verify"))
+        self.assertIs(flow.initial_node, flow.node("verify.ask"))
+
+    async def test_one_subflow_run_by_two_nodes(self):
+        cfg = composed()
+        cfg.nodes["verify_again"] = FlowConfig.Node(flow="verification", return_to="start")
+        flow = make_flow(cfg)
+
+        self.assertIsNot(flow.node("verify.ask"), flow.node("verify_again.ask"))
+        self.assertIs(await self.call(flow, "verify.ask"), flow.node("verify.check"))
+        self.assertIs(await self.call(flow, "verify_again.ask"), flow.node("verify_again.check"))
+        self.assertIs(await self.call(flow, "verify.check", {"flag": True}), flow.node("book"))
+        self.assertIs(
+            await self.call(flow, "verify_again.check", {"flag": True}), flow.node("start")
+        )
+
+    def test_a_subflow_that_never_returns_needs_no_return_to(self):
+        cfg = composed()
+        cfg.flows["closing"].nodes["anything_else"].functions[0].transition_to = "anything_else"
+        cfg.nodes["goodbye"].return_to = None
+        flow = make_flow(FlowConfig.model_validate(cfg.model_dump()))
+        self.assertEqual(flow.node("goodbye")["name"], "goodbye.anything_else")
+
+    async def test_global_function_may_enter_a_subflow(self):
+        flow = make_flow(composed(global_functions=[_go("reverify", "verify")]))
+        _, next_node = await flow.global_functions[0].handler({}, self.flow_manager)
+        self.assertIs(next_node, flow.node("verify.ask"))
+
+    async def test_a_node_named_return_is_an_ordinary_node_outside_a_subflow(self):
+        cfg = single_node(_go("back", "next"))
+        cfg.nodes["return"] = cfg.nodes["next"].model_copy()
+        cfg.nodes["a"].functions[0].transition_to = "return"
+        flow = make_flow(cfg)
+        self.assertIs(await self.call(flow, "a"), flow.node("return"))
+
+    def test_problems_in_a_subflow_name_the_built_node(self):
+        cfg = composed()
+        cfg.flows["verification"].nodes["check"].functions[0].name = "no_such_tool"
+        cfg.nodes["book"].functions[0].name = "also_missing"
+        cfg.nodes["verify_again"] = FlowConfig.Node(flow="verification", return_to="start")
+        with self.assertRaises(FlowReferenceError) as cm:
+            make_flow(cfg)
+        problems = [(p.code, p.node, p.function) for p in cm.exception.problems]
+        self.assertEqual(
+            problems,
+            [
+                ("missing_tool", "verify.check", "no_such_tool"),
+                ("missing_tool", "book", "also_missing"),
+                ("missing_tool", "verify_again.check", "no_such_tool"),
+            ],
+        )
+        self.assertIn("node 'verify.check' references tool 'no_such_tool'", str(cm.exception))
+
+
+class TestShippedExamples(unittest.TestCase):
+    """Every YAML example under examples/flows/yaml loads and builds."""
+
+    EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "flows" / "yaml"
+
+    def build(self, example: Path) -> Flow:
+        spec = importlib.util.spec_from_file_location(
+            f"{example.name}_handlers", example / "handlers.py"
+        )
+        handlers = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(handlers)
+        return Flow(FlowConfig.from_file(example / "flow.yaml"), handlers=handlers)
+
+    def test_examples_build(self):
+        examples = sorted(p.parent for p in self.EXAMPLES.glob("*/flow.yaml"))
+        self.assertGreaterEqual(len(examples), 7)
+        for example in examples:
+            with self.subTest(example=example.name):
+                flow = self.build(example)
+                if not flow.config.flows:
+                    self.assertEqual(set(flow._nodes), set(flow.config.nodes))
+                self.assertIn("task_messages", flow.initial_node)
+
+    def test_clinic_appointments_runs_one_subflow_from_two_nodes(self):
+        flow = self.build(self.EXAMPLES / "clinic_appointments")
+        self.assertEqual(
+            set(flow._nodes) - set(flow.config.nodes),
+            {"verify_to_book.ask_birth_date", "verify_to_cancel.ask_birth_date"},
+        )
+
+
 class TestWithFlowManager(unittest.IsolatedAsyncioTestCase):
     """A configured flow driven through the real FlowManager."""
 
@@ -737,6 +949,44 @@ class TestWithFlowManager(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("secret-", repr(vars(frame)))
         for schema in get_advertised_tools(self.mock_worker).standard_tools:
             self.assertNotIn("secret-", repr(schema.to_default_dict()))
+
+    async def test_node_entered_through_a_subflow(self):
+        flow = make_flow(composed())
+        flow_manager = self.make_manager(flow)
+        entered: list[NodeEntered] = []
+
+        @flow_manager.event_handler("on_node_entered")
+        async def on_node_entered(flow_manager, event):
+            entered.append(event)
+
+        await flow_manager.initialize(flow.initial_node)
+        await self.invoke("begin")
+        await self.invoke("answered")
+        await self.invoke("report_flag", {"flag": False})
+        await self.invoke("answered")
+        await self.invoke("report_flag", {"flag": True})
+        await self.invoke("report", {"status": "booked"})
+        await self.invoke("more")
+
+        self.assertEqual(
+            [(e.previous_node, e.function, e.node) for e in entered],
+            [
+                (None, None, "start"),
+                ("start", "begin", "verify.ask"),
+                ("verify.ask", "answered", "verify.check"),
+                ("verify.check", "report_flag", "verify.ask"),
+                ("verify.ask", "answered", "verify.check"),
+                ("verify.check", "report_flag", "book"),
+                ("book", "report", "goodbye.anything_else"),
+                ("goodbye.anything_else", "more", "book"),
+            ],
+        )
+        self.assertEqual(entered[1].metadata, {"step": "ask"})
+        self.assertEqual(flow_manager.current_node, "book")
+        self.assertEqual(
+            [e.parent for e in entered],
+            [None, "verify", "verify", "verify", "verify", None, "goodbye", None],
+        )
 
     def queued_messages(self) -> list[dict]:
         """Every message the manager has sent to the LLM context so far."""

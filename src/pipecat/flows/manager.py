@@ -127,16 +127,19 @@ class FlowManager(BaseObject):
         {
             "type": "flows",
             "event": "node",
-            "node": "find_slot",
+            "node": "booking.find_slot",
             "previous_node": "start",
             "function": "begin",
             "metadata": {"step": 2},
-            "function_metadata": {"exit": "chosen"}
+            "function_metadata": {"exit": "chosen"},
+            "parent": "booking"
         }
 
     ``type``, ``event`` and ``node`` are always present. The other fields are
     those of :class:`~pipecat.flows.NodeEntered`, and one with no value is
-    left out.
+    left out. The message is sent whenever the worker has RTVI enabled, so
+    keep anything the end user should not see out of node names, function
+    names and metadata.
     """
 
     def __init__(
@@ -663,7 +666,7 @@ class FlowManager(BaseObject):
     def _node_entered_message(entered: NodeEntered) -> dict[str, Any]:
         """The RTVI server message data that announces a node; see the class docstring."""
         message: dict[str, Any] = {"type": "flows", "event": "node", "node": entered.node}
-        for field in ("previous_node", "function", "metadata", "function_metadata"):
+        for field in ("previous_node", "function", "metadata", "function_metadata", "parent"):
             value = getattr(entered, field)
             if value is not None:
                 message[field] = value
@@ -835,6 +838,7 @@ class FlowManager(BaseObject):
                 function=via,
                 metadata=node_config.get("metadata"),
                 function_metadata=self._current_function_metadata.get(via) if via else None,
+                parent=node_config.get("parent"),
             )
             self._current_node = node_id
             self._current_functions = new_functions

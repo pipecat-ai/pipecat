@@ -185,7 +185,22 @@ class TestFlowConfigLoading(unittest.TestCase):
         self.assertEqual(schema["required"], ["initial_node", "nodes"])
         for model in ("Node", "Function"):
             self.assertIn("metadata", schema["$defs"][model]["properties"])
-            self.assertNotIn("metadata", schema["$defs"][model]["required"])
+            self.assertNotIn("metadata", schema["$defs"][model].get("required", []))
+
+    def test_json_schema_has_optional_subflows(self):
+        schema = FlowConfig.model_json_schema()
+        # The root stays an inline object schema, not a reference.
+        self.assertNotIn("$ref", schema)
+        self.assertEqual(schema["type"], "object")
+        self.assertEqual(schema["required"], ["initial_node", "nodes"])
+        self.assertIn("flows", schema["properties"])
+        self.assertEqual(schema["$defs"]["Subflow"]["required"], ["initial_node", "nodes"])
+        node = schema["$defs"]["Node"]
+        self.assertIn("flow", node["properties"])
+        self.assertIn("return_to", node["properties"])
+        # A node needs task_messages unless it runs a flow.
+        self.assertNotIn("required", node)
+        self.assertEqual(node["else"]["required"], ["task_messages"])
 
     def test_shipped_schema_file_is_current(self):
         # The repository keeps the schema for editors and other tools to vendor.
@@ -389,3 +404,298 @@ class TestFlowConfigValidation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _node(*functions: dict) -> dict:
+    node: dict = {"task_messages": [{"role": "developer", "content": "hi"}]}
+    if functions:
+        node["functions"] = list(functions)
+    return node
+
+
+def _go(name: str, target: str) -> dict:
+    return {"name": name, "transition_only": True, "description": "Go.", "transition_to": target}
+
+
+def _composed() -> dict:
+    """A flow whose ``verify`` node runs a verification subflow and comes back to ``book``."""
+    return {
+        "initial_node": "start",
+        "flows": {
+            "verification": {
+                "initial_node": "ask",
+                "nodes": {
+                    "ask": _node({"name": "check", "transition_to": "confirm"}),
+                    "confirm": _node(_go("verified", "return")),
+                },
+            },
+        },
+        "nodes": {
+            "start": _node(_go("begin", "verify")),
+            "verify": {"flow": "verification", "return_to": "book"},
+            "book": _node(),
+        },
+    }
+
+
+class TestSubflows(unittest.TestCase):
+    def assert_invalid(self, data: dict, *messages: str) -> None:
+        with self.assertRaises(ValidationError) as cm:
+            FlowConfig.model_validate(data)
+        for message in messages:
+            self.assertIn(message, str(cm.exception))
+
+    def test_composed_config(self):
+        cfg = FlowConfig.model_validate(_composed())
+        self.assertEqual(cfg.nodes["verify"].flow, "verification")
+        self.assertEqual(cfg.nodes["verify"].return_to, "book")
+        self.assertEqual(cfg.nodes["verify"].task_messages, [])
+        self.assertEqual(set(cfg.flows["verification"].nodes), {"ask", "confirm"})
+        self.assertEqual(FlowConfig.model_validate_json(cfg.model_dump_json()), cfg)
+        self.assertEqual(FlowConfig.model_validate(cfg.model_dump()), cfg)
+
+    def test_defaults_to_no_subflows(self):
+        cfg = FlowConfig.model_validate(_minimal())
+        self.assertEqual(cfg.flows, {})
+        self.assertIsNone(cfg.nodes["a"].flow)
+        self.assertIsNone(cfg.nodes["a"].return_to)
+
+    def test_subflow_from_an_included_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            subflow = _composed()["flows"]["verification"]
+            Path(tmp, "verification.yaml").write_text(yaml.safe_dump(subflow), encoding="utf-8")
+            data = _composed()
+            del data["flows"]
+            text = yaml.safe_dump(data) + "flows:\n  verification: !include verification.yaml\n"
+            Path(tmp, "flow.yaml").write_text(text, encoding="utf-8")
+            cfg = FlowConfig.from_file(Path(tmp, "flow.yaml"))
+        self.assertEqual(cfg, FlowConfig.model_validate(_composed()))
+
+    # A node prompts the LLM or runs a flow, not both.
+
+    def test_node_that_runs_a_flow_takes_nothing_else(self):
+        extras = {
+            "task_messages": [{"role": "developer", "content": "hi"}],
+            "role_message": "You are helpful.",
+            "functions": [_go("skip", "book")],
+            "pre_actions": [{"type": "tts_say", "text": "One moment."}],
+            "post_actions": [{"type": "end_conversation"}],
+            "context_strategy": "reset",
+            "respond_immediately": False,
+        }
+        for key, value in extras.items():
+            data = _composed()
+            data["nodes"]["verify"][key] = value
+            self.assert_invalid(
+                data, "a node that runs flow 'verification' takes only 'flow', 'return_to'"
+            )
+
+    def test_node_that_runs_a_flow_may_have_metadata(self):
+        data = _composed()
+        data["nodes"]["verify"]["metadata"] = {"graph_node": "n7"}
+        cfg = FlowConfig.model_validate(data)
+        self.assertEqual(cfg.nodes["verify"].metadata, {"graph_node": "n7"})
+
+    def test_return_to_needs_a_flow(self):
+        data = _composed()
+        data["nodes"]["book"]["return_to"] = "start"
+        self.assert_invalid(data, "'return_to' applies only to a node that runs a 'flow'")
+
+    def test_node_needs_task_messages_or_a_flow(self):
+        data = _composed()
+        data["nodes"]["book"] = {}
+        self.assert_invalid(data, "a node needs 'task_messages', or a 'flow' to run")
+
+    # A node runs a flow the config has.
+
+    def test_node_runs_unknown_flow(self):
+        data = _composed()
+        data["nodes"]["verify"]["flow"] = "nope"
+        self.assert_invalid(data, "node 'verify' runs unknown flow 'nope'")
+
+        plain = _minimal()
+        plain["nodes"]["b"] = {"flow": "verification"}
+        self.assert_invalid(plain, "node 'b' runs unknown flow 'verification'")
+
+    # return_to names a node, and is needed only when the flow returns.
+
+    def test_return_to_unknown_node(self):
+        data = _composed()
+        data["nodes"]["verify"]["return_to"] = "nope"
+        self.assert_invalid(data, "node 'verify' returns to unknown node 'nope'")
+
+    def test_return_to_a_node_that_runs_a_flow(self):
+        data = _composed()
+        data["nodes"]["verify_again"] = {"flow": "verification", "return_to": "book"}
+        data["nodes"]["verify"]["return_to"] = "verify_again"
+        FlowConfig.model_validate(data)
+
+    def test_nodes_may_return_to_each_other(self):
+        data = _composed()
+        data["nodes"]["verify_again"] = {"flow": "verification", "return_to": "verify"}
+        data["nodes"]["verify"]["return_to"] = "verify_again"
+        FlowConfig.model_validate(data)
+
+    def test_return_to_is_needed_when_the_flow_returns(self):
+        data = _composed()
+        del data["nodes"]["verify"]["return_to"]
+        self.assert_invalid(
+            data, "node 'verify' runs flow 'verification', which returns, and needs a 'return_to'"
+        )
+
+    def test_return_to_may_be_omitted_when_the_flow_never_returns(self):
+        data = _composed()
+        data["flows"]["closing"] = {
+            "initial_node": "bye",
+            "nodes": {"bye": _node(_go("again", "bye"))},
+        }
+        data["nodes"]["goodbye"] = {"flow": "closing"}
+        cfg = FlowConfig.model_validate(data)
+        self.assertIsNone(cfg.nodes["goodbye"].return_to)
+
+        data["nodes"]["goodbye"]["return_to"] = "start"
+        FlowConfig.model_validate(data)
+
+    # A node that runs a flow is a node: a target, or where the flow starts.
+
+    def test_initial_node_may_run_a_flow(self):
+        data = _composed()
+        data["initial_node"] = "verify"
+        self.assertEqual(FlowConfig.model_validate(data).initial_node, "verify")
+
+    def test_initial_node_must_exist(self):
+        data = _composed()
+        data["initial_node"] = "verification"
+        self.assert_invalid(data, "initial_node 'verification' is not a defined node")
+
+    def test_global_function_may_enter_a_flow(self):
+        data = _composed()
+        data["global_functions"] = [_go("reverify", "verify")]
+        FlowConfig.model_validate(data)
+
+    def test_branch_may_enter_a_flow(self):
+        data = _composed()
+        data["nodes"]["book"] = _node(
+            {
+                "name": "book_slot",
+                "transition_to": {
+                    "field": "booked",
+                    "cases": {"true": "verify"},
+                    "default": "book",
+                },
+            }
+        )
+        FlowConfig.model_validate(data)
+
+    def test_target_cannot_name_a_flow_or_one_of_its_nodes(self):
+        for target in ("verification", "ask", "verify.ask"):
+            data = _composed()
+            data["nodes"]["book"] = _node(_go("again", target))
+            self.assert_invalid(data, f"transitions to unknown node '{target}'")
+
+    def test_return_is_an_ordinary_name_outside_a_subflow(self):
+        data = _composed()
+        data["nodes"]["book"] = _node(_go("back", "return"))
+        self.assert_invalid(
+            data, "node 'book' function 'back' transitions to unknown node 'return'"
+        )
+
+        data["nodes"]["return"] = _node()
+        FlowConfig.model_validate(data)
+
+        plain = _minimal()
+        plain["nodes"]["a"]["functions"] = [_go("back", "return")]
+        self.assert_invalid(plain, "transitions to unknown node 'return'")
+        plain["nodes"]["return"] = _node()
+        FlowConfig.model_validate(plain)
+
+    # A target in a subflow names one of its nodes or is `return`.
+
+    def test_subflow_target_must_be_its_own_node_or_return(self):
+        for target in ("book", "verify", "nope"):
+            data = _composed()
+            data["flows"]["verification"]["nodes"]["confirm"] = _node(_go("verified", target))
+            self.assert_invalid(
+                data,
+                "flows.verification",
+                f"node 'confirm' function 'verified' transitions to unknown node '{target}'",
+            )
+
+    def test_subflow_branch_targets(self):
+        data = _composed()
+        branch = {"field": "ok", "cases": {"true": "return", "false": "ask"}}
+        data["flows"]["verification"]["nodes"]["confirm"] = _node(
+            {"name": "check_again", "transition_to": branch}
+        )
+        FlowConfig.model_validate(data)
+
+        branch["default"] = "book"
+        self.assert_invalid(data, "transitions to unknown node 'book'")
+
+    def test_subflow_cannot_have_a_node_named_return(self):
+        data = _composed()
+        data["flows"]["verification"]["nodes"]["return"] = _node()
+        self.assert_invalid(data, "flows.verification", "cannot have a node named 'return'")
+
+    def test_subflow_initial_node_must_exist(self):
+        data = _composed()
+        data["flows"]["verification"]["initial_node"] = "start"
+        self.assert_invalid(
+            data, "flows.verification", "initial_node 'start' is not a defined node"
+        )
+
+    def test_subflows_do_not_nest(self):
+        data = _composed()
+        data["flows"]["verification"]["nodes"]["inner"] = {"flow": "verification"}
+        self.assert_invalid(
+            data,
+            "flows.verification",
+            "node 'inner' runs a flow, which a subflow's nodes cannot do",
+        )
+        for key, value in (("flows", {}), ("global_functions", [])):
+            data = _composed()
+            data["flows"]["verification"][key] = value
+            self.assert_invalid(data, f"flows.verification.{key}")
+
+    def test_subflow_function_cannot_share_a_global_function_name(self):
+        data = _composed()
+        data["global_functions"] = [{"name": "check"}]
+        self.assert_invalid(
+            data, "flow 'verification' node 'ask' function 'check' is also a global function"
+        )
+
+    # Node names have no dots in a config that has subflows.
+
+    def test_no_dots_in_node_names_with_subflows(self):
+        data = _composed()
+        data["nodes"]["book.slot"] = _node()
+        self.assert_invalid(data, "node 'book.slot' has a '.' in its name")
+
+        data = _composed()
+        data["nodes"]["verify.caller"] = {"flow": "verification", "return_to": "book"}
+        self.assert_invalid(data, "node 'verify.caller' has a '.' in its name")
+
+        data = _composed()
+        data["flows"]["verification"]["nodes"]["ask.again"] = _node()
+        self.assert_invalid(data, "node 'ask.again' has a '.' in its name")
+
+    def test_dots_are_allowed_without_subflows(self):
+        data = _minimal()
+        data["nodes"]["scheduling.find_slot"] = _node(_go("back", "a"))
+        data["nodes"]["a"]["functions"] = [_go("find", "scheduling.find_slot")]
+        FlowConfig.model_validate(data)
+
+    # Every subflow is run.
+
+    def test_unused_flow(self):
+        data = _composed()
+        data["flows"]["closing"] = {"initial_node": "bye", "nodes": {"bye": _node()}}
+        self.assert_invalid(data, "flow 'closing' is not run by any node")
+
+        data["nodes"]["goodbye"] = {"flow": "closing"}
+        FlowConfig.model_validate(data)
+
+    def test_one_flow_run_by_two_nodes(self):
+        data = _composed()
+        data["nodes"]["verify_again"] = {"flow": "verification", "return_to": "start"}
+        FlowConfig.model_validate(data)
