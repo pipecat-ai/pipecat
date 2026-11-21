@@ -779,6 +779,21 @@ def _completed(lane, response_id, text):
     }
 
 
+def _native_turn_lane_error(lane):
+    return {
+        "type": "error",
+        "stream_id": lane,
+        "error": {
+            "type": "invalid_request_error",
+            "code": "unsupported_native_response_reference",
+            "message": (
+                "The experimental native turn lane cannot hand response_id resp_1 "
+                "to Python. Start a new independent turn instead."
+            ),
+        },
+    }
+
+
 def _make_lane_service(*events):
     """Create a service that runs inferences against a mock WebSocket."""
     service = _make_service()
@@ -901,6 +916,75 @@ class TestResponseLanes:
 
         service.push_error.assert_not_called()
         assert not service._draining_lanes
+
+    @pytest.mark.asyncio
+    async def test_an_unchainable_request_is_retried_with_full_context_on_a_new_lane(self):
+        """A request rejected with unsupported_native_response_reference is
+        retried with the full context on another lane. The rejected lane's
+        events that follow are discarded, so they can't become the retry's
+        reply, and the lane is free again once that response ends."""
+        first = [{"role": "user", "content": "hi"}]
+        later = [
+            *first,
+            {"role": "assistant", "content": "Hello"},
+            {"role": "user", "content": "go"},
+        ]
+        service = _make_lane_service(
+            _delta("lane-0", "Hello"),
+            _completed("lane-0", "resp_1", "Hello"),
+        )
+        service.push_error = AsyncMock()
+        await _run_inference(service, first)
+
+        service._push_llm_text.reset_mock()
+        service._websocket.recv.side_effect = [
+            json.dumps(e)
+            for e in (
+                _native_turn_lane_error("lane-1"),
+                _created("lane-1", "resp_stale"),
+                _delta("lane-1", "stale"),
+                _created("lane-0", "resp_3"),
+                _completed("lane-1", "resp_stale", "stale"),
+                _delta("lane-0", "fresh"),
+                _completed("lane-0", "resp_3", "fresh"),
+            )
+        ]
+        await _run_inference(service, later)
+
+        requests = _sent_requests(service)
+        assert [r["stream_id"] for r in requests] == ["lane-0", "lane-1", "lane-0"]
+        assert requests[1]["previous_response_id"] == "resp_1"
+        assert "previous_response_id" not in requests[2]
+        assert len(requests[2]["input"]) == len(later)
+        service._push_llm_text.assert_awaited_once_with("fresh")
+        service.push_error.assert_not_called()
+        assert service._previous_response_id == "resp_3"
+        assert not service._draining_lanes
+
+    @pytest.mark.asyncio
+    async def test_an_unchainable_requests_lane_stays_taken_until_its_response_ends(self):
+        """With nothing yet from the rejected lane, the retry still gets its
+        reply, and the next request avoids that lane."""
+        service = _make_lane_service(
+            _native_turn_lane_error("lane-0"),
+            _delta("lane-1", "Hello"),
+            _completed("lane-1", "resp_1", "Hello"),
+            _delta("lane-2", "again"),
+            _completed("lane-2", "resp_2", "again"),
+        )
+        service.push_error = AsyncMock()
+
+        messages = [{"role": "user", "content": "hi"}]
+        await _run_inference(service, messages)
+        assert service._draining_lanes == {"lane-0"}
+
+        messages = [*messages, {"role": "assistant", "content": "Hello"}]
+        await _run_inference(service, [*messages, {"role": "user", "content": "more"}])
+
+        requests = _sent_requests(service)
+        assert [r["stream_id"] for r in requests] == ["lane-0", "lane-1", "lane-2"]
+        service.push_error.assert_not_called()
+        assert service._previous_response_id == "resp_2"
 
     @pytest.mark.asyncio
     async def test_every_lane_taken_reconnects(self):
