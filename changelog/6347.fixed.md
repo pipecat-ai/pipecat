@@ -1,0 +1,1 @@
+- Fixed pending image requests remaining unanswered when Daily leaves a room before the queued SDK leave event can run. Other pending requests are still attempted if a result callback fails, and callback failures are propagated.
