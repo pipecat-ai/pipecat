@@ -283,6 +283,7 @@ class TestSimulationRunResult(unittest.TestCase):
 import asyncio  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
+import pipecat.processors.frameworks.rtvi.models as RTVI  # noqa: E402
 from pipecat.evals.client import (  # noqa: E402
     BOT_ENDED_EVENT,
     HARNESS_ERROR_EVENT,
@@ -297,7 +298,6 @@ from pipecat.evals.simulation_driver import END_CALL_EVENT, EvalSimulationDriver
 from pipecat.frames.frames import (  # noqa: E402
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMTextFrame,
     TextType,
     TTSTextFrame,
 )
@@ -1217,7 +1217,13 @@ class TestSimulationEarlyEndings(unittest.IsolatedAsyncioTestCase):
             await stream.append({"type": "llm_started"})
             for _ in range(3):
                 await asyncio.sleep(0.1)
-                stream.frame_to_event(LLMTextFrame(text="token "))
+                stream.rtvi_message_to_event(
+                    {
+                        "label": RTVI.MESSAGE_LABEL,
+                        "type": "llm-raw-text",
+                        "data": {"text": "token "},
+                    }
+                )
             await _end_call(llm, success=True, reason="done")
 
         task = asyncio.create_task(conversation())

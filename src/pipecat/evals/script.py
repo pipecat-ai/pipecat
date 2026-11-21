@@ -134,10 +134,10 @@ The bot's reply can be asserted three ways:
     text in text modality. The real end-to-end check — prefer this.
 
 ``llm_response``
-    the LLM's text output (``bot-llm-text``). Available in both modalities.
+    the LLM's text output (``llm-raw-text``). Available in both modalities.
 
 ``tts_response``
-    the text the TTS reports speaking (``bot-tts-text``, with word timing).
+    the text the TTS reports speaking (``tts-raw-text``, with word timing).
     Audio modality only.
 
 Supported expectation fields (per event):

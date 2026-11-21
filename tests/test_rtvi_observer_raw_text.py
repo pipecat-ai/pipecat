@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.observers.base_observer import FramePushed
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserverParams
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
@@ -151,6 +152,22 @@ class TestRTVIObserverRawText(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(self._sent_raw_text(), [])
+
+    async def test_raw_text_a_config_turned_on_goes_out_before_client_ready(self):
+        # The eval transport turns it on at connect, and the bot can greet before
+        # client-ready says which protocol the client speaks. The STT's raw text,
+        # which no config turned on, still waits for it.
+        self.observer._rtvi = SimpleNamespace(client_version=[0, 0, 0])
+        self.observer._params = RTVIObserverParams(stt_raw_text_enabled=True)
+        self.observer._apply_config(
+            RTVIConfigureObserverFrame(llm_raw_text_enabled=True, tts_raw_text_enabled=True)
+        )
+        await self._push_one_of_each()
+
+        self.assertEqual(
+            [type(m) for m in self._sent_raw_text()],
+            [RTVI.LLMRawTextMessage, RTVI.TTSRawTextMessage],
+        )
 
     async def test_raw_text_is_kept_from_older_clients(self):
         for version in ([2, 1, 0], [1, 4, 0]):

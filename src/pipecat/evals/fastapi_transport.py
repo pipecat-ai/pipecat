@@ -12,7 +12,8 @@ therefore sends its connection's flags as its first message, ``eval-connect``,
 which ``create_transport`` reads before building this transport with them.
 The flags are those :class:`~pipecat.evals.transport.EvalTransport` reads from
 its URL, applied the same way: ``skip_tts`` before ``on_client_connected``, so
-a greeting made there is silent too.
+a greeting made there is silent too. The bot's raw LLM and TTS text messages,
+which the harness reads the bot's text from, are turned on there as well.
 
 The connection is the session, so ``on_client_disconnected`` fires whenever
 the harness disconnects, letting the bot end with it.
@@ -30,6 +31,7 @@ from pipecat.frames.frames import (
     UserImageRequestFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketInputTransport,
     FastAPIWebsocketOutputTransport,
@@ -132,4 +134,8 @@ class EvalFastAPIWebsocketTransport(FastAPIWebsocketTransport):
         skip_tts = self._flags.skip_tts
         logger.debug(f"{self}: configuring eval LLM output with {skip_tts=}")
         await self._input.push_frame(LLMConfigureOutputFrame(skip_tts=skip_tts))
+        # The harness reads the bot's text from the raw text messages, off by default.
+        await self._input.push_frame(
+            RTVIConfigureObserverFrame(llm_raw_text_enabled=True, tts_raw_text_enabled=True)
+        )
         await super()._on_client_connected(websocket)

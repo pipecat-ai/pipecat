@@ -32,6 +32,7 @@ from pipecat.evals.transport import (
     _query_flag,
 )
 from pipecat.frames.frames import LLMConfigureOutputFrame, UserImageRawFrame, UserImageRequestFrame
+from pipecat.processors.frameworks.rtvi.frames import RTVIConfigureObserverFrame
 
 
 def _ws(path=None, request_path=None):
@@ -76,6 +77,15 @@ class TestQueryFlag(unittest.TestCase):
         self.assertFalse(_query_flag(_ws(), SKIP_TTS_QUERY_PARAM))
 
 
+def _raw_text_configs(push_frame: AsyncMock) -> list[tuple]:
+    """The raw text settings of the observer configs pushed so far."""
+    return [
+        (call.args[0].llm_raw_text_enabled, call.args[0].tts_raw_text_enabled)
+        for call in push_frame.await_args_list
+        if isinstance(call.args[0], RTVIConfigureObserverFrame)
+    ]
+
+
 class TestConnectionOutputSettings(unittest.IsolatedAsyncioTestCase):
     async def test_audio_connection_reenables_tts_without_query_flag(self):
         await self._assert_tts_resets_between_connections("/")
@@ -110,6 +120,22 @@ class TestConnectionOutputSettings(unittest.IsolatedAsyncioTestCase):
         # Each greeting must see its own session's output setting.
         self.assertEqual(observed, [True, False, True])
 
+    async def test_raw_text_is_enabled_before_on_client_connected(self):
+        with self.assertWarns(DeprecationWarning):
+            transport = EvalTransport(params=EvalTransportParams())
+        self.addAsyncCleanup(transport.cleanup)
+        push_frame = AsyncMock()
+        transport.input().push_frame = push_frame
+        transport.output().set_client_connection = AsyncMock()
+        configured = asyncio.Queue()
+
+        @transport.event_handler("on_client_connected")
+        async def on_connected(transport, websocket):
+            configured.put_nowait(_raw_text_configs(push_frame))
+
+        await transport._on_client_connected(_ws(path="/"))
+        self.assertEqual(await asyncio.wait_for(configured.get(), timeout=1), [(True, True)])
+
 
 class TestEvalFastAPIWebsocketTransport(unittest.IsolatedAsyncioTestCase):
     def _transport(self, flags: EvalConnectionFlags) -> EvalFastAPIWebsocketTransport:
@@ -128,6 +154,19 @@ class TestEvalFastAPIWebsocketTransport(unittest.IsolatedAsyncioTestCase):
         serializer = transport._params.serializer
         self.assertTrue(serializer._capture_audio)
         self.assertTrue(serializer._capture_images)
+
+    async def test_raw_text_is_enabled_before_on_client_connected(self):
+        transport = self._transport(EvalConnectionFlags())
+        push_frame = AsyncMock()
+        transport.input().push_frame = push_frame
+        configured = asyncio.Queue()
+
+        @transport.event_handler("on_client_connected")
+        async def on_connected(transport, websocket):
+            configured.put_nowait(_raw_text_configs(push_frame))
+
+        await transport._on_client_connected(MagicMock())
+        self.assertEqual(await asyncio.wait_for(configured.get(), timeout=1), [(True, True)])
 
     async def test_skip_tts_is_configured_before_on_client_connected(self):
         self.assertEqual(await self._greeting_skip_tts(True), [True])
