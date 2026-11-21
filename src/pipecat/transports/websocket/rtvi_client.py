@@ -39,7 +39,9 @@ class RTVIClientTransport(WebsocketClientTransport):
 
     - on_connected: the WebSocket connection was established
     - on_disconnected: the WebSocket connection was closed
-    - on_bot_ready: the bot answered the ``client-ready`` handshake with ``bot-ready``
+    - on_bot_ready: the bot answered the ``client-ready`` handshake with ``bot-ready``.
+      The handler runs before any later message from the bot is dispatched, so
+      it acts on what the bot reported before it hears anything else from it.
 
     Example::
 
@@ -67,7 +69,9 @@ class RTVIClientTransport(WebsocketClientTransport):
 
         self._bot_ready = False
         self._bot_capabilities: BotCapabilities | None = None
-        self._register_event_handler("on_bot_ready")
+        # Run inline: the bot can send its first reports right after bot-ready,
+        # and they must not reach the pipeline before the handler has run.
+        self._register_event_handler("on_bot_ready", sync=True)
 
     @property
     def bot_ready(self) -> bool:

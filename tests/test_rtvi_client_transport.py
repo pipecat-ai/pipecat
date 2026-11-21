@@ -13,6 +13,7 @@ in a real pipeline against a tiny RTVI WebSocket server and asserts the bot's
 server messages arrive as the right frames.
 """
 
+import asyncio
 import base64
 import json
 import socket
@@ -33,6 +34,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.serializers.rtvi_client import RTVIClientSerializer
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.transports.websocket.client import WebsocketClientParams
 from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
 
 
@@ -204,6 +206,32 @@ class TestRTVIClientTransportIntegration(unittest.IsolatedAsyncioTestCase):
         # The transport completed the handshake (the server saw client-ready).
         self.assertTrue(any(m.get("type") == "client-ready" for m in server.received))
         self.assertTrue(transport.bot_ready)
+
+    async def test_bot_ready_is_handled_before_the_bots_next_message(self):
+        # The bot reports right after bot-ready; the handler, checking what the
+        # bot reported, runs before any of that reaches the pipeline.
+        order: list[str] = []
+
+        class _Recording(RTVIClientSerializer):
+            async def deserialize(self, data):
+                order.append(json.loads(data)["type"])
+                return await super().deserialize(data)
+
+        async with _BotServer(_free_port(), [_rtvi("bot-llm-started")]) as server:
+            transport = RTVIClientTransport(
+                server.url, WebsocketClientParams(serializer=_Recording())
+            )
+
+            @transport.event_handler("on_bot_ready")
+            async def _on_bot_ready(_transport):
+                await asyncio.sleep(0.1)
+                order.append("on_bot_ready")
+
+            await run_test(
+                transport.input(), frames_to_send=[SleepFrame(sleep=0.5)], start_timeout=5.0
+            )
+
+        self.assertEqual(order, ["on_bot_ready", "bot-ready", "bot-llm-started"])
 
 
 if __name__ == "__main__":
