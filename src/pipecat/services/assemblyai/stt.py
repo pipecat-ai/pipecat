@@ -726,7 +726,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             )
         return frame
 
-    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply a settings delta and apply the changes to the live session.
 
         Most settings are connection-time WebSocket query parameters, so changing
@@ -736,12 +736,13 @@ class AssemblyAISTTService(WebsocketSTTService):
         transcripts are formatted, so they need neither.
 
         Args:
-            delta: A settings delta with updated values.
+            delta: An :class:`STTSettings` (or ``AssemblyAISTTService.Settings``)
+                delta with updated values.
 
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        if isinstance(delta.language_codes, list):
+        if isinstance(delta, self.Settings) and isinstance(delta.language_codes, list):
             try:
                 _prepare_language_codes(delta.language_codes)
             except ValueError as e:

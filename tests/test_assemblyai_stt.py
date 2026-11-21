@@ -29,6 +29,7 @@ from pipecat.services.assemblyai.models import (
     Word,
 )
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, is_u3_pro_model
+from pipecat.services.settings import STTSettings
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -959,6 +960,24 @@ def _stub_connection(service: AssemblyAISTTService) -> tuple[list, list]:
     service._disconnect = fake_disconnect
     service._connect = fake_connect
     return sent, reconnects
+
+
+@pytest.mark.parametrize(
+    "fields", [{"model": "universal-streaming-multilingual"}, {"language": Language.ES}]
+)
+def test_update_settings_accepts_a_base_stt_settings_delta(fields):
+    typed = AssemblyAISTTService(api_key="test-key")
+    typed_calls = _stub_connection(typed)
+    asyncio.run(typed._update_settings(AssemblyAISTTService.Settings(**fields)))
+
+    base = AssemblyAISTTService(api_key="test-key")
+    base_calls = _stub_connection(base)
+    asyncio.run(base._update_settings(STTSettings(**fields)))
+
+    # A provider-neutral delta is applied exactly like the service's own.
+    assert typed._settings != AssemblyAISTTService(api_key="test-key")._settings
+    assert base._settings == typed._settings
+    assert base_calls == typed_calls
 
 
 def test_update_settings_agent_context_only_sends_without_reconnect():
