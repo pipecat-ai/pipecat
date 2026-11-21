@@ -360,7 +360,7 @@ class RTVIObserver(BaseObserver):
 
     def _client_is_at_least(self, version: list[int]) -> bool:
         """Return True when the connected client's protocol is ``version`` or later."""
-        if not self._rtvi or not self._rtvi._client_ready:
+        if not self._rtvi or not self._rtvi.client_ready:
             # No client has negotiated a version yet, so assume the current
             # protocol: a bot may speak before client-ready, as when it greets
             # on connect.
