@@ -206,6 +206,8 @@ class NodeConfig(TypedDict, total=False):
             node. Flows never acts on it and never sends it to the LLM. An
             RTVI client receives it when the node is entered, so keep anything
             the end user should not see out of it.
+        parent: For a node of a subflow, the name of the node that runs the
+            subflow. :class:`~pipecat.flows.Flow` sets it.
 
     Example::
 
@@ -240,6 +242,7 @@ class NodeConfig(TypedDict, total=False):
     context_strategy: ContextStrategyConfig
     respond_immediately: bool
     metadata: dict[str, Any]
+    parent: str
 
 
 class _NoResponse:
@@ -431,6 +434,8 @@ class NodeEntered:
             node was set directly (``initialize``, ``set_node_from_config``).
         metadata: The entered node's ``metadata``, or None.
         function_metadata: The ``metadata`` of ``function``, or None.
+        parent: When the entered node is a node of a subflow, the name of the
+            node that runs the subflow; None otherwise.
     """
 
     node: str
@@ -438,6 +443,7 @@ class NodeEntered:
     function: str | None = None
     metadata: dict[str, Any] | None = None
     function_metadata: dict[str, Any] | None = None
+    parent: str | None = None
 
 
 def flows_tool_options(

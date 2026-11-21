@@ -1630,6 +1630,27 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_parent_of_a_subflow_node(self):
+        flow_manager, entered = self.make_manager()
+        await flow_manager.initialize(self.node("start"))
+        await flow_manager.set_node_from_config(self.node("verify.ask", parent="verify"))
+
+        self.assertIsNone(entered[0].parent)
+        self.assertEqual(entered[1].parent, "verify")
+        self.assertEqual(
+            self.rtvi_messages(self.mock_worker),
+            [
+                {"type": "flows", "event": "node", "node": "start"},
+                {
+                    "type": "flows",
+                    "event": "node",
+                    "node": "verify.ask",
+                    "previous_node": "start",
+                    "parent": "verify",
+                },
+            ],
+        )
+
     async def test_rtvi_message_follows_the_handlers_and_precedes_the_llm_run(self):
         calls = MagicMock()
         self.mock_worker.queue_frame.side_effect = lambda frame: calls.frame(type(frame).__name__)

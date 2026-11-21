@@ -147,7 +147,8 @@ class FlowConfig(BaseModel):
     subflow that never returns. A :class:`~pipecat.flows.Flow` builds a
     subflow's nodes once for each node that runs it, named
     ``<node>.<subflow node>``, so everything before the dot is the node that
-    runs the subflow; that is the name ``FlowManager.current_node`` reports. A
+    runs the subflow; that is the name ``FlowManager.current_node`` reports,
+    and ``on_node_entered`` gives the running node separately as ``parent``. A
     config that has subflows therefore cannot have a dot in a node name. A
     subflow's nodes cannot run subflows, and ``global_functions`` are offered
     at them too.

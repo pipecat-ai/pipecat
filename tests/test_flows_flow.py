@@ -703,6 +703,14 @@ class TestSubflows(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(FlowError):
             flow.node("verification.ask")
 
+    def test_a_subflow_node_names_the_node_that_runs_it(self):
+        flow = make_flow(composed())
+        self.assertEqual(flow.node("verify.ask")["parent"], "verify")
+        self.assertEqual(flow.node("verify.check")["parent"], "verify")
+        self.assertEqual(flow.node("goodbye.anything_else")["parent"], "goodbye")
+        self.assertNotIn("parent", flow.node("start"))
+        self.assertNotIn("parent", flow.node("book"))
+
     def test_the_node_that_runs_a_subflow_is_its_first_node(self):
         flow = make_flow(composed())
         self.assertIs(flow.node("verify"), flow.node("verify.ask"))
@@ -975,6 +983,10 @@ class TestWithFlowManager(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(entered[1].metadata, {"step": "ask"})
         self.assertEqual(flow_manager.current_node, "book")
+        self.assertEqual(
+            [e.parent for e in entered],
+            [None, "verify", "verify", "verify", "verify", None, "goodbye", None],
+        )
 
     def queued_messages(self) -> list[dict]:
         """Every message the manager has sent to the LLM context so far."""

@@ -94,10 +94,12 @@ class Flow:
         self._handlers = list(handlers) if isinstance(handlers, (list, tuple)) else [handlers]
         self._problems: list[FlowProblem] = []
 
-        nodes, global_functions, self._entries = _flatten(config)
+        nodes, global_functions, self._entries, parents = _flatten(config)
         self._nodes: dict[str, NodeConfig] = {
             name: self._build_node(name, node) for name, node in nodes.items()
         }
+        for name, parent in parents.items():
+            self._nodes[name]["parent"] = parent
         self._global_functions = [
             schema
             for ref in global_functions
@@ -329,14 +331,17 @@ class Flow:
 
 def _flatten(
     config: "FlowConfig",
-) -> tuple[dict[str, "FlowConfig.Node"], list["FlowConfig.Function"], dict[str, str]]:
+) -> tuple[
+    dict[str, "FlowConfig.Node"], list["FlowConfig.Function"], dict[str, str], dict[str, str]
+]:
     """Copy each subflow in under the node that runs it.
 
     Returns:
         The nodes to build, keyed by the name each is built under; the global
-        functions; and, for every node name in the config, the name of the
-        built node it leads to. Every transition in the nodes and functions
-        returned names a built node.
+        functions; for every node name in the config, the name of the built
+        node it leads to; and, for every node copied from a subflow, the name
+        of the node that runs the subflow. Every transition in the nodes and
+        functions returned names a built node.
     """
 
     def entry(name: str) -> str:
@@ -344,6 +349,7 @@ def _flatten(
         return name if flow is None else f"{name}.{config.flows[flow].initial_node}"
 
     nodes: dict[str, FlowConfig.Node] = {}
+    parents: dict[str, str] = {}
     for name, node in config.nodes.items():
         if node.flow is None:
             nodes[name] = _retarget_node(node, entry)
@@ -356,9 +362,10 @@ def _flatten(
 
         for inner_name, inner in config.flows[node.flow].nodes.items():
             nodes[f"{name}.{inner_name}"] = _retarget_node(inner, inside)
+            parents[f"{name}.{inner_name}"] = name
 
     global_functions = [_retarget(func, entry) for func in config.global_functions]
-    return nodes, global_functions, {name: entry(name) for name in config.nodes}
+    return nodes, global_functions, {name: entry(name) for name in config.nodes}, parents
 
 
 def _retarget_node(node: "FlowConfig.Node", resolve: Callable[[str], str]) -> "FlowConfig.Node":
