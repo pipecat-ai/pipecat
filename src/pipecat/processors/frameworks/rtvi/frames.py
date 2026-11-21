@@ -89,9 +89,12 @@ class RTVIConfigureObserverFrame(SystemFrame):
         bot_llm_marker_enabled: Whether the observer should emit the sideband
             markers the bot's LLM produces, or ``None`` to leave it unchanged.
         llm_raw_text_enabled: Whether the observer should emit the LLM's raw text
-            messages (``llm-raw-text``), or ``None`` to leave it unchanged.
+            messages (``llm-raw-text``), or ``None`` to leave it unchanged. Raw
+            text turned on this way goes out before the client reports its
+            protocol version: the source that turns it on knows its client.
         tts_raw_text_enabled: Whether the observer should emit the TTS's raw text
-            messages (``tts-raw-text``), or ``None`` to leave it unchanged.
+            messages (``tts-raw-text``), or ``None`` to leave it unchanged, sent
+            the same way.
     """
 
     function_call_report_level: dict[str, RTVIFunctionCallReportLevel] | None = None

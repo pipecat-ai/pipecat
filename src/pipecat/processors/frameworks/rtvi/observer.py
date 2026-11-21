@@ -314,6 +314,11 @@ class RTVIObserver(BaseObserver):
 
         self._ignored_sources: set[FrameProcessor] = set(self._params.ignored_sources)
 
+        # Raw text a trusted config turned on (see _apply_config). It goes out
+        # whatever protocol the client reported, and before it reports one.
+        self._llm_raw_text_configured = False
+        self._tts_raw_text_configured = False
+
         self._bot_transcription = ""
         self._last_user_audio_level = 0
         self._last_bot_audio_level = 0
@@ -532,11 +537,15 @@ class RTVIObserver(BaseObserver):
         if frame.bot_llm_marker_enabled is not None:
             self._params.bot_llm_marker_enabled = frame.bot_llm_marker_enabled
             logger.debug(f"{self}: bot_llm_marker_enabled set to {frame.bot_llm_marker_enabled}")
+        # The source that turns raw text on knows its client takes it, so it
+        # doesn't wait for client-ready to say which protocol the client speaks.
         if frame.llm_raw_text_enabled is not None:
             self._params.llm_raw_text_enabled = frame.llm_raw_text_enabled
+            self._llm_raw_text_configured = frame.llm_raw_text_enabled
             logger.debug(f"{self}: llm_raw_text_enabled set to {frame.llm_raw_text_enabled}")
         if frame.tts_raw_text_enabled is not None:
             self._params.tts_raw_text_enabled = frame.tts_raw_text_enabled
+            self._tts_raw_text_configured = frame.tts_raw_text_enabled
             logger.debug(f"{self}: tts_raw_text_enabled set to {frame.tts_raw_text_enabled}")
 
     async def _logger_sink(self, message):
@@ -1069,7 +1078,11 @@ class RTVIObserver(BaseObserver):
             TextType.EXPRESSION_PAUSE,
         )
 
-        if spoken_words and self._params.tts_raw_text_enabled and self._client_supports_raw_text:
+        if (
+            spoken_words
+            and self._params.tts_raw_text_enabled
+            and (self._tts_raw_text_configured or self._client_supports_raw_text)
+        ):
             await self.send_rtvi_message(
                 RTVI.TTSRawTextMessage(data=RTVI.TextMessageData(text=text))
             )
@@ -1080,7 +1093,9 @@ class RTVIObserver(BaseObserver):
 
     async def _handle_llm_text_frame(self, frame: LLMTextFrame):
         """Handle LLM text output frames."""
-        if self._params.llm_raw_text_enabled and self._client_supports_raw_text:
+        if self._params.llm_raw_text_enabled and (
+            self._llm_raw_text_configured or self._client_supports_raw_text
+        ):
             await self.send_rtvi_message(
                 RTVI.LLMRawTextMessage(data=RTVI.TextMessageData(text=frame.text))
             )
