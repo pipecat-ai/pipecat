@@ -137,6 +137,7 @@ class DeepgramFluxTTSBase(TTSService):
 
         self._mip_opt_out = mip_opt_out
         self._tag = tag or []
+        self._speaking_contexts: set[str] = set()
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -219,6 +220,7 @@ class DeepgramFluxTTSBase(TTSService):
         """Release the connection at teardown."""
         await super().cleanup()
         await self._disconnect()
+        self._speaking_contexts.clear()
 
     # ------------------------------------------------------------------
     # Connection helpers
@@ -316,6 +318,7 @@ class DeepgramFluxTTSBase(TTSService):
         Args:
             context_id: The ID of the audio context that was interrupted.
         """
+        self._speaking_contexts.discard(context_id)
         if self._transport_is_active():
             try:
                 await self._transport_send_json({"type": "Interrupt"})
@@ -323,6 +326,20 @@ class DeepgramFluxTTSBase(TTSService):
                 logger.error(f"{self} error sending Interrupt message: {e}")
 
         await super().on_audio_context_interrupted(context_id)
+
+    async def on_audio_context_completed(self, context_id: str):
+        """Retire speech ownership when playback and the LLM turn have both ended."""
+        # Playback can time out before more audio arrives in the current turn.
+        if context_id != self._turn_context_id:
+            self._speaking_contexts.discard(context_id)
+        await super().on_audio_context_completed(context_id)
+
+    async def on_turn_context_completed(self):
+        """Retire speech ownership when the completed turn has no playback context."""
+        context_id = self._turn_context_id
+        await super().on_turn_context_completed()
+        if context_id is not None and not self.audio_context_available(context_id):
+            self._speaking_contexts.discard(context_id)
 
     async def flush_audio(self, context_id: str | None = None):
         """Flush any pending audio synthesis by sending a Flush message.
@@ -353,6 +370,7 @@ class DeepgramFluxTTSBase(TTSService):
                 # (e.g. Flux's one-hour session cap) the transport's receive
                 # task has completed but is still set, so a plain _connect()
                 # would not restart the receive loop.
+                self._speaking_contexts.clear()
                 await self._disconnect()
                 await self._connect()
 
@@ -360,7 +378,16 @@ class DeepgramFluxTTSBase(TTSService):
                     yield ErrorFrame(error=f"{self} is not connected")
                     return
 
-            await self._transport_send_json({"type": "Speak", "text": text})
+            first_speak = context_id not in self._speaking_contexts
+            self._speaking_contexts.add(context_id)
+            sent = False
+            try:
+                # The receive task can see this audio before the send returns.
+                await self._transport_send_json({"type": "Speak", "text": text})
+                sent = True
+            finally:
+                if first_speak and not sent:
+                    self._speaking_contexts.discard(context_id)
 
             await self.start_tts_usage_metrics(text)
 
@@ -376,13 +403,13 @@ class DeepgramFluxTTSBase(TTSService):
     async def _handle_audio(self, audio: bytes):
         """Append a chunk of synthesized audio to the active audio context.
 
-        Audio carries no speech_id, so it is attributed to the active audio
-        context. This is safe because ``pause_frame_processing=True``
-        serializes turns, and an interruption leaves no active context, so
-        audio the server had already generated for the abandoned turn is
-        discarded.
+        Binary audio carries no speech_id. Use playback order to choose its
+        context, and require a Speak for that context. An LLM reply can have a
+        turn ID before any text reaches synthesis, including tool-only replies.
         """
         ctx_id = self.get_active_audio_context_id()
+        if ctx_id is None or ctx_id not in self._speaking_contexts:
+            return
         frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=ctx_id)
         await self.append_to_audio_context(ctx_id, frame)
 
@@ -410,6 +437,9 @@ class DeepgramFluxTTSBase(TTSService):
                 f"billable characters: {msg.get('billable_character_count')})"
             )
             ctx_id = self.get_active_audio_context_id()
+            if ctx_id is None or ctx_id not in self._speaking_contexts:
+                return
+            self._speaking_contexts.discard(ctx_id)
             await self.append_to_audio_context(ctx_id, TTSStoppedFrame(context_id=ctx_id))
             await self.remove_audio_context(ctx_id)
         elif msg_type == "SpeechInterrupted":
