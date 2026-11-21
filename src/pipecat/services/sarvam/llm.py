@@ -27,13 +27,28 @@ class SarvamLLMSettings(OpenAILLMSettings):
 
     Parameters:
         wiki_grounding: Sarvam wiki grounding toggle.
-        reasoning_effort: Reasoning effort level (low, medium, high).
+        reasoning_effort: Reasoning effort level. ``"none"`` turns reasoning off
+            on the models that allow it (``sarvam-105b``, ``gemma4`` and
+            ``deepseekv4.1-flash``); ``glm5.3`` accepts ``"low"``, ``"high"`` and
+            ``"max"``. Left unset, each of these models is sent its lowest
+            setting (see ``use_provider_thinking_default``).
     """
 
     wiki_grounding: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    reasoning_effort: Literal["low", "medium", "high"] | None | NotGiven = field(
+    reasoning_effort: Literal["none", "low", "medium", "high", "max"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+
+
+# The lowest reasoning setting each model takes on Sarvam's /v2 API, sent when
+# the caller configures no reasoning, keyed by model name. "none" turns
+# thinking off; glm5.3 always reasons, and rejects anything below "low".
+_THINKING_DEFAULTS: dict[str, str] = {
+    "deepseekv4.1-flash": "none",
+    "gemma4": "none",
+    "glm5.3": "low",
+    "sarvam-105b": "none",
+}
 
 
 class SarvamLLMService(OpenAILLMService):
@@ -108,6 +123,9 @@ class SarvamLLMService(OpenAILLMService):
             default_headers=default_headers,
             **kwargs,
         )
+        # Sarvam's /v1 API takes only low, medium and high, and turns reasoning
+        # on by default; the /v2 defaults don't apply there.
+        self._uses_v1_api = base_url.rstrip("/").endswith("/v1")
 
     def create_client(
         self,
@@ -226,7 +244,35 @@ class SarvamLLMService(OpenAILLMService):
         ):
             params["reasoning_effort"] = self._settings.reasoning_effort
 
+        self._maybe_apply_thinking_default(params)
+
         return params
+
+    def _maybe_apply_thinking_default(self, params: dict[str, Any]):
+        """Send the model's lowest reasoning setting when no reasoning is configured.
+
+        Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one. A
+        request that already sets ``reasoning_effort``, from the settings or from
+        ``extra``, is left as it is. So is every request when
+        ``use_provider_thinking_default`` is set, and every request to Sarvam's
+        ``/v1`` API, which doesn't take these values. The first request for each
+        model logs the setting sent, or that the model runs at Sarvam's default.
+
+        Args:
+            params: The chat completion params dict (modified in place).
+        """
+        if "reasoning_effort" in params or "reasoning_effort" in params.get("extra_body", {}):
+            return
+        model = assert_given(self._settings.model) or ""
+        effort = None if self._uses_v1_api else _THINKING_DEFAULTS.get(model)
+        self._apply_thinking_default(
+            params,
+            model,
+            {"extra_body": {"reasoning_effort": effort}} if effort is not None else None,
+            can_think=model in self._REASONING_MODELS,
+            provider="Sarvam",
+            settings_fields="`reasoning_effort`",
+        )
 
     def _validate_request(self, params_from_context: OpenAILLMInvocationParams) -> str | None:
         """Run all pre-request validations, returning an error message or None.
