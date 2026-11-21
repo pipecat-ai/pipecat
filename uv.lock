@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -796,28 +796,28 @@ wheels = [
 
 [[package]]
 name = "baresip-python"
-version = "0.6.0"
+version = "0.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cffi" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/6e/6ec16c44310f1115258ccaf69a49b2d8bf8d9f953c75ced6e92210a61f31/baresip_python-0.6.0-cp311-cp311-macosx_15_0_arm64.whl", hash = "sha256:10b111c6f1a5dff290abdcbfef63e15db33e0ca6eb563724a9ac2c924c7cbb44", size = 4173534, upload-time = "2026-10-29T11:12:54.153Z" },
-    { url = "https://files.pythonhosted.org/packages/a1/05/66d9c35aea6f808ef05f83ce83f4bdc0a1eeafb82f6179b271869ffbf344/baresip_python-0.6.0-cp311-cp311-macosx_15_0_x86_64.whl", hash = "sha256:40a161e48f379629fa50bc37ade7193cc2ec6fcb60cc69dcbf20ce63686e15fe", size = 4024408, upload-time = "2026-10-29T11:12:56.31Z" },
-    { url = "https://files.pythonhosted.org/packages/3c/01/6ea57fdf58576d70309084d36895dcf5ada62cf5ac43a484c0ed105641c9/baresip_python-0.6.0-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:6af4e51a10e27b86050f454fec39e31a15a6f28dde54e5d92dc3a7183d0fd122", size = 3836291, upload-time = "2026-10-29T11:12:57.931Z" },
-    { url = "https://files.pythonhosted.org/packages/c9/2f/bcebb62b547ff2005321370da21c2ebbd422887c92cb9d90e4077ef4056a/baresip_python-0.6.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e53c5b7604ef3a348309fa1cf78a4c7ffabcf8bd4df4ee5340248c599a347752", size = 4075428, upload-time = "2026-10-29T11:12:59.833Z" },
-    { url = "https://files.pythonhosted.org/packages/44/ec/f2794164b282b9c3722b9f459d88aa3e4e65bd2d5c244a76b9bf0827b0c2/baresip_python-0.6.0-cp312-cp312-macosx_15_0_arm64.whl", hash = "sha256:87d40a77b0d143738995515b5f792336044520b1910e7d0ea5e5977ea77f3ff1", size = 4173640, upload-time = "2026-10-29T11:13:01.791Z" },
-    { url = "https://files.pythonhosted.org/packages/bc/3f/8de088a1bf92c2eae20c5cdd8d784391b311a9fe59da88a69e7f934e493e/baresip_python-0.6.0-cp312-cp312-macosx_15_0_x86_64.whl", hash = "sha256:f61a6c157ba84036fb018f708cf309919ead9b75e7fb5713eac97afdbe426fb2", size = 4024442, upload-time = "2026-10-29T11:13:03.613Z" },
-    { url = "https://files.pythonhosted.org/packages/75/77/0338f1415d0edb27069219918752757811a9cc6b821c0a8cdfbb77d1114e/baresip_python-0.6.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b481fdb3563c87433ca07bb63ad97bbd79471e766724de84f786a24ac28108bb", size = 3836185, upload-time = "2026-10-29T11:13:05.571Z" },
-    { url = "https://files.pythonhosted.org/packages/e7/33/558271f852d3ca7440aeacff4f666eeffe3eaa7b6b1007e4fd133a2714db/baresip_python-0.6.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7a537160f6a606168bb91519dd30826cbc66e166499a7f2f0d7238142f6bee7f", size = 4075881, upload-time = "2026-10-29T11:13:07.467Z" },
-    { url = "https://files.pythonhosted.org/packages/c3/fc/646233008a5b03e95679598785c3583a837cc9a5c5d25315cca0d79721f6/baresip_python-0.6.0-cp313-cp313-macosx_15_0_arm64.whl", hash = "sha256:318caf0dcabb7e178d6e49eb0d3b69634ac6c6606d06c743527681f5e6c12b2e", size = 4173636, upload-time = "2026-10-29T11:13:09.758Z" },
-    { url = "https://files.pythonhosted.org/packages/de/7e/6c477d6d638cc25e93d04c2a80a5f94aa9c929e1dd45e42215c5606ff002/baresip_python-0.6.0-cp313-cp313-macosx_15_0_x86_64.whl", hash = "sha256:418951da804b3eae3c1cab99f4e1a5486e2c93ef51966397eed23195ce27b35e", size = 4024441, upload-time = "2026-10-29T11:13:11.874Z" },
-    { url = "https://files.pythonhosted.org/packages/58/4a/c1f077877c0193412f382864d52a722629baea9113d9776491b4be80033f/baresip_python-0.6.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b559fc1c74739e5c1ffe5373ea238e8462a1cc59c5bbc74c02b67556f3b8f212", size = 3836212, upload-time = "2026-10-29T11:13:13.433Z" },
-    { url = "https://files.pythonhosted.org/packages/c7/49/0aaa34cb9f57103dda985854bc8290526bc29df07d9959593e5879270d89/baresip_python-0.6.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a15ba8e0563570a9f0cd39cbf4d0595f7f394139ba2d2f3402177c7c9a3d83d5", size = 4075987, upload-time = "2026-10-29T11:13:15.638Z" },
-    { url = "https://files.pythonhosted.org/packages/24/11/271ce74870a7606178c19d0719550f7311cd6c9059f00c8629430ac9fe9e/baresip_python-0.6.0-cp314-cp314-macosx_15_0_arm64.whl", hash = "sha256:5c90da59b6e2cbcc211574ab367b2ca28d8c18fe35cf435e7cb9d74c1f2d33fc", size = 4173618, upload-time = "2026-10-29T11:13:17.361Z" },
-    { url = "https://files.pythonhosted.org/packages/ff/d1/ed58f8697f7e30a5b35650484fa9fea5a5fd9574e0dfe096a3087ab25b74/baresip_python-0.6.0-cp314-cp314-macosx_15_0_x86_64.whl", hash = "sha256:7e20f5a977a0c77104db8b6f4bf902cf1106e1bf0ddadb337a203a0e216aacf6", size = 4024468, upload-time = "2026-10-29T11:13:18.972Z" },
-    { url = "https://files.pythonhosted.org/packages/40/81/ff302059b25855506b93d8934762b9372e5d3b90bbb01cb3f6063dacaecf/baresip_python-0.6.0-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ede4b28c253637993ae548e6b26bf933551c2813683e677faf1349f21dffd053", size = 3836323, upload-time = "2026-10-29T11:13:20.653Z" },
-    { url = "https://files.pythonhosted.org/packages/b1/61/c9c64462bd9d2f50524ba2c2b1f7722f126fc06b89d707038c37ed885fad/baresip_python-0.6.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:892cb526097d111bf8c8b14db23ffea53861339a1a1ae4ea2f3cd071a2802ee1", size = 4076102, upload-time = "2026-10-29T11:13:22.694Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/11/fc7592598b19de4ddbf61dcd4f9c95927d3b2f6dfaa1f5346cf09428d41f/baresip_python-0.6.1-cp311-cp311-macosx_15_0_arm64.whl", hash = "sha256:7081f1c2ceb99a22bd36c3a57166a5b305f8418c777c899b8768f2a3f996ebaa", size = 4131318, upload-time = "2026-11-20T18:55:58.444Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/50/483b1045d00a2afaf100dda3a03820dd0ba2defb809f633a712705aac1bf/baresip_python-0.6.1-cp311-cp311-macosx_15_0_x86_64.whl", hash = "sha256:5d027ceb4126ed4e22f6fed11c8d59fe92162b00aaaf291f638ad3bedc5367b5", size = 4024644, upload-time = "2026-11-20T18:56:00.359Z" },
+    { url = "https://files.pythonhosted.org/packages/53/3d/537a66200b84bc266c3d73f42079923d352699cc502d52792f2897e26935/baresip_python-0.6.1-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:0b72953c113557e74919a6097ef9c9cf50292c2317f57c2eacd3b7501aa8b3a3", size = 3836562, upload-time = "2026-11-20T18:56:02.472Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/7a/990d29de49bb78691b5988807c756377d91be9b16aea8225ef1bb150579f/baresip_python-0.6.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6e3a70a81003e698aecdedf57f4343cffc1632bf829cb1671b75811e6675bf17", size = 4076844, upload-time = "2026-11-20T18:56:04.068Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/80/6f81b51d308a3f93ca767ae62fed865a57ac3d306c69fc4a12d5d1664d27/baresip_python-0.6.1-cp312-cp312-macosx_15_0_arm64.whl", hash = "sha256:23c67a7682a89b49d51c253c27721d7a185750d50ec43fbde7a8a97268417209", size = 4131375, upload-time = "2026-11-20T18:56:05.551Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/0a/0113ea7e262fe6e68845ae0fef00a454e1780b961e298a9578924ca8639b/baresip_python-0.6.1-cp312-cp312-macosx_15_0_x86_64.whl", hash = "sha256:de231345b889802cb0c77acc081c9313478948b298c0a12320bfc6b35dd25990", size = 4024751, upload-time = "2026-11-20T18:56:07.238Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/d5/02d25b3818e0f89e63e6afdb81d8c610bd9ac3899790bebbf57790f76c9a/baresip_python-0.6.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c6c594b9a09dff8be6790b54922d34875959d0cd8a4950607a7eeb6e0204a2eb", size = 3836705, upload-time = "2026-11-20T18:56:09.224Z" },
+    { url = "https://files.pythonhosted.org/packages/b2/bc/8ad9e6d0fe3fd21847ae4ae68b14f5bd20e0e7558f062ca4b8a719c771df/baresip_python-0.6.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7f0ac45f7b3efe571acac879feb60cd8382da8f33bb0f5b8bacdf5051582eaf5", size = 4077339, upload-time = "2026-11-20T18:56:10.865Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/ad/8550dd609ad47466aeb2d1c328761eb800041acd6dcb9d4fbb9aeccdbb81/baresip_python-0.6.1-cp313-cp313-macosx_15_0_arm64.whl", hash = "sha256:97039e62e92e5a0ea1ac35df1ffc12fb5f9955dd92c594a5ae0202ea9c5f83d3", size = 4131375, upload-time = "2026-11-20T18:56:13.103Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/0c/acf5169856b8b0bcb61294877186bf8e1d77bcfa5f0ddc9bf9a042caa14f/baresip_python-0.6.1-cp313-cp313-macosx_15_0_x86_64.whl", hash = "sha256:9d56106121ea4ae50f22c6e9cfabd3e000e5c58d332a9c0c1ebc9976d05d6b4b", size = 4024750, upload-time = "2026-11-20T18:56:14.893Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/3a/75ea393dfda9bce1dffb289bdfa658684d84c5a615c4ef9261b411227fd1/baresip_python-0.6.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:fc7db0817e8f32a88cca929c7a03327a08f1cd683a7b4e4bd53c2bbae6b1c87c", size = 3836724, upload-time = "2026-11-20T18:56:16.402Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/53/42615d78ad82342f9c55061c9d8b349597bee10ad351dbe9d370a8a9c5d6/baresip_python-0.6.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b4976afb806533ff20a18d653fbfaedb414b713413325159e67db8316ed4ed29", size = 4077411, upload-time = "2026-11-20T18:56:18.152Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/e9/2ea934be81bd14fd7d7088a08413bc105d65380392278234b3f6f35dad81/baresip_python-0.6.1-cp314-cp314-macosx_15_0_arm64.whl", hash = "sha256:c22e72093c753c186f45050c3b1e4397b4c0e7552480b76d83904d8c404e1f62", size = 4131308, upload-time = "2026-11-20T18:56:19.776Z" },
+    { url = "https://files.pythonhosted.org/packages/42/2b/92955e7a6acb9798e912879199cddb8acc877a56c4b8d37bf76f356093b8/baresip_python-0.6.1-cp314-cp314-macosx_15_0_x86_64.whl", hash = "sha256:ae90fc87b661104c01d55030fa29762728843f57045970bd8ad269846c97cc29", size = 4024703, upload-time = "2026-11-20T18:56:21.357Z" },
+    { url = "https://files.pythonhosted.org/packages/44/12/0c170c6fbcd1147bc403444171af41286805e0c79717fc3079da4afb9788/baresip_python-0.6.1-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:480a935f2ff65a5f3a73fb86a69d7231d259ce1718a488afa7d2531e660d756b", size = 3836717, upload-time = "2026-11-20T18:56:22.768Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/23/75aef957cf81a109c75fc20bf57bb9a45d783d2138202421706c42abd8a0/baresip_python-0.6.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5bdbfde765f87d99fd0bbeee6113f4145ba4e72c0b22e85aed6f0e0efc4d02da", size = 4077538, upload-time = "2026-11-20T18:56:24.564Z" },
 ]
 
 [[package]]
@@ -932,7 +932,7 @@ name = "build"
 version = "1.4.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "(python_full_version != '3.13.*' and os_name == 'nt') or (os_name == 'nt' and sys_platform != 'linux')" },
+    { name = "colorama", marker = "os_name == 'nt'" },
     { name = "packaging" },
     { name = "pyproject-hooks" },
 ]
@@ -6379,7 +6379,7 @@ requires-dist = [
     { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = ">=0.6.0,<0.10" },
     { name = "aws-sdk-sagemaker-runtime-http2", marker = "python_full_version >= '3.12' and extra == 'sagemaker'", specifier = ">=0.6.0,<0.10" },
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = ">=1.47.0,<2" },
-    { name = "baresip-python", marker = "extra == 'sip'", specifier = ">=0.6.0,<0.7" },
+    { name = "baresip-python", marker = "extra == 'sip'", specifier = ">=0.6.1,<0.7" },
     { name = "camb-sdk", marker = "extra == 'camb'", specifier = ">=1.5.4,<2" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
     { name = "cryptography", marker = "extra == 'moq'", specifier = ">=45.0.0" },
@@ -6415,7 +6415,7 @@ requires-dist = [
     { name = "markdown", specifier = ">=3.7,<4" },
     { name = "mcp", extras = ["cli"], marker = "extra == 'mcp'", specifier = ">=2.1.1,<3" },
     { name = "mem0ai", marker = "extra == 'mem0'", specifier = ">=2,<3" },
-    { name = "mistralai", marker = "extra == 'mistral'", specifier = ">=2.0.0,<3" },
+    { name = "mistralai", marker = "extra == 'mistral'", specifier = ">=2.0.0,<4" },
     { name = "mlx-whisper", marker = "extra == 'mlx-whisper'", specifier = "~=0.4.2" },
     { name = "moonshine-voice", marker = "extra == 'moonshine'", specifier = ">=0.1.5" },
     { name = "moq-rs", marker = "extra == 'moq'", specifier = "~=0.5.1" },
