@@ -20,9 +20,42 @@ from pipecat_resampler import Resampler
 from pipecat.audio.turn.smart_turn._whisper_features import compute_whisper_log_mel_features
 from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
 from pipecat.utils.env import env_truthy
+from pipecat.utils.models import get_shared_model
 
 # The Whisper-based ONNX model expects 16 kHz audio input.
 _MODEL_SAMPLE_RATE = 16000
+
+
+def _resolve_bundled_model_path() -> str:
+    """Resolve the filesystem path to the bundled smart-turn-v3 ONNX model."""
+    model_name = "smart-turn-v3.2-cpu.onnx"
+    package_path = "pipecat.audio.turn.smart_turn.data"
+
+    try:
+        import importlib_resources as impresources
+
+        return str(impresources.files(package_path).joinpath(model_name))
+    except BaseException:
+        from importlib import resources as impresources
+
+        try:
+            with impresources.path(package_path, model_name) as f:
+                return str(f)
+        except BaseException:
+            return str(impresources.files(package_path).joinpath(model_name))
+
+
+def _open_session(model_path: str, cpu_count: int) -> ort.InferenceSession:
+    """Load the smart-turn-v3 model into an ONNX inference session."""
+    logger.debug(f"Loading Local Smart Turn v3.x model from {model_path}...")
+    so = ort.SessionOptions()
+    so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    so.inter_op_num_threads = 1
+    so.intra_op_num_threads = cpu_count
+    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    session = ort.InferenceSession(model_path, sess_options=so)
+    logger.debug("Loaded Local Smart Turn v3.x")
+    return session
 
 
 class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
@@ -30,6 +63,9 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
 
     Provides end-of-turn detection using locally-stored ONNX model,
     enabling offline operation without network dependencies.
+
+    Every analyzer with the same model path and ``cpu_count`` shares one ONNX
+    session, loaded once a process (see :func:`pipecat.utils.models.get_shared_model`).
     """
 
     def __init__(self, *, smart_turn_model_path: str | None = None, cpu_count: int = 1, **kwargs):
@@ -47,36 +83,14 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         self._resampler: Resampler | None = None
 
         if not smart_turn_model_path:
-            # Load bundled model
-            model_name = "smart-turn-v3.2-cpu.onnx"
-            package_path = "pipecat.audio.turn.smart_turn.data"
+            smart_turn_model_path = _resolve_bundled_model_path()
 
-            try:
-                import importlib_resources as impresources
-
-                smart_turn_model_path = str(impresources.files(package_path).joinpath(model_name))
-            except BaseException:
-                from importlib import resources as impresources
-
-                try:
-                    with impresources.path(package_path, model_name) as f:
-                        smart_turn_model_path = str(f)
-                except BaseException:
-                    smart_turn_model_path = str(
-                        impresources.files(package_path).joinpath(model_name)
-                    )
-
-        logger.debug(f"Loading Local Smart Turn v3.x model from {smart_turn_model_path}...")
-
-        so = ort.SessionOptions()
-        so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-        so.inter_op_num_threads = 1
-        so.intra_op_num_threads = cpu_count
-        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-
-        self._session = ort.InferenceSession(smart_turn_model_path, sess_options=so)
-
-        logger.debug("Loaded Local Smart Turn v3.x")
+        # The session's weights are immutable and ONNX Runtime runs a CPU session
+        # concurrently, so one session serves every analyzer.
+        model_path = str(smart_turn_model_path)
+        self._session = get_shared_model(
+            ("smart-turn-v3", model_path, cpu_count), lambda: _open_session(model_path, cpu_count)
+        )
 
     def _write_audio_to_wav(
         self, audio_array: np.ndarray, sample_rate: int = _MODEL_SAMPLE_RATE, suffix: str = ""
