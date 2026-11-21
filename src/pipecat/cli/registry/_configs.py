@@ -246,6 +246,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "llmtr_llm": (
+        "LLMTRLLMService(\n"
+        '        api_key=os.getenv("LLMTR_API_KEY"),\n'
+        "        settings=LLMTRLLMService.Settings(\n"
+        '            model=os.getenv("LLMTR_MODEL", "minimax/minimax-m3.1-flash"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "novita_llm": (
         "NovitaLLMService(\n"
         '        api_key=os.getenv("NOVITA_API_KEY"),\n'

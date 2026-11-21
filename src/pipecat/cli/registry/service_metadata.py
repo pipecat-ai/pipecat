@@ -661,6 +661,16 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
+            value="llmtr_llm",
+            label="LLMTR",
+            package="pipecat-ai[llmtr]",
+            class_name=["LLMTRLLMService"],
+            env_prefix="LLMTR",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+            param_defaults={"model": "minimax/minimax-m3.1-flash"},
+        ),
+        ServiceDefinition(
             value="mistral_llm",
             label="Mistral",
             package="pipecat-ai[mistral]",
