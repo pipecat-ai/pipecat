@@ -232,6 +232,13 @@ class TestFramesToEvents(unittest.TestCase):
             {"type": "llm_response", "text": "Tokyo"},
         )
 
+    def test_the_deprecated_user_transcription_is_no_event(self):
+        # user-input carries the same transcriptions.
+        s = _stream()
+        self.assertIsNone(
+            s.frame_to_event(_bot_report("user-transcription", {"text": "hello", "final": True}))
+        )
+
     def test_user_transcription_from_message(self):
         # The bot's reported user-input arrives as a raw RTVI message frame,
         # not a TranscriptionFrame (which the eval reserves for the bot's response).

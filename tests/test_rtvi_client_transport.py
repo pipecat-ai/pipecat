@@ -183,9 +183,15 @@ class TestRTVIClientTransportIntegration(unittest.IsolatedAsyncioTestCase):
         reports = [f.message for f in down if isinstance(f, InputTransportMessageFrame)]
         self.assertEqual(
             [m["type"] for m in reports],
-            ["bot-llm-started", "bot-llm-text", "bot-llm-stopped", "user-transcription"],
+            [
+                "bot-ready",
+                "bot-llm-started",
+                "bot-llm-text",
+                "bot-llm-stopped",
+                "user-transcription",
+            ],
         )
-        self.assertEqual(reports[1]["data"]["text"], "Paris")
+        self.assertEqual(reports[2]["data"]["text"], "Paris")
 
         # The transport completed the handshake (the server saw client-ready).
         self.assertTrue(any(m.get("type") == "client-ready" for m in server.received))

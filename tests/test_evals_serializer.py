@@ -268,13 +268,12 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(frame, InputAudioRawFrame)
         self.assertEqual(frame.sample_rate, 16000)
 
-    async def test_user_transcription_is_dropped(self):
-        # user-input carries the same transcriptions; the base serializer would
-        # make this a TranscriptionFrame, the STT's transcription of the bot's audio.
+    async def test_user_transcription_stays_a_raw_message(self):
+        # Not a TranscriptionFrame, which in the harness is its STT's
+        # transcription of the bot's audio.
         data = {"text": "hello", "user_id": "u", "final": True}
-        self.assertIsNone(
-            await self.serializer.deserialize(self._server("user-transcription", data))
-        )
+        frame = await self.serializer.deserialize(self._server("user-transcription", data))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
 
     async def test_bot_output_and_user_input_stay_raw_messages(self):
         # Kept as raw messages (not a TranscriptionFrame) so the sink can tell the
@@ -323,18 +322,9 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
         frame = await self.serializer.deserialize(self._server("bot-llm-started"))
         self.assertIsInstance(frame, InputTransportMessageFrame)
         self.assertEqual(frame.message["type"], "bot-llm-started")
-        self.assertIsNone(await self.serializer.deserialize(self._server("bot-ready")))
-        self.assertIsNone(await self.serializer.deserialize("not json"))
-
-    async def test_base_keeps_user_transcription_raw(self):
-        # The generic base keeps it as the bot's raw report; the eval subclass
-        # drops it, since user-input carries the same transcriptions.
-        from pipecat.serializers.rtvi_client import RTVIClientSerializer
-
-        frame = await RTVIClientSerializer().deserialize(
-            self._server("user-transcription", {"text": "hi", "final": True})
-        )
+        frame = await self.serializer.deserialize(self._server("bot-ready"))
         self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertIsNone(await self.serializer.deserialize("not json"))
 
 
 if __name__ == "__main__":

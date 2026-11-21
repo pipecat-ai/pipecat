@@ -6,32 +6,24 @@
 
 """Frame serializer for a Pipecat pipeline acting as an RTVI *client*.
 
-This is the client-side mirror of how a bot emits RTVI. It deserializes the RTVI
-*server* messages a bot sends, and serializes a client's outgoing frames (audio,
-and RTVI client messages the caller builds) onto the wire. Pair it with a WebSocket client
-transport to let a Pipecat pipeline talk to a bot that runs an RTVI *server*
-transport (e.g. the eval transport).
+This is the client-side mirror of how a bot emits RTVI. It hands the RTVI
+*server* messages a bot sends to the pipeline, and serializes a client's
+outgoing frames (audio, and RTVI client messages the caller builds) onto the
+wire. Pair it with a WebSocket client transport to let a Pipecat pipeline talk
+to a bot that runs an RTVI *server* transport (e.g. the eval transport).
 
 It is the inverse of
 :class:`~pipecat.processors.frameworks.rtvi.observer.RTVIObserver`, which turns
 pipeline frames into server messages on the bot side.
 
-The bot's reports about its own output (its speaking and interruptions, its
-LLM's ``bot-llm-*`` reports and function calls, and its TTS's ``bot-tts-text``)
-stay raw messages, as :class:`~pipecat.frames.frames.InputTransportMessageFrame`.
-In this pipeline a ``BotStartedSpeakingFrame``, an ``InterruptionFrame``, an
-``LLMTextFrame``, a ``FunctionCallInProgressFrame`` or a ``TTSTextFrame`` would
-be about this pipeline's own output, not the bot's. So does its
-``user-transcription``, the bot's transcription of this pipeline's speech,
-which a ``TranscriptionFrame`` would pass off as this pipeline's own. Kept as
-one kind of frame, the bot's reports also reach the pipeline in the order the
-bot sent them.
-
-.. note::
-    This covers the messages a conversation needs (the LLM response lifecycle,
-    the TTS's spoken text, transcriptions, speaking/interruption signals, function
-    calls). Metrics and inbound bot audio are added as the eval-simulation work
-    progresses.
+Every message from the bot stays a raw message, an
+:class:`~pipecat.frames.frames.InputTransportMessageFrame`. The bot's messages
+are about the bot (its speaking, its LLM's text, its function calls, ...) or
+about this pipeline as the bot sees it (its ``user-transcription``), and this
+pipeline's own frames would pass them off as its own: a
+``BotStartedSpeakingFrame`` here means this pipeline's output started playing.
+Kept as one kind of frame, they also reach the pipeline in the order the bot
+sent them.
 """
 
 import base64
@@ -48,24 +40,6 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
-
-# The bot's reports, about its own output and about this pipeline's speech,
-# which stay raw messages (see above).
-_BOT_REPORTS = frozenset(
-    {
-        "bot-llm-started",
-        "bot-llm-text",
-        "bot-llm-marker",
-        "bot-llm-stopped",
-        "llm-function-call-in-progress",
-        "llm-function-call-stopped",
-        "bot-tts-text",
-        "bot-started-speaking",
-        "bot-stopped-speaking",
-        "bot-interrupted",
-        "user-transcription",
-    }
-)
 
 
 class RTVIClientSerializer(FrameSerializer):
@@ -119,15 +93,14 @@ class RTVIClientSerializer(FrameSerializer):
         return None
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
-        """Deserialize an incoming RTVI server message into a pipeline frame.
+        """Deserialize an incoming RTVI server message, as the raw message it is.
 
         Args:
             data: JSON text (or bytes) sent by the bot.
 
         Returns:
-            The bot's report as an ``InputTransportMessageFrame``, or ``None`` if
-            the message is not an RTVI message or not one of the reports kept
-            (``bot-ready`` and the others are handled elsewhere).
+            The bot's message as an ``InputTransportMessageFrame``, or ``None`` if
+            it is not an RTVI message.
         """
         try:
             message = json.loads(data)
@@ -138,7 +111,4 @@ class RTVIClientSerializer(FrameSerializer):
         if not isinstance(message, dict) or message.get("label") != RTVI.MESSAGE_LABEL:
             return None
 
-        if message.get("type") in _BOT_REPORTS:
-            # This pipeline's own frames would be about its own output and speech.
-            return InputTransportMessageFrame(message=message)
-        return None
+        return InputTransportMessageFrame(message=message)
