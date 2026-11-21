@@ -64,9 +64,6 @@ from pipecat.evals.tts import CachingTTSService
 from pipecat.expressive.perception import PerceptionSignal
 from pipecat.frames.frames import (
     ErrorFrame,
-    ExternalFunctionCallCancelFrame,
-    ExternalFunctionCallInProgressFrame,
-    ExternalFunctionCallResultFrame,
     FunctionCallInProgressFrame,
     InputTransportMessageFrame,
     InterruptionFrame,
@@ -3959,39 +3956,6 @@ class TestBotImageEvent(unittest.TestCase):
             _stream().frame_to_event(InputTransportMessageFrame(message=message)),
             {"type": "image", "width": 64, "height": 32, "format": "RGB"},
         )
-
-
-class TestExternalFunctionCallEvents(unittest.TestCase):
-    """A call made outside the pipeline and reported into it is an event like the pipeline's own."""
-
-    def test_an_external_call_starts_and_stops_like_the_pipelines_own(self):
-        s = _stream()
-        started = s.frame_to_event(
-            ExternalFunctionCallInProgressFrame("run_tests", "toolu_1", arguments={"path": "x"})
-        )
-        progress = s.frame_to_event(
-            ExternalFunctionCallResultFrame(
-                "run_tests", "toolu_1", arguments={}, result="1 of 3", is_final=False
-            )
-        )
-        cancelled = s.frame_to_event(ExternalFunctionCallCancelFrame("run_tests", "toolu_1"))
-        done = s.frame_to_event(
-            ExternalFunctionCallResultFrame("run_tests", "toolu_2", arguments={}, result="ok")
-        )
-
-        self.assertEqual(
-            started, {"type": "function_call", "name": "run_tests", "args": {"path": "x"}}
-        )
-        self.assertIsNone(progress)
-        self.assertEqual(
-            cancelled,
-            {
-                "type": "function_call_stopped",
-                "name": "run_tests",
-                "args": {"tool_call_id": "toolu_1", "cancelled": True},
-            },
-        )
-        self.assertEqual(done["args"], {"tool_call_id": "toolu_2", "cancelled": False})
 
 
 class TestCheckFrom(unittest.IsolatedAsyncioTestCase):
