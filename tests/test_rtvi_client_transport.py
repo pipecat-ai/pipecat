@@ -173,7 +173,7 @@ class TestRTVIClientTransportIntegration(unittest.IsolatedAsyncioTestCase):
         ]
         async with _BotServer(_free_port(), replies) as server:
             transport = RTVIClientTransport(server.url)
-            down, _ = await run_test(
+            down, up = await run_test(
                 transport.input(),
                 frames_to_send=[SleepFrame(sleep=0.5)],  # let connect/handshake/replies flow
                 start_timeout=5.0,  # the input transport connects before the pipeline starts
@@ -192,6 +192,9 @@ class TestRTVIClientTransportIntegration(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertEqual(reports[2]["data"]["text"], "Paris")
+        # Downstream only: the worker's RTVIProcessor, ahead of the pipeline,
+        # would take them for a client's messages to it.
+        self.assertFalse(any(isinstance(f, InputTransportMessageFrame) for f in up))
 
         # The transport completed the handshake (the server saw client-ready).
         self.assertTrue(any(m.get("type") == "client-ready" for m in server.received))
