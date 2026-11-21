@@ -1703,10 +1703,21 @@ class AWSNovaSonicLLMService(LLMService[AWSNovaSonicLLMAdapter]):
 
     async def _report_tts_text(self):
         if self._pending_speculative_text:
+            # Announce the text as a segment the bot speaks, then report it spoken,
+            # as a TTS service does: clients add a segment's text when it is
+            # announced and track its progress when it is spoken.
+            announcement = AggregatedTextFrame(self._pending_speculative_text, TextType.SENTENCE)
+            announcement.will_be_spoken = True
+            announcement.append_to_context = False
+            await self.push_frame(announcement)
+
             tts_text_frame = TTSTextFrame(
-                self._pending_speculative_text, text_type=TextType.SENTENCE
+                self._pending_speculative_text,
+                text_type=TextType.SENTENCE,
+                segment_id=announcement.id,
             )
             tts_text_frame.includes_inter_frame_spaces = True
+            tts_text_frame.will_be_spoken = True
             await self.push_frame(tts_text_frame)
             self._pending_speculative_text = None
 
