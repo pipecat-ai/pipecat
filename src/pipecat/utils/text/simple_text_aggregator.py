@@ -14,7 +14,7 @@ text processing scenarios.
 from collections.abc import AsyncIterator
 from enum import Enum, auto
 
-from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, match_endofsentence
+from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, is_thai, match_endofsentence
 from pipecat.utils.text.base_text_aggregator import Aggregation, BaseTextAggregator, TextType
 
 
@@ -69,8 +69,8 @@ class SimpleTextAggregator(BaseTextAggregator):
         """Aggregate text and yield completed aggregations.
 
         In SENTENCE mode, processes the input text character-by-character. When
-        sentence-ending punctuation is detected, it waits for non-whitespace
-        lookahead before calling sentencex.
+        sentence-ending punctuation, or a space after a Thai word, is detected, it
+        waits for non-whitespace lookahead before calling sentencex.
 
         In TOKEN mode, yields the text immediately without buffering.
 
@@ -99,7 +99,8 @@ class SimpleTextAggregator(BaseTextAggregator):
     ) -> Aggregation | None:
         """Check a possible sentence ending using text that arrives after it.
 
-        ``char`` is already appended to ``self._text``. Punctuation starts a
+        ``char`` is already appended to ``self._text``. Punctuation, or a space
+        after a Thai word (Thai has no sentence-ending punctuation), starts a
         candidate, but the tokenizer decides whether it actually ends a sentence:
 
         - ``Hello.`` or ``Hello. ``: keep buffering until meaningful text follows.
@@ -129,6 +130,7 @@ class SimpleTextAggregator(BaseTextAggregator):
             Aggregation if a sentence boundary is confirmed, otherwise None.
         """
         is_punctuation = char in SENTENCE_ENDING_PUNCTUATION
+        is_thai_space = char.isspace() and len(self._text) > 1 and is_thai(self._text[-2])
         result = None
 
         # The state machine requests a check at the first lookahead character
@@ -139,10 +141,11 @@ class SimpleTextAggregator(BaseTextAggregator):
             # the whole buffer. This temporary slice does not discard the "?".
             candidate = self._text[:-1] if is_punctuation else self._text
             if protected_end:
-                # Blank out punctuation up to protected_end with equal-width
+                # Blank out punctuation, and Thai letters (a space between
+                # them ends a sentence), up to protected_end with equal-width
                 # spaces, so boundary offsets still refer to self._text.
                 protected = "".join(
-                    " " if c in SENTENCE_ENDING_PUNCTUATION else c
+                    " " if c in SENTENCE_ENDING_PUNCTUATION or is_thai(c) else c
                     for c in candidate[:protected_end]
                 )
                 candidate = protected + candidate[protected_end:]
@@ -156,8 +159,9 @@ class SimpleTextAggregator(BaseTextAggregator):
                 self._lookahead_state = _LookaheadState.IDLE
 
         # A trailing "?" in "...I. Did?" needs its own lookahead, whether or not
-        # the retry above found a boundary at the earlier period.
-        if is_punctuation:
+        # the retry above found a boundary at the earlier period. So does a
+        # space after a Thai word.
+        if is_punctuation or is_thai_space:
             self._lookahead_state = _LookaheadState.AWAITING_CHARACTER
 
         return result

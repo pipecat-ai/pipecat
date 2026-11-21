@@ -185,6 +185,24 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         # Arabic with lookahead
         assert match_endofsentence("مرحبا؟ك") == 6
 
+    async def test_endofsentence_thai(self):
+        """Thai ends a sentence with a space between words instead of punctuation."""
+        first = "สวัสดีค่ะ ยินดีต้อนรับสู่ร้านอาหารค่ะ"
+        # The space ends the sentence once the next Thai word starts
+        assert match_endofsentence(first + " ต้อง") == len(first)
+        assert not match_endofsentence(first + " ")
+        # A phrase too short to speak on its own stays with the next one
+        assert not match_endofsentence("สวัสดีค่ะ ยินดี")
+        # A space after ฯ (abbreviation) or ๆ (repetition) doesn't end a sentence
+        assert not match_endofsentence("วันพรุ่งนี้ที่กรุงเทพฯ มีฝนตก")
+        assert not match_endofsentence("คุณครูประจำชั้นพูดช้าๆ กับนักเรียน")
+        # Nor does a space next to Latin text or digits
+        assert not match_endofsentence("กรุณาตรวจสอบอีเมลของคุณใน Inbox ภายในห้านาที")
+        assert not match_endofsentence("ยอดเงินคงเหลือในบัญชีของคุณคือ 500 บาท")
+        # Whichever ends first, punctuation or the space, ends the sentence
+        assert match_endofsentence("ได้ค่ะ! " + first + " ต้อง") == len("ได้ค่ะ!")
+        assert match_endofsentence(first + " ต้องการจองไหมคะ? ได้") == len(first)
+
     async def test_endofsentence_latin_not_affected_by_fallback(self):
         """Verify that the CJK fallback does not change behavior for Latin text."""
         # These should still return 0 - Latin "." is NOT in the unambiguous set
