@@ -18,7 +18,9 @@ from pipecat.frames.frames import (
     AudioBufferStopRecordingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    CancelFrame,
     EndFrame,
+    Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
     StartFrame,
@@ -27,11 +29,13 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.pipeline.worker import PipelineParams
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.workers.runner import WorkerRunner
 
 
 class _PassthroughResampler:
@@ -1286,6 +1290,52 @@ class TestTurnAudio(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(events, [("user", 1, TURN_CHUNK), ("bot", 1, TURN_CHUNK)])
+
+
+class TestFinalAudioBeforePipelineFinished(unittest.IsolatedAsyncioTestCase):
+    """The final audio handlers finish before on_pipeline_finished fires (#6698)."""
+
+    async def _run_until(self, terminal_frame: Frame) -> list[str]:
+        audiobuffer = AudioBufferProcessor()
+        worker = PipelineWorker(Pipeline([audiobuffer]), enable_rtvi=False, idle_timeout_secs=None)
+        events: list[str] = []
+
+        @audiobuffer.event_handler("on_audio_data")
+        async def on_audio_data(_buffer, audio, sample_rate, num_channels):
+            await asyncio.sleep(0.2)
+            events.append("on_audio_data done")
+
+        @audiobuffer.event_handler("on_track_audio_data")
+        async def on_track_audio_data(_buffer, user, bot, sample_rate, num_channels):
+            await asyncio.sleep(0.2)
+            events.append("on_track_audio_data done")
+
+        @worker.event_handler("on_pipeline_started")
+        async def on_pipeline_started(_worker, _frame):
+            await audiobuffer.start_recording()
+            await worker.queue_frame(
+                InputAudioRawFrame(audio=b"\x00" * 3200, sample_rate=16000, num_channels=1)
+            )
+            await worker.queue_frame(terminal_frame)
+
+        @worker.event_handler("on_pipeline_finished")
+        async def on_pipeline_finished(_worker, _frame):
+            events.append("on_pipeline_finished")
+
+        runner = WorkerRunner(handle_sigint=False)
+        await runner.add_workers(worker)
+        await asyncio.wait_for(runner.run(), timeout=5)
+        return events
+
+    async def test_end_frame_waits_for_final_audio_handlers(self):
+        events = await self._run_until(EndFrame())
+        self.assertEqual(events[-1], "on_pipeline_finished")
+        self.assertCountEqual(events[:-1], ["on_audio_data done", "on_track_audio_data done"])
+
+    async def test_cancel_frame_waits_for_final_audio_handlers(self):
+        events = await self._run_until(CancelFrame())
+        self.assertEqual(events[-1], "on_pipeline_finished")
+        self.assertCountEqual(events[:-1], ["on_audio_data done", "on_track_audio_data done"])
 
 
 if __name__ == "__main__":

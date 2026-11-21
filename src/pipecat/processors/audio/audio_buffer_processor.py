@@ -267,6 +267,9 @@ class AudioBufferProcessor(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming audio frames and manage audio buffers.
 
+        On ``EndFrame`` or ``CancelFrame``, waits for the final audio handlers
+        before pushing the frame on.
+
         Args:
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
@@ -289,6 +292,7 @@ class AudioBufferProcessor(FrameProcessor):
 
         if isinstance(frame, (CancelFrame, EndFrame)):
             await self.stop_recording()
+            await self._wait_for_event_handlers()
 
         await self.push_frame(frame, direction)
 

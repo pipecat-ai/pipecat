@@ -172,6 +172,10 @@ class BaseObject(ABC):
         before returning, except the one it is called from, since a task
         can't wait for itself.
         """
+        await self._wait_for_event_handlers()
+
+    async def _wait_for_event_handlers(self):
+        """Wait for running event handler tasks, except the calling one."""
         current = asyncio.current_task()
         event_tasks = [(name, task) for name, task in self._event_tasks if task is not current]
         if event_tasks:
