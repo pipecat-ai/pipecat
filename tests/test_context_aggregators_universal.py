@@ -1751,6 +1751,76 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse([f for f in up_frames if isinstance(f, LLMContextFrame)])
 
+    async def test_a_result_held_for_the_bot_survives_the_reply_closing_first(self):
+        """A TTS holds the reply's end frame behind its audio, so the turn can close before the bot stops."""
+        aggregator = LLMAssistantAggregator(LLMContext())
+        _, up_frames = await run_test(
+            aggregator,
+            frames_to_send=[
+                BotStartedSpeakingFrame(),
+                LLMFullResponseStartFrame(),
+                TTSTextFrame("Let me check on that.", text_type=TextType.SENTENCE),
+                FunctionCallInProgressFrame(
+                    function_name="lookup",
+                    tool_call_id="1",
+                    arguments={},
+                    cancel_on_interruption=True,
+                ),
+                SleepFrame(),
+                # Arrives while the bot speaks, so the push waits for it to stop.
+                FunctionCallResultFrame(
+                    function_name="lookup",
+                    tool_call_id="1",
+                    arguments={},
+                    result={"answer": 42},
+                ),
+                SleepFrame(),
+                LLMFullResponseEndFrame(),
+                SleepFrame(),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(),
+            ],
+        )
+        self.assertEqual(len([f for f in up_frames if isinstance(f, LLMContextFrame)]), 1)
+
+    async def test_an_append_held_for_the_bot_survives_a_spoken_turn_closing_first(self):
+        """Committing a TTSSpeakFrame-driven turn leaves the held run in place."""
+        aggregator = LLMAssistantAggregator(LLMContext())
+        _, up_frames = await run_test(
+            aggregator,
+            frames_to_send=[
+                BotStartedSpeakingFrame(),
+                TTSStartedFrame(append_to_context=True),
+                TTSTextFrame("One moment.", text_type=TextType.SENTENCE),
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "developer", "content": "Backend: Done."}], run_llm=True
+                ),
+                SleepFrame(),
+                LLMAssistantPushAggregationFrame(),
+                SleepFrame(),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(),
+            ],
+        )
+        self.assertEqual(len([f for f in up_frames if isinstance(f, LLMContextFrame)]), 1)
+
+    async def test_a_turn_closing_with_nothing_held_runs_no_llm(self):
+        """Closing a turn only keeps a run that was already waiting; it never starts one."""
+        aggregator = LLMAssistantAggregator(LLMContext())
+        _, up_frames = await run_test(
+            aggregator,
+            frames_to_send=[
+                BotStartedSpeakingFrame(),
+                LLMFullResponseStartFrame(),
+                TTSTextFrame("Have a great day.", text_type=TextType.SENTENCE),
+                LLMFullResponseEndFrame(),
+                SleepFrame(),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(),
+            ],
+        )
+        self.assertFalse([f for f in up_frames if isinstance(f, LLMContextFrame)])
+
     async def test_interruption_with_no_open_turn_writes_nothing(self):
         """An interruption between turns leaves the context alone."""
         context = LLMContext()

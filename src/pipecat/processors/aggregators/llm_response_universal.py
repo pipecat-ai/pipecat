@@ -2015,8 +2015,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """Reset the aggregation state."""
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
-        self._push_context_on_bot_stopped_speaking = False
-        self._context_push_owed = False
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
@@ -2228,8 +2226,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
             The frame pushed.
         """
         frame = await super().push_context_frame(direction)
-        self._push_context_on_bot_stopped_speaking = False
-        self._context_push_owed = False
+        # Only an upstream push runs the LLM. A downstream one, such as the record of a
+        # finished assistant turn, leaves a held or owed run in place.
+        if direction == FrameDirection.UPSTREAM:
+            self._push_context_on_bot_stopped_speaking = False
+            self._context_push_owed = False
         return frame
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
@@ -2264,7 +2265,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # The output transport sends a BotStoppedSpeakingFrame right after the
         # interruption, and it is handled before the turn closes. Drop the
         # context push waiting for it: it belongs to the cancelled response.
+        # An owed push goes with it: the user's new turn brings a run of its own.
         self._push_context_on_bot_stopped_speaking = False
+        self._context_push_owed = False
 
         if not self._assistant_turn_start_timestamp:
             await self.reset()
