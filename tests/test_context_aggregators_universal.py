@@ -9,15 +9,19 @@ import contextlib
 import io
 import json
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from loguru import logger
 
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    CancelFrame,
     EndFrame,
     Frame,
     FunctionCallCancelFrame,
@@ -55,6 +59,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     TranslationFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSTextFrame,
     UserBackchannelFrame,
@@ -68,6 +73,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -85,8 +91,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
     UserTurnStoppedMessage,
     _AssistantTurnInterruptedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.transports.base_output import BaseOutputTransport
+from pipecat.transports.base_transport import TransportParams
 from pipecat.turns.empty_user_turn import DEFAULT_EMPTY_USER_TURN_INTERRUPTED_PROMPT
 from pipecat.turns.user_mute import (
     FirstSpeechUserMuteStrategy,
@@ -111,7 +119,17 @@ from pipecat.turns.user_turn_strategies import (
     UserTurnStrategies,
     UserTurnStrategiesParams,
 )
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.text.base_text_aggregator import TextType
+
+
+async def _until(predicate, *, timeout: float = 2.0) -> None:
+    async def poll() -> None:
+        while not predicate():
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(poll(), timeout=timeout)
+
 
 USER_TURN_STOP_TIMEOUT = 0.2
 TRANSCRIPTION_TIMEOUT = 0.1
@@ -1860,6 +1878,485 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=[],
         )
         self.assertEqual(context.messages[-1]["content"], "COMPLETED")
+
+    async def test_a_synchronous_result_runs_while_filler_plays(self):
+        """A synchronous call holds the model, so filler queued after it is not an answer it would repeat."""
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup", tool_call_id="1", arguments={}, cancel_on_interruption=True
+            ),
+            SleepFrame(),
+            BotStartedSpeakingFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup", tool_call_id="1", arguments={}, result={"slots": 2}
+            ),
+            SleepFrame(),
+        ]
+        context = LLMContext()
+        await run_test(
+            LLMAssistantAggregator(context),
+            frames_to_send=frames_to_send,
+            expected_down_frames=[BotStartedSpeakingFrame],
+            expected_up_frames=[LLMContextFrame],
+        )
+        self.assertEqual(json.loads(context.messages[-1]["content"]), {"slots": 2})
+
+        await run_test(
+            LLMAssistantAggregator(LLMContext()),
+            frames_to_send=[*frames_to_send, BotStoppedSpeakingFrame()],
+            expected_down_frames=[BotStartedSpeakingFrame, BotStoppedSpeakingFrame],
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_two_synchronous_results_while_filler_plays_run_once(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                FunctionCallsStartedFrame(
+                    function_calls=[
+                        FunctionCallFromLLM(
+                            function_name="lookup", tool_call_id=id, arguments={}, context=None
+                        )
+                        for id in ("1", "2")
+                    ]
+                ),
+                SleepFrame(),
+                *[
+                    FunctionCallInProgressFrame(
+                        function_name="lookup",
+                        tool_call_id=id,
+                        arguments={},
+                        cancel_on_interruption=True,
+                    )
+                    for id in ("1", "2")
+                ],
+                SleepFrame(),
+                BotStartedSpeakingFrame(),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="lookup", tool_call_id="1", arguments={}, result={"a": 1}
+                ),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="lookup", tool_call_id="2", arguments={}, result={"b": 2}
+                ),
+                SleepFrame(),
+            ],
+            expected_down_frames=[BotStartedSpeakingFrame],
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_a_synchronous_result_waits_for_words_going_into_the_context(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                FunctionCallInProgressFrame(
+                    function_name="lookup",
+                    tool_call_id="1",
+                    arguments={},
+                    cancel_on_interruption=True,
+                ),
+                SleepFrame(),
+                TTSStartedFrame(append_to_context=True),
+                BotStartedSpeakingFrame(),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="lookup", tool_call_id="1", arguments={}, result={"slots": 2}
+                ),
+                SleepFrame(),
+            ],
+            expected_up_frames=[],
+        )
+
+    async def test_a_synchronous_result_waits_for_a_context_bound_line_queued_after_the_call(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        snapshots: list[list] = []
+
+        class _ContextSnapshots(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                if (
+                    data.source == aggregator
+                    and data.direction == FrameDirection.UPSTREAM
+                    and isinstance(data.frame, LLMContextFrame)
+                ):
+                    snapshots.append(list(data.frame.context.messages))
+
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            TTSStartedFrame(append_to_context=True),
+            BotStartedSpeakingFrame(),
+            TTSTextFrame("Let me check.", text_type=TextType.SENTENCE),
+            LLMAssistantPushAggregationFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup", tool_call_id="1", arguments={}, result={"slots": 2}
+            ),
+            SleepFrame(),
+            BotStoppedSpeakingFrame(),
+            SleepFrame(),
+        ]
+        _, up = await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            observers=[_ContextSnapshots()],
+        )
+        context_frames = [f for f in up if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)
+        self.assertEqual(len(snapshots), 1)
+        self.assertEqual(snapshots[0][-1], {"role": "assistant", "content": "Let me check."})
+        self.assertEqual(json.loads(snapshots[0][-2]["content"]), {"slots": 2})
+
+    async def test_transport_then_aggregator_orders_context_bound_line_before_result(self):
+        """Pipeline transport→aggregator: a context-bound line still precedes the result downstream."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        transport = BaseOutputTransport(TransportParams(audio_out_enabled=True))
+        release = asyncio.Event()
+        context_bound_tts_pushed = asyncio.Event()
+        result_after_context_bound = asyncio.Event()
+        snapshots: list[list] = []
+        downstream_types: list[type] = []
+
+        async def write(_frame):
+            await release.wait()
+            return True
+
+        real_push = transport.push_frame
+
+        ip_pushed = asyncio.Event()
+
+        async def tracking_push(frame, direction=FrameDirection.DOWNSTREAM):
+            downstream_types.append(type(frame))
+            if isinstance(frame, FunctionCallInProgressFrame):
+                ip_pushed.set()
+            if isinstance(frame, TTSStartedFrame) and frame.append_to_context:
+                context_bound_tts_pushed.set()
+            if isinstance(frame, FunctionCallResultFrame) and context_bound_tts_pushed.is_set():
+                result_after_context_bound.set()
+            return await real_push(frame, direction)
+
+        transport.push_frame = tracking_push
+        transport.write_audio_frame = AsyncMock(side_effect=write)
+
+        task_manager = TaskManager()
+        await transport.setup(
+            FrameProcessorSetup(
+                clock=SystemClock(),
+                task_manager=task_manager,
+                pipeline_worker=SimpleNamespace(app_resources=None),  # type: ignore[arg-type]
+            )
+        )
+        start = StartFrame(audio_out_sample_rate=16000)
+        await transport.process_frame(start, FrameDirection.DOWNSTREAM)
+        await transport.set_transport_ready(start)
+
+        sender = transport._media_senders[None]
+        registered_at_result: list[bool] = []
+        real_handle_result = sender.handle_function_call_result
+
+        async def tracking_handle_result(frame: FunctionCallResultFrame):
+            registered_at_result.append(frame.tool_call_id in sender._delivered_synchronous_calls)
+            await real_handle_result(frame)
+
+        sender.handle_function_call_result = tracking_handle_result
+        line = TTSAudioRawFrame(b"\x01" * (sender.audio_chunk_size * 5), sender.sample_rate, 1)
+        result = FunctionCallResultFrame(
+            function_name="lookup", tool_call_id="1", arguments={}, result={"slots": 2}
+        )
+        pipeline = Pipeline([transport, aggregator])
+
+        context_pushed = asyncio.Event()
+
+        class _CombinedObserver(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                if (
+                    data.source == aggregator
+                    and data.direction == FrameDirection.UPSTREAM
+                    and isinstance(data.frame, LLMContextFrame)
+                ):
+                    snapshots.append(list(data.frame.context.messages))
+                    context_pushed.set()
+
+        async def _unblock_when_result_queued() -> None:
+            await ip_pushed.wait()
+            await _until(
+                lambda: transport._media_senders[None]._audio_queue.has_frame(
+                    FunctionCallResultFrame
+                )
+            )
+            release.set()
+
+        unblock = asyncio.create_task(_unblock_when_result_queued())
+        try:
+            await run_test(
+                pipeline,
+                frames_to_send=[
+                    FunctionCallInProgressFrame(
+                        function_name="lookup",
+                        tool_call_id="1",
+                        arguments={},
+                        cancel_on_interruption=True,
+                    ),
+                    SleepFrame(),
+                    line,
+                    TTSStartedFrame(append_to_context=True),
+                    TTSTextFrame("Let me check.", text_type=TextType.SENTENCE),
+                    LLMAssistantPushAggregationFrame(),
+                    result,
+                    BotStartedSpeakingFrame(),
+                    BotStoppedSpeakingFrame(),
+                ],
+                observers=[_CombinedObserver()],
+            )
+            await asyncio.wait_for(result_after_context_bound.wait(), timeout=2.0)
+            await asyncio.wait_for(context_pushed.wait(), timeout=2.0)
+            tts_index = downstream_types.index(TTSStartedFrame)
+            result_index = downstream_types.index(FunctionCallResultFrame)
+            self.assertLess(tts_index, result_index)
+            self.assertEqual(len(snapshots), 1)
+            self.assertEqual(snapshots[0][-1], {"role": "assistant", "content": "Let me check."})
+            self.assertEqual(json.loads(snapshots[0][-2]["content"]), {"slots": 2})
+            self.assertEqual(registered_at_result, [True])
+        finally:
+            release.set()
+            unblock.cancel()
+            with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+                await unblock
+            await transport.cancel(CancelFrame())
+
+    async def test_parallel_sibling_still_in_the_queue_defers_inference_until_both_finish(self):
+        """Shared group_id: the first result waits until the sibling in-progress frame is delivered."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                FunctionCallInProgressFrame(
+                    function_name="lookup",
+                    tool_call_id="1",
+                    arguments={},
+                    cancel_on_interruption=True,
+                    group_id="g",
+                ),
+                SleepFrame(),
+                FunctionCallInProgressFrame(
+                    function_name="lookup",
+                    tool_call_id="2",
+                    arguments={},
+                    cancel_on_interruption=True,
+                    group_id="g",
+                ),
+                SleepFrame(),
+                BotStartedSpeakingFrame(),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="lookup", tool_call_id="1", arguments={}, result={"a": 1}
+                ),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="lookup", tool_call_id="2", arguments={}, result={"b": 2}
+                ),
+                SleepFrame(),
+            ],
+            expected_down_frames=[BotStartedSpeakingFrame],
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_parallel_siblings_announced_together_run_once_after_both_finish(self):
+        """Two calls started together defer inference until both results are in."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                FunctionCallsStartedFrame(
+                    function_calls=[
+                        FunctionCallFromLLM(
+                            function_name="lookup", tool_call_id="1", arguments={}, context=None
+                        ),
+                        FunctionCallFromLLM(
+                            function_name="lookup", tool_call_id="2", arguments={}, context=None
+                        ),
+                    ]
+                ),
+                SleepFrame(),
+                FunctionCallInProgressFrame(
+                    function_name="lookup",
+                    tool_call_id="1",
+                    arguments={},
+                    cancel_on_interruption=True,
+                ),
+                SleepFrame(),
+                BotStartedSpeakingFrame(),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="lookup", tool_call_id="1", arguments={}, result={"a": 1}
+                ),
+                SleepFrame(),
+                FunctionCallInProgressFrame(
+                    function_name="lookup",
+                    tool_call_id="2",
+                    arguments={},
+                    cancel_on_interruption=True,
+                ),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="lookup", tool_call_id="2", arguments={}, result={"b": 2}
+                ),
+                SleepFrame(),
+            ],
+            expected_down_frames=[BotStartedSpeakingFrame],
+            expected_up_frames=[LLMContextFrame],
+        )
+
+    async def test_a_synchronous_result_waits_for_response_and_bot_to_finish(self):
+        """An open assistant turn keeps post-tool inference off until audio ends."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        snapshots: list[list] = []
+
+        class _ContextSnapshots(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                if (
+                    data.source == aggregator
+                    and data.direction == FrameDirection.UPSTREAM
+                    and isinstance(data.frame, LLMContextFrame)
+                ):
+                    snapshots.append(list(data.frame.context.messages))
+
+        open_turn_prefix = [
+            LLMFullResponseStartFrame(),
+            BotStartedSpeakingFrame(),
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup", tool_call_id="1", arguments={}, result={"slots": 2}
+            ),
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=open_turn_prefix,
+            expected_up_frames=[],
+        )
+        _, up = await run_test(
+            aggregator,
+            frames_to_send=[
+                *open_turn_prefix,
+                SleepFrame(),
+                LLMFullResponseEndFrame(),
+                SleepFrame(),
+                BotStoppedSpeakingFrame(),
+                SleepFrame(),
+            ],
+            observers=[_ContextSnapshots()],
+        )
+        context_frames = [f for f in up if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)
+        self.assertEqual(len(snapshots), 1)
+        self.assertEqual(json.loads(snapshots[0][-1]["content"]), {"slots": 2})
+
+    async def test_a_synchronous_result_waits_for_the_bot_if_the_user_spoke_during_the_call(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                FunctionCallInProgressFrame(
+                    function_name="lookup",
+                    tool_call_id="1",
+                    arguments={},
+                    cancel_on_interruption=True,
+                ),
+                SleepFrame(),
+                UserStartedSpeakingFrame(),
+                UserStoppedSpeakingFrame(),
+                BotStartedSpeakingFrame(),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="lookup", tool_call_id="1", arguments={}, result={"slots": 2}
+                ),
+                SleepFrame(),
+            ],
+            expected_up_frames=[],
+        )
+
+    async def test_an_asynchronous_result_waits_for_the_bot_to_stop_speaking(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        await run_test(
+            aggregator,
+            frames_to_send=[
+                FunctionCallInProgressFrame(
+                    function_name="lookup",
+                    tool_call_id="1",
+                    arguments={},
+                    cancel_on_interruption=False,
+                ),
+                SleepFrame(),
+                BotStartedSpeakingFrame(),
+                SleepFrame(),
+                FunctionCallResultFrame(
+                    function_name="lookup", tool_call_id="1", arguments={}, result={"slots": 2}
+                ),
+                SleepFrame(),
+            ],
+            expected_up_frames=[],
+        )
+
+    async def test_a_synchronous_result_run_during_filler_is_cancelled_by_interruption(self):
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="lookup",
+                tool_call_id="1",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+            SleepFrame(),
+            BotStartedSpeakingFrame(),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="lookup", tool_call_id="1", arguments={}, result={"slots": 2}
+            ),
+            SleepFrame(),
+            InterruptionFrame(),
+            BotStoppedSpeakingFrame(),
+            UserStartedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+            SleepFrame(),
+            LLMMessagesAppendFrame(
+                messages=[{"role": "user", "content": "Never mind."}], run_llm=True
+            ),
+            SleepFrame(),
+        ]
+        _, up = await run_test(aggregator, frames_to_send=frames_to_send)
+        context_frames = [f for f in up if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 2)
+        self.assertEqual(json.loads(context.messages[-2]["content"]), {"slots": 2})
+
+        _, up = await run_test(
+            LLMAssistantAggregator(LLMContext()),
+            frames_to_send=[*frames_to_send, BotStoppedSpeakingFrame()],
+        )
+        self.assertEqual(len([f for f in up if isinstance(f, LLMContextFrame)]), 2)
 
     async def test_function_call_cancel(self):
         context = LLMContext()

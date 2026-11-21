@@ -34,7 +34,12 @@ from pipecat.frames.frames import (
     EndFrame,
     FilterControlFrame,
     Frame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InterruptionFrame,
+    LLMFullResponseStartFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
@@ -47,8 +52,12 @@ from pipecat.frames.frames import (
     SpriteFrame,
     StartFrame,
     SystemFrame,
+    TextFrame,
     TTSAudioRawFrame,
+    TTSSpeakFrame,
+    TTSStartedFrame,
     TTSStoppedFrame,
+    UserStartedSpeakingFrame,
     VolumeFrame,
     VolumeGainFrame,
 )
@@ -388,6 +397,15 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, OutputDTMFUrgentFrame):
             await self.write_dtmf(frame)
         elif isinstance(frame, SystemFrame):
+            if isinstance(frame, UserStartedSpeakingFrame):
+                for sender in self._media_senders.values():
+                    sender.on_user_started_speaking()
+            elif isinstance(frame, FunctionCallsStartedFrame):
+                for sender in self._media_senders.values():
+                    sender.on_function_calls_started()
+            elif isinstance(frame, FunctionCallCancelFrame):
+                for sender in self._media_senders.values():
+                    sender.discard_synchronous_call(frame.tool_call_id)
             await self.push_frame(frame, direction)
         elif direction == FrameDirection.UPSTREAM:
             await self.push_frame(frame, direction)
@@ -418,6 +436,8 @@ class BaseOutputTransport(FrameProcessor):
             await sender.handle_mixer_control_frame(frame)
         elif isinstance(frame, TTSStoppedFrame):
             await sender.handle_tts_stopped(frame)
+        elif isinstance(frame, FunctionCallResultFrame):
+            await sender.handle_function_call_result(frame)
         elif frame.pts:
             await sender.handle_timed_frame(frame)
         else:
@@ -468,6 +488,16 @@ class BaseOutputTransport(FrameProcessor):
             # reconstructed as the same frame type).
             self._audio_runs: deque[tuple[bytearray, bool]] = deque()
             self._audio_buffer_cls: type[OutputAudioRawFrame] = OutputAudioRawFrame
+
+            # Synchronous calls whose in-progress frame has been pushed on. Their
+            # results may pass the audio queued after it (see
+            # ``handle_function_call_result``).
+            self._delivered_synchronous_calls: set[str] = set()
+            # Set when the user started speaking since the current call batch
+            # began, so results keep their place behind the audio.
+            self._user_spoke_during_function_calls: bool = False
+            # Frame the audio task is delivering; invisible to queue scans.
+            self._frame_in_hand: Frame | None = None
 
             # Resamples incoming audio to the output sample rate, created when
             # audio first arrives at another rate.
@@ -619,6 +649,7 @@ class BaseOutputTransport(FrameProcessor):
             # the background audio (made worse by telephony serializers that
             # clear the playout buffer on interruptions).
             self._audio_queue.reset()
+            self.forget_synchronous_calls()
             # The same goes for the audio still waiting to fill a chunk.
             self._audio_runs = deque((audio, flag) for audio, flag in self._audio_runs if flag)
 
@@ -700,6 +731,78 @@ class BaseOutputTransport(FrameProcessor):
                 frame: The frame to handle synchronously.
             """
             await self._audio_queue.put(frame)
+
+        def _is_context_free_filler(self, frame: Frame) -> bool:
+            """Return whether a queued frame is playout that does not bind the LLM context."""
+            if isinstance(frame, OutputAudioRawFrame):
+                return True
+            if isinstance(frame, OutputImageRawFrame):
+                return not isinstance(frame, AssistantImageRawFrame)
+            if isinstance(frame, TTSStartedFrame):
+                return not frame.append_to_context
+            if isinstance(frame, TTSStoppedFrame):
+                return True
+            if isinstance(frame, (TextFrame, TTSSpeakFrame)):
+                return not frame.append_to_context
+            return False
+
+        def _audio_queue_blocks_synchronous_result_bypass(self) -> bool:
+            """Return True unless every frame in this sender's queue is context-free filler."""
+            if self._frame_in_hand is not None and not self._is_context_free_filler(
+                self._frame_in_hand
+            ):
+                return True
+            return any(
+                not self._is_context_free_filler(frame) for frame in self._audio_queue.iter_frames()
+            )
+
+        def _forget_synchronous_calls_on_take(self, frame: Frame) -> None:
+            """Drop delivered-call state once context-bound speech or a response is dequeued."""
+            if isinstance(frame, TTSStartedFrame) and frame.append_to_context:
+                self.forget_synchronous_calls()
+            elif isinstance(frame, LLMFullResponseStartFrame):
+                self.forget_synchronous_calls()
+
+        async def handle_function_call_result(self, frame: FunctionCallResultFrame):
+            """Pass a synchronous call's result on when ordering ahead of it cannot matter.
+
+            A synchronous call holds the conversation until its result is in, so
+            audio queued after its in-progress frame is not an answer the model
+            would give again. The result still queues behind that audio when any
+            queued frame or the frame the audio task is delivering is not
+            context-free filler. User speech forgets delivered call ids, so
+            results keep their place the same way. Only this sender's queue is
+            consulted; filler on another ``transport_destination`` does not
+            affect bypass here.
+
+            Args:
+                frame: The function call result.
+            """
+            if (
+                frame.tool_call_id in self._delivered_synchronous_calls
+                and not self._audio_queue_blocks_synchronous_result_bypass()
+            ):
+                self._delivered_synchronous_calls.discard(frame.tool_call_id)
+                await self._transport.push_frame(frame)
+            else:
+                await self._audio_queue.put(frame)
+
+        def forget_synchronous_calls(self):
+            """Queue results behind the audio until a new synchronous call batch."""
+            self._delivered_synchronous_calls.clear()
+
+        def on_user_started_speaking(self):
+            """Keep results ordered once the user may have run the model."""
+            self.forget_synchronous_calls()
+            self._user_spoke_during_function_calls = True
+
+        def on_function_calls_started(self):
+            """Start a new synchronous-call batch on this sender."""
+            self._user_spoke_during_function_calls = False
+
+        def discard_synchronous_call(self, tool_call_id: str) -> None:
+            """Stop bypassing for a cancelled synchronous call."""
+            self._delivered_synchronous_calls.discard(tool_call_id)
 
         async def handle_tts_stopped(self, frame: TTSStoppedFrame):
             """Queue a TTSStoppedFrame, flushing any trailing buffered audio first.
@@ -967,16 +1070,18 @@ class BaseOutputTransport(FrameProcessor):
             async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
                 while True:
                     try:
-                        frame = await asyncio.wait_for(
-                            self._audio_queue.get(), timeout=vad_stop_secs
-                        )
-                        await self._filter_audio(frame)
-                        self._apply_volume(frame)
-                        yield frame
-                        self._audio_queue.task_done()
+                        async with asyncio.timeout(vad_stop_secs):
+                            frame = await self._audio_queue.get()
                     except TimeoutError:
                         # Fallback: notify the bot stopped speaking upstream if necessary based on timeout.
                         await self._bot_stopped_speaking()
+                        continue
+                    self._frame_in_hand = frame
+                    self._forget_synchronous_calls_on_take(frame)
+                    await self._filter_audio(frame)
+                    self._apply_volume(frame)
+                    yield frame
+                    self._audio_queue.task_done()
 
             async def with_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
                 # Caller below only invokes this when `self._mixer` is set.
@@ -987,6 +1092,8 @@ class BaseOutputTransport(FrameProcessor):
                 while True:
                     try:
                         frame = self._audio_queue.get_nowait()
+                        self._frame_in_hand = frame
+                        self._forget_synchronous_calls_on_take(frame)
                         await self._filter_audio(frame)
                         self._apply_volume(frame)
                         if isinstance(frame, OutputAudioRawFrame):
@@ -1031,35 +1138,44 @@ class BaseOutputTransport(FrameProcessor):
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
             async for frame in self._next_frame():
-                # No need to push EndFrame, it's pushed from process_frame().
-                if isinstance(frame, EndFrame):
-                    # Send some final silence so words don't cut out.
-                    await self._send_silence(self._params.audio_out_end_silence_secs)
-                    break
-
-                # Skip frames with no audio data (e.g. filter is buffering).
-                if isinstance(frame, OutputAudioRawFrame) and not frame.audio:
-                    continue
-
-                # Handle frame.
-                await self._handle_frame(frame)
-
-                # If we are not able to write to the transport we shouldn't
-                # push downstream.
-                push_downstream = True
-
-                # Try to send audio to the transport.
                 try:
-                    if isinstance(frame, OutputAudioRawFrame):
-                        push_downstream = await self._internal_write_audio_frame(frame)
-                except Exception as e:
-                    logger.error(f"{self} Error writing {frame} to transport: {e}")
-                    push_downstream = False
+                    # No need to push EndFrame, it's pushed from process_frame().
+                    if isinstance(frame, EndFrame):
+                        # Send some final silence so words don't cut out.
+                        await self._send_silence(self._params.audio_out_end_silence_secs)
+                        break
 
-                # If we were able to send to the transport, push the frame
-                # downstream in case anyone else needs it.
-                if push_downstream:
-                    await self._transport.push_frame(frame)
+                    # Skip frames with no audio data (e.g. filter is buffering).
+                    if isinstance(frame, OutputAudioRawFrame) and not frame.audio:
+                        continue
+
+                    # Handle frame.
+                    await self._handle_frame(frame)
+
+                    # If we are not able to write to the transport we shouldn't
+                    # push downstream.
+                    push_downstream = True
+
+                    # Try to send audio to the transport.
+                    try:
+                        if isinstance(frame, OutputAudioRawFrame):
+                            push_downstream = await self._internal_write_audio_frame(frame)
+                    except Exception as e:
+                        logger.error(f"{self} Error writing {frame} to transport: {e}")
+                        push_downstream = False
+
+                    # If we were able to send to the transport, push the frame
+                    # downstream in case anyone else needs it.
+                    if push_downstream:
+                        await self._transport.push_frame(frame)
+                        if (
+                            isinstance(frame, FunctionCallInProgressFrame)
+                            and frame.cancel_on_interruption
+                            and not self._user_spoke_during_function_calls
+                        ):
+                            self._delivered_synchronous_calls.add(frame.tool_call_id)
+                finally:
+                    self._frame_in_hand = None
 
         async def _internal_write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
             """Write a frame to the transport, giving up if the write never returns.
