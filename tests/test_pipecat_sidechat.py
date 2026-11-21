@@ -451,6 +451,12 @@ async def test_without_the_model_only_a_turn_naming_the_bot_is_answered(monkeypa
     ]
 
 
+def test_the_bots_role_reaches_the_model():
+    role = "voice assistant in the meeting room's screen; it shows the agenda"
+    assert PipecatSidechat(agent_name="Atlas", role=role)._classifier._agent.role == role
+    assert PipecatSidechat(agent_name="Atlas")._classifier._agent.role == "AI assistant on the call"
+
+
 @pytest.mark.asyncio
 async def test_a_model_that_cant_load_leaves_only_the_bots_name(monkeypatch):
     def download(**kwargs):

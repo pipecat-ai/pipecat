@@ -22,7 +22,7 @@ from typing import Literal
 from loguru import logger
 
 from pipecat.classifiers.base_classifier import BaseClassifier, ClassifierError, YesNoQuestion
-from pipecat.classifiers.sidechat.classifier import PipecatSidechatClassifier
+from pipecat.classifiers.sidechat.classifier import DEFAULT_ROLE, PipecatSidechatClassifier
 from pipecat.classifiers.sidechat.conversation import (
     MAX_HISTORY,
     SidechatLine,
@@ -242,6 +242,7 @@ class PipecatSidechat(FrameProcessor):
         *,
         agent_name: str,
         aliases: Sequence[str] = (),
+        role: str | None = DEFAULT_ROLE,
         speaker_format: str | None = SIDECHAT_SPEAKER_FORMAT,
         variant: Literal["base", "small"] = "small",
         revision: str = SIDECHAT_REVISION,
@@ -258,6 +259,10 @@ class PipecatSidechat(FrameProcessor):
             agent_name: The bot's name, as people say it.
             aliases: Other ways speech recognition writes the bot's name, such
                 as ``"at last"`` for ``"Atlas"``.
+            role: One line on what the bot is and does, such as ``"voice
+                assistant in the meeting room's screen; it shows the agenda"``.
+                The model reads it with every line. By default the role of a
+                bot on a call.
             speaker_format: The STT service's ``speaker_format``, whose tags
                 say who said each part of a turn, or None when it has none.
             variant: The model's size. ``"small"`` reads a line in a few
@@ -282,6 +287,7 @@ class PipecatSidechat(FrameProcessor):
         self._classifier = PipecatSidechatClassifier(
             agent_name=agent_name,
             aliases=aliases,
+            role=role,
             variant=variant,
             revision=revision,
             model_dir=model_dir,
