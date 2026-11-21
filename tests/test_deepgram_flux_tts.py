@@ -567,6 +567,39 @@ async def test_flux_tts_late_audio_reopens_spoken_active_turn():
 
 
 @pytest.mark.asyncio
+async def test_flux_tts_interrupt_retires_a_timed_out_turn():
+    """An interrupted turn loses ownership even when playback has already timed out."""
+    service, _ = _connected_service()
+    await service._handle_llm_response_start(LLMFullResponseStartFrame())
+    context_id = service.get_active_audio_context_id()
+    assert [frame async for frame in service.run_tts("Hello", context_id)] == [None]
+    await service.on_audio_context_completed(context_id)
+
+    await service._interrupt_audio_contexts()
+
+    assert not service.get_audio_contexts()
+    assert context_id not in service._speaking_contexts
+
+
+@pytest.mark.asyncio
+async def test_flux_tts_voice_update_retires_previous_transport_speech():
+    """A new connection starts without ownership from the earlier stream."""
+    service, _ = _connected_service()
+    await service._handle_llm_response_start(LLMFullResponseStartFrame())
+    context_id = service.get_active_audio_context_id()
+    assert [frame async for frame in service.run_tts("Hello", context_id)] == [None]
+
+    with (
+        patch.object(service, "_connect", new=AsyncMock()),
+        patch.object(service, "_disconnect", new=AsyncMock()),
+    ):
+        await service._update_settings(DeepgramFluxTTSService.Settings(voice="flux-ava-en"))
+
+    await service._handle_audio(AUDIO_CHUNK_1)
+    assert not service.get_audio_contexts()
+
+
+@pytest.mark.asyncio
 async def test_flux_tts_speed_update_sends_configure():
     """A speed change is applied on the open connection, without reconnecting."""
     tts_service, websocket = _connected_service()

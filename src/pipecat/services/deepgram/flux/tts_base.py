@@ -284,6 +284,7 @@ class DeepgramFluxTTSBase(TTSService):
             self._sync_model_name_to_metrics()
 
         if changed.keys() - self._CONFIGURE_FIELDS:
+            self._speaking_contexts.clear()
             await self._disconnect()
             await self._connect()
         elif changed:
@@ -326,6 +327,13 @@ class DeepgramFluxTTSBase(TTSService):
                 logger.error(f"{self} error sending Interrupt message: {e}")
 
         await super().on_audio_context_interrupted(context_id)
+
+    async def _interrupt_audio_contexts(self):
+        context_id = self._turn_context_id
+        await super()._interrupt_audio_contexts()
+        # A timed-out context is already detached from the playback queue.
+        if context_id is not None and context_id != self._turn_context_id:
+            self._speaking_contexts.discard(context_id)
 
     async def on_audio_context_completed(self, context_id: str):
         """Retire speech ownership when playback and the LLM turn have both ended."""
