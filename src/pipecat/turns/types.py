@@ -42,7 +42,8 @@ class UserTurnSpeculation:
     until the turn is confirmed.
 
     Parameters:
-        text: The user turn text the inference was run against.
+        text: The text the service predicted, covering the speech since it last
+            committed a transcript.
         perception: How the user said it, as read at the eager end of turn,
             or None. Part of expressive conversation (alpha).
     """

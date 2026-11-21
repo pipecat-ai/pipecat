@@ -8,7 +8,7 @@ import asyncio
 import io
 import time
 import unittest
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 
 from loguru import logger
 
@@ -197,6 +197,20 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
 
+    async def test_parallel_forgets_frames_once_they_are_gone(self):
+        pipeline = ParallelPipeline([IdentityFilter()], [IdentityFilter()])
+
+        frames_to_send = [
+            InputAudioRawFrame(audio=b"\x00" * 320, sample_rate=16000, num_channels=1)
+            for _ in range(10)
+        ]
+        sent_ids = [frame.id for frame in frames_to_send]
+        kept = frames_to_send[-1]
+        await run_test(pipeline, frames_to_send=frames_to_send)
+        del frames_to_send
+
+        self.assertEqual([i for i in sent_ids if i in pipeline._seen_frames], [kept.id])
+
     async def test_parallel_internal_frames_buffered_during_start(self):
         """Frames pushed by internal processors during StartFrame processing
         should be buffered and only released after StartFrame synchronization
@@ -248,10 +262,9 @@ class FlushRecorder(FrameProcessor):
 
 
 class TestPipelineFlush(unittest.IsolatedAsyncioTestCase):
-    async def _flush(self, processor: FrameProcessor, flushes: int = 1) -> list[bool]:
-        worker = PipelineWorker(Pipeline([processor]))
+    async def _run(self, worker: PipelineWorker, action: Callable[[], Awaitable[None]]):
+        """Run the worker, call the action once its pipeline has started, then end it."""
         started = asyncio.Event()
-        results = []
 
         @worker.event_handler("on_pipeline_started")
         async def on_pipeline_started(worker, frame):
@@ -259,14 +272,23 @@ class TestPipelineFlush(unittest.IsolatedAsyncioTestCase):
 
         async def drive():
             await started.wait()
-            flushing = (worker.flush_pipeline(timeout=1.0) for _ in range(flushes))
-            results.extend(await asyncio.gather(*flushing))
+            await action()
             await worker.queue_frame(EndFrame())
 
         await asyncio.wait_for(
             asyncio.gather(worker.run(WorkerParams(task_manager=TaskManager())), drive()),
             timeout=10.0,
         )
+
+    async def _flush(self, processor: FrameProcessor, flushes: int = 1) -> list[bool]:
+        worker = PipelineWorker(Pipeline([processor]))
+        results = []
+
+        async def flush():
+            flushing = (worker.flush_pipeline(timeout=1.0) for _ in range(flushes))
+            results.extend(await asyncio.gather(*flushing))
+
+        await self._run(worker, flush)
         return results
 
     async def test_flush_through_parallel_pipeline(self):
@@ -290,6 +312,38 @@ class TestPipelineFlush(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(active.legs.values()), [FLUSH_LEGS])
         self.assertEqual(inactive.legs, {})
         self.assertEqual(outer.legs, {})
+
+    async def test_flush_with_probe_reports_it_flushed(self):
+        """A flush started with the caller's probe settles under its flush id."""
+        worker = PipelineWorker(Pipeline([IdentityFilter()]))
+        probe = PipelineFlushFrame()
+        flushed_ids = []
+        results = []
+
+        @worker.event_handler("on_pipeline_flushed")
+        async def on_pipeline_flushed(worker, frame):
+            flushed_ids.append(frame.flush_id)
+
+        async def flush():
+            results.append(await worker.flush_pipeline(probe=probe, timeout=1.0))
+
+        await self._run(worker, flush)
+
+        self.assertEqual(results, [True])
+        self.assertEqual(flushed_ids, [probe.flush_id])
+
+    async def test_flush_with_positional_timeout_warns(self):
+        """A positional timeout still flushes, with a deprecation warning."""
+        worker = PipelineWorker(Pipeline([IdentityFilter()]))
+        results = []
+
+        async def flush():
+            with self.assertWarns(DeprecationWarning):
+                results.append(await worker.flush_pipeline(1.0))
+
+        await self._run(worker, flush)
+
+        self.assertEqual(results, [True])
 
 
 class TestPipelineWorker(unittest.IsolatedAsyncioTestCase):

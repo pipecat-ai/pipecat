@@ -18,6 +18,8 @@ from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
+    BackgroundWorkFinishedFrame,
+    BackgroundWorkStartedFrame,
     FunctionCallCancelFrame,
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
@@ -38,7 +40,8 @@ from pipecat.services.llm_service import (
 )
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.turns.user_stop.llm_turn_completion.llm_extension import LLMTurnCompletionLLMExtension
+from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 from pipecat.utils.async_tool_cancellation import cancel_tool_name
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.errors import ErrorCategory
@@ -504,6 +507,80 @@ class TestLLMService(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(muted)
 
 
+class TestBackgroundWorkFrames(unittest.IsolatedAsyncioTestCase):
+    """An async call is work the conversation waits on; a synchronous one holds it."""
+
+    async def _frames_for(self, service: MockLLMService, function_name: str) -> list:
+        service._call_event_handler = AsyncMock()
+
+        async def run_inline(runner_items):
+            for runner_item in runner_items:
+                await service._run_function_call(runner_item)
+
+        service._run_parallel_function_calls = run_inline
+        service._sync_registered_tool_handlers(NOT_GIVEN)
+
+        frames = []
+
+        async def mock_broadcast_frame(frame_cls, **kwargs):
+            frames.append(frame_cls(**kwargs))
+
+        service.broadcast_frame = mock_broadcast_frame
+        await service.run_function_calls(
+            [
+                FunctionCallFromLLM(
+                    function_name=function_name,
+                    tool_call_id="call_1",
+                    arguments={},
+                    context=LLMContext(),
+                )
+            ]
+        )
+        return frames
+
+    async def test_an_async_call_is_bracketed_by_the_work_frames(self):
+        service = MockLLMService()
+
+        async def async_tool(params: FunctionCallParams):
+            await params.result_callback(
+                "working", properties=FunctionCallResultProperties(is_final=False)
+            )
+            await params.result_callback("done")
+
+        service.register_function("async_tool", async_tool, cancel_on_interruption=False)
+
+        frames = await self._frames_for(service, "async_tool")
+
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                BackgroundWorkStartedFrame,
+                FunctionCallResultFrame,
+                FunctionCallResultFrame,
+                BackgroundWorkFinishedFrame,
+            ],
+        )
+        self.assertEqual(frames[2].work_id, "call_1")
+        self.assertEqual(frames[-1].work_id, "call_1")
+
+    async def test_a_synchronous_call_broadcasts_no_work_frames(self):
+        service = MockLLMService()
+
+        async def sync_tool(params: FunctionCallParams):
+            await params.result_callback("done")
+
+        service.register_function("sync_tool", sync_tool)
+
+        frames = await self._frames_for(service, "sync_tool")
+
+        self.assertEqual(
+            [type(frame) for frame in frames],
+            [FunctionCallsStartedFrame, FunctionCallInProgressFrame, FunctionCallResultFrame],
+        )
+
+
 class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
     """A function call that runs past its deadline is cancelled, not abandoned."""
 
@@ -639,11 +716,12 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
         service.register_function("slow", slow, cancel_on_interruption=False)
         await self._run_call(service, "slow")
         await asyncio.sleep(self.TIMEOUT)
-        await service._cancel_function_calls_by_tool_call_id("call_1")
+        await service.cancel_function_call("call_1")
         await asyncio.sleep(self.SETTLE)
 
-        self.assertIsInstance(frames[-1], FunctionCallCancelFrame)
-        self.assertFalse(frames[-1].run_llm)
+        self.assertIsInstance(frames[-2], FunctionCallCancelFrame)
+        self.assertFalse(frames[-2].run_llm)
+        self.assertIsInstance(frames[-1], BackgroundWorkFinishedFrame)
 
     async def test_sequential_runner_survives_a_timeout(self):
         """A cancelled call must not take the sequential runner down with it."""
@@ -746,9 +824,15 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [type(frame) for frame in frames],
-            [FunctionCallsStartedFrame, FunctionCallInProgressFrame, FunctionCallResultFrame],
+            [
+                FunctionCallsStartedFrame,
+                FunctionCallInProgressFrame,
+                BackgroundWorkStartedFrame,
+                FunctionCallResultFrame,
+                BackgroundWorkFinishedFrame,
+            ],
         )
-        self.assertEqual(frames[-1].result, {"ok": True})
+        self.assertEqual(frames[-2].result, {"ok": True})
 
     async def test_timeout_settles_a_call_with_no_task_left_to_cancel(self):
         """The handler can finish while the deadline is being processed.
@@ -873,12 +957,14 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
             [
                 FunctionCallsStartedFrame,
                 FunctionCallInProgressFrame,
+                BackgroundWorkStartedFrame,
                 FunctionCallResultFrame,
                 FunctionCallCancelFrame,
+                BackgroundWorkFinishedFrame,
             ],
         )
-        self.assertFalse(frames[2].properties.is_final)
-        self.assertTrue(frames[-1].run_llm)
+        self.assertFalse(frames[3].properties.is_final)
+        self.assertTrue(frames[-2].run_llm)
 
     async def test_a_hanging_async_tool_times_out_without_any_update(self):
         """Control for the test above, differing only in the missing update."""
@@ -908,10 +994,12 @@ class TestFunctionCallTimeout(unittest.IsolatedAsyncioTestCase):
             [
                 FunctionCallsStartedFrame,
                 FunctionCallInProgressFrame,
+                BackgroundWorkStartedFrame,
                 FunctionCallCancelFrame,
+                BackgroundWorkFinishedFrame,
             ],
         )
-        self.assertTrue(frames[-1].run_llm)
+        self.assertTrue(frames[-2].run_llm)
 
 
 class TestFunctionCallError(unittest.IsolatedAsyncioTestCase):
@@ -1092,13 +1180,14 @@ class TestAppendSystemInstruction(unittest.IsolatedAsyncioTestCase):
         service.append_system_instruction("GUIDE")
 
         # Enabling turn completion composes after the appended guide, once.
-        await service._update_settings(LLMSettings(filter_incomplete_user_turns=True))
+        await service._update_settings(LLMSettings(extensions=[LLMTurnCompletionLLMExtension]))
         composed = service._settings.system_instruction
         self.assertTrue(composed.startswith("APP\n\nGUIDE\n\n"))
         self.assertEqual(composed.count("GUIDE"), 1)
 
         # Disabling restores base + guide (without the turn instructions).
-        await service._update_settings(LLMSettings(filter_incomplete_user_turns=False))
+        with self.assertWarns(DeprecationWarning):
+            await service._update_settings(LLMSettings(filter_incomplete_user_turns=False))
         self.assertEqual(service._settings.system_instruction, "APP\n\nGUIDE")
 
     async def test_runtime_system_instruction_update_preserves_appended(self):
@@ -1437,15 +1526,26 @@ class TestTurnCompletionSettingsDeprecation(unittest.IsolatedAsyncioTestCase):
             MockLLMService(filter_incomplete_user_turns=False, user_turn_completion_config=None)
 
     async def test_strategy_settings_update_is_silent(self):
-        """The strategy's own update is how the setting is meant to arrive."""
+        """The strategy's own update, which installs the extension, is how it is meant to arrive."""
         service = MockLLMService()
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
             await service.process_frame(
+                LLMUpdateSettingsFrame(
+                    delta=LLMSettings(extensions=[LLMTurnCompletionLLMExtension])
+                ),
+                FrameDirection.DOWNSTREAM,
+            )
+        self.assertIsInstance(service._extensions[0], LLMTurnCompletionLLMExtension)
+
+    async def test_the_flag_in_a_settings_update_warns_and_installs_the_extension(self):
+        service = MockLLMService()
+        with self.assertWarns(DeprecationWarning):
+            await service.process_frame(
                 LLMUpdateSettingsFrame(delta=LLMSettings(filter_incomplete_user_turns=True)),
                 FrameDirection.DOWNSTREAM,
             )
-        self.assertTrue(service._filter_incomplete_user_turns)
+        self.assertIsInstance(service._extensions[0], LLMTurnCompletionLLMExtension)
 
 
 class TestToolHandlerErrorClassification(unittest.IsolatedAsyncioTestCase):

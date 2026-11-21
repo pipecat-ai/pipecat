@@ -792,6 +792,15 @@ def test_the_llm_runs_at_its_providers_default_thinking():
     assert llm.settings.use_provider_thinking_default is True
 
 
+def test_pipeline_worker_arguments_reach_the_worker():
+    backend = BackendLLMWorker(
+        llm=_ScriptedLLM([]), conversation_id="conversation-1", idle_timeout_secs=30
+    )
+
+    assert backend._conversation_id == "conversation-1"
+    assert backend._idle_timeout_secs == 30
+
+
 def test_an_llm_that_declines_the_backend_role_is_refused():
     llm = _ScriptedLLM([])
     llm.llm_with_backend_role_objection = lambda role: f"cannot be the {role}"

@@ -42,10 +42,12 @@ class ExpressionGuidance(StrEnum):
             choosing.
     """
 
+    # The laugh has a sentence of its own: listed with the moods, it would read as
+    # one, and an LLM could answer a joke with an amused delivery alone.
     MATCH_STYLE = (
-        "Let your voice match the user's mood and energy: be excited for their good news, "
-        "sympathetic with their bad news, and laugh when they say something funny. If they "
-        "are hostile, stay calm instead of matching it. Most sentences need no tag."
+        "Let your voice match the user's mood and energy: be excited for their good news and "
+        "sympathetic with their bad news. When they say something funny, laugh. If they are "
+        "hostile, stay calm instead of matching it. Most sentences need no tag."
     )
 
     SLOW_FOR_DETAILS = (

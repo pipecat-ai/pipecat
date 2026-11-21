@@ -1,0 +1,1 @@
+- Lowered the `MOQParams.audio_out_max_buffer_ms` default from 25000 to 2000. The browser player plays whatever is in flight at 1x, so the cap bounds how long a cancelled utterance keeps playing after an interruption; raise it for more network-stall smoothing at the cost of barge-in overhang.

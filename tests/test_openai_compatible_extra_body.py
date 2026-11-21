@@ -88,6 +88,18 @@ def test_grok_settings_extra_reasoning_effort_wins():
     assert params["reasoning_effort"] == "high"
 
 
+def test_grok_guidelines_unset_by_default():
+    params = _build_params(GrokLLMService)
+    assert "extra_body" not in params
+
+
+def test_grok_guidelines_in_extra_body():
+    guidelines = [{"type": "policy", "category": "profanity", "behavior": "decline"}]
+    params = _build_params(GrokLLMService, GrokLLMService.Settings(guidelines=guidelines))
+    assert "guidelines" not in params
+    assert params["extra_body"] == {"guidelines": guidelines}
+
+
 def test_deepseek_disables_thinking_by_default():
     params = _build_params(DeepSeekLLMService)
     assert params["extra_body"] == {"thinking": {"type": "disabled"}}

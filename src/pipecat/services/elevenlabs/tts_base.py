@@ -33,6 +33,7 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.context.word_timestamp_tracker import WordTime
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 #: Languages the Flash and Turbo v2.5 models accept as a ``language_code``.
@@ -452,7 +453,8 @@ def calculate_word_times(
     partial_word_start_time: float = 0.0,
     *,
     audio_tags: bool = False,
-) -> tuple[list[tuple[str, float]], str, float]:
+    word_ends: bool = False,
+) -> tuple[list[WordTime], str, float]:
     """Calculate word timestamps from character alignment information.
 
     Args:
@@ -464,15 +466,21 @@ def calculate_word_times(
             is one word, spaces and all. Eleven v3 and v4 return the tags they
             perform in the alignment, and a tag reported whole matches the text
             it was sent in.
+        word_ends: Whether to report where each word ends, as the third item of
+            its tuple. A word ends where the space after it ends: that space
+            holds the pause before the next word, or the silence after the last
+            one.
 
     Returns:
         Tuple of (word_times, new_partial_word, new_partial_word_start_time):
-        - word_times: List of (word, timestamp) tuples for complete words
+        - word_times: List of (word, timestamp) tuples for complete words, or
+          (word, timestamp, end) tuples with ``word_ends``
         - new_partial_word: Incomplete word at end of chunk (empty if chunk ends with space)
         - new_partial_word_start_time: Start time of the incomplete word
     """
     chars = alignment_info["chars"]
     char_start_times_ms = alignment_info["charStartTimesMs"]
+    char_durations_ms = alignment_info.get("charDurationsMs") or []
 
     if len(chars) != len(char_start_times_ms):
         logger.error(
@@ -483,6 +491,7 @@ def calculate_word_times(
     # Build words and track their start positions
     words = []
     word_start_times = []
+    word_end_times = []
     current_word = partial_word  # Start with any partial word from previous chunk
     word_start_time = partial_word_start_time if partial_word else None
     in_tag = audio_tags and _ends_in_audio_tag(current_word)
@@ -495,6 +504,10 @@ def calculate_word_times(
             if current_word:  # Only add non-empty words
                 words.append(current_word)
                 word_start_times.append(word_start_time)
+                space_ms = char_durations_ms[i] if i < len(char_durations_ms) else 0
+                word_end_times.append(
+                    cumulative_time + ((char_start_times_ms[i] + space_ms) / 1000.0)
+                )
                 current_word = ""
                 word_start_time = None
         else:
@@ -505,7 +518,10 @@ def calculate_word_times(
             current_word += char
 
     # Build result for complete words
-    word_times = list(zip(words, word_start_times))
+    if word_ends:
+        word_times: list[WordTime] = list(zip(words, word_start_times, word_end_times))
+    else:
+        word_times = list(zip(words, word_start_times))
 
     # Return any incomplete word at the end of this chunk
     new_partial_word = current_word if current_word else ""
@@ -795,7 +811,7 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         alignment: Mapping[str, Any],
         *,
         audio_tags: bool = False,
-    ) -> list[tuple[str, float]]:
+    ) -> list[WordTime]:
         """Complete words from one alignment chunk, on its context's own clock.
 
         Args:
@@ -805,7 +821,7 @@ class ElevenLabsTTSBase(WebsocketTTSService):
                 :func:`calculate_word_times`.
 
         Returns:
-            The (word, start seconds) pairs the chunk completes.
+            The (word, start seconds, end seconds) triples the chunk completes.
         """
         clock = self._word_clocks.setdefault(context_id, _WordClock())
         word_times, clock.partial_word, clock.partial_word_start_time = calculate_word_times(
@@ -814,6 +830,7 @@ class ElevenLabsTTSBase(WebsocketTTSService):
             clock.partial_word,
             clock.partial_word_start_time,
             audio_tags=audio_tags,
+            word_ends=True,
         )
 
         # Alignment times restart at zero in every message, so the clock

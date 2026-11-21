@@ -14,7 +14,11 @@ labels and how sure it is of each, or a measure such as speech rate. It
 declares the signals it reports with :class:`PerceptionCapabilities`, and
 broadcasts them at start in a
 :class:`~pipecat.frames.frames.PerceptionMetadataFrame`, so the LLM can be told
-how to read them.
+how to read them. A turn read more than once is merged with
+:func:`merge_perception`, keeping the higher of each signal. A producer after
+another adds its reading to the one the transcription carries and declares
+both producers' signals together, so the latest declaration names every signal
+a transcription can carry.
 
 **Alpha.** These types are likely to change between releases.
 """
@@ -69,6 +73,30 @@ class PerceptionCapabilities:
 
     signals: list[PerceptionTerm] = field(default_factory=list)
 
+    def merge(self, other: "PerceptionCapabilities") -> "PerceptionCapabilities":
+        """Merge another producer's signals into these.
+
+        A signal both report keeps every label either can report and the first
+        description that isn't empty.
+
+        Args:
+            other: The other producer's signals.
+
+        Returns:
+            The signals of both, these first.
+        """
+
+        def merged_term(earlier: PerceptionTerm, term: PerceptionTerm) -> PerceptionTerm:
+            added = [label for label in term.labels if label not in earlier.labels]
+            labels = [*earlier.labels, *added]
+            return PerceptionTerm(term.name, earlier.description or term.description, labels)
+
+        terms = {term.name: term for term in self.signals}
+        for term in other.signals:
+            earlier = terms.get(term.name)
+            terms[term.name] = merged_term(earlier, term) if earlier else term
+        return PerceptionCapabilities(list(terms.values()))
+
 
 def format_perception(signals: list[PerceptionSignal]) -> str:
     """Format a reading as written at the head of the user's message to the LLM.
@@ -92,3 +120,38 @@ def format_perception(signals: list[PerceptionSignal]) -> str:
         return f"[{signal.name} {pairs}]"
 
     return f"({','.join(category(signal) for signal in signals)})"
+
+
+def merge_perception(
+    merged: list[PerceptionSignal] | None, reading: list[PerceptionSignal]
+) -> list[PerceptionSignal]:
+    """Merge a reading into the readings of the same turn so far, keeping the higher of each.
+
+    A signal read as a value keeps its highest value. A signal read as labels
+    keeps every label either reading has, each with its highest confidence,
+    likeliest first. A signal only one of them has is kept as it is, and the
+    signals stay in the order they were first read.
+
+    Args:
+        merged: The readings merged so far, or None before the first.
+        reading: The reading to merge in.
+
+    Returns:
+        The merged reading.
+    """
+
+    def merged_signal(earlier: PerceptionSignal, signal: PerceptionSignal) -> PerceptionSignal:
+        if earlier.labels or signal.labels:
+            confidences = dict(earlier.labels)
+            for label, confidence in signal.labels:
+                confidences[label] = max(confidence, confidences.get(label, confidence))
+            likeliest = sorted(confidences.items(), key=lambda pair: -pair[1])
+            return PerceptionSignal(signal.name, labels=likeliest)
+        values = [value for value in (earlier.value, signal.value) if value is not None]
+        return PerceptionSignal(signal.name, value=max(values) if values else None)
+
+    signals = {signal.name: signal for signal in merged or []}
+    for signal in reading:
+        earlier = signals.get(signal.name)
+        signals[signal.name] = merged_signal(earlier, signal) if earlier else signal
+    return list(signals.values())

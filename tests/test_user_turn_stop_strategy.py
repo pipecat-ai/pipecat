@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -578,6 +579,39 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertTrue(should_start)
 
+    async def test_finalized_frame_short_circuits_stt_wait(self):
+        """A finalization confirmed after its text cancels the stt_timeout too.
+
+        An STT's own endpointing can deliver the transcript before the VAD
+        stop asks it to finalize; the confirmation then arrives without text,
+        as a TranscriptionFinalizedFrame.
+        """
+        stt_timeout = AGGREGATION_TIMEOUT * 4
+        strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=AGGREGATION_TIMEOUT)
+        await strategy.setup(frame_processor_setup(self.task_manager))
+        await strategy.process_frame(
+            STTMetadataFrame(service_name="test", ttfs_p99_latency=stt_timeout)
+        )
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # S → T → E: the transcript is not finalized, so stt_timeout is armed.
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+
+        await strategy.process_frame(TranscriptionFinalizedFrame())
+        self.assertIsNone(should_start)
+
+        # The turn stops at user_speech_timeout rather than at stt_timeout.
+        await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        self.assertTrue(should_start)
+
     async def test_non_finalized_waits_full_stt_timeout(self):
         """Non-finalized transcript does not short-circuit stt_timeout.
 
@@ -974,6 +1008,53 @@ class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.15)
         self.assertIsNotNone(params)
         self.assertFalse(params.enable_user_speaking_frames)
+        await strategy.cleanup()
+
+    async def test_a_finalized_transcript_after_the_stop_signal_ends_the_turn_at_once(self):
+        """A finalized transcript is the last of the turn's text, so nothing is left to wait for."""
+        strategy = ExternalUserTurnStopStrategy(timeout=10.0)
+        decisions = await self._open_turn(strategy)
+
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+        self.assertEqual(decisions, [])
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now", finalized=True)
+        )
+        self.assertEqual(len(decisions), 1)
+        await strategy.cleanup()
+
+    async def test_a_finalized_frame_after_the_text_ends_the_turn_at_once(self):
+        """The text came first and its finalization after, with no text of its own."""
+        strategy = ExternalUserTurnStopStrategy(timeout=10.0)
+        decisions = await self._open_turn(strategy)
+
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="", timestamp="now"))
+        self.assertEqual(decisions, [])
+
+        await strategy.process_frame(TranscriptionFinalizedFrame())
+        self.assertEqual(len(decisions), 1)
+
+        # It brings no new text, so it is not worth a second decision.
+        await strategy.process_frame(TranscriptionFinalizedFrame())
+        self.assertEqual(len(decisions), 1)
+        await strategy.cleanup()
+
+    async def test_a_finalized_transcript_while_the_user_speaks_waits_for_the_stop_signal(self):
+        strategy = ExternalUserTurnStopStrategy(timeout=10.0)
+        decisions = await self._open_turn(strategy)
+
+        await strategy.process_frame(ProposedUserStartedSpeakingFrame())
+        await strategy.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now", finalized=True)
+        )
+        self.assertEqual(decisions, [])
+
+        await strategy.process_frame(ProposedUserStoppedSpeakingFrame())
+        self.assertEqual(len(decisions), 1)
         await strategy.cleanup()
 
     async def _open_turn(self, strategy) -> list:

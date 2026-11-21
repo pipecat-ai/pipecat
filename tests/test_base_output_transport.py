@@ -8,11 +8,13 @@
 
 import asyncio
 import hashlib
+import io
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import numpy as np
+from loguru import logger
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
@@ -31,6 +33,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     StartFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
     VolumeFrame,
@@ -647,12 +650,13 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             )
             await asyncio.sleep(0.2)
 
-            # Every input sample reaches the transport, give or take the
-            # silence the last partial chunk is padded with.
+            # Every input sample reaches the transport, followed by the few
+            # milliseconds the resampler's filter delays the audio by, and the
+            # silence the last partial chunk is padded with: at most one chunk.
             expected = in_samples * self.OUT_RATE // self.TTS_RATE
             written = len(self._written(transport)) // 2
             self.assertGreaterEqual(written, expected)
-            self.assertLess(written, expected + sender.audio_chunk_size // 2)
+            self.assertLessEqual(written, expected + sender.audio_chunk_size // 2)
         finally:
             await transport.cancel(CancelFrame())
 
@@ -671,8 +675,9 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.1)
             already_written = len(transport.write_audio_frame.call_args_list)
 
-            # The next turn is entirely negative, so anything positive in it is
-            # left over from the turn that was cut short.
+            # The next turn is entirely negative. The resampler's filter rings
+            # by up to about a tenth of a sudden step, while audio left over
+            # from the turn that was cut short would come back near +8000.
             for frame in self._constant_frames(-8000, 8000):
                 await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
             await transport.process_frame(
@@ -686,9 +691,78 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
             )
             samples = np.frombuffer(after, dtype=np.int16)
             self.assertGreater(len(samples), 0)
-            self.assertLessEqual(int(samples.max()), 0)
+            self.assertLess(int(samples.max()), 8000 // 4)
         finally:
             await transport.cancel(CancelFrame())
+
+    async def test_a_turn_without_audio_writes_nothing(self):
+        """A TTS turn that produced no audio writes nothing and starts no bot turn.
+
+        The end of every TTS turn flushes the resampler, which has to give back
+        nothing when no audio went in since the last flush.
+        """
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            for frame in self._tts_frames(sample_count=3200):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.8)
+            written = len(transport.write_audio_frame.call_args_list)
+            pushed = len(transport.push_frame.call_args_list)
+
+            await transport.process_frame(
+                TTSStartedFrame(context_id="ctx2"), FrameDirection.DOWNSTREAM
+            )
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx2"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.8)
+
+            self.assertEqual(len(transport.write_audio_frame.call_args_list), written)
+            bot_frames = [
+                call.args[0]
+                for call in transport.push_frame.call_args_list[pushed:]
+                if isinstance(call.args[0], (BotStartedSpeakingFrame, BotStoppedSpeakingFrame))
+            ]
+            self.assertEqual(bot_frames, [])
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_resampling_is_logged_once(self):
+        """The resample log line shows up once, never for a match."""
+        sink = io.StringIO()
+        handler_id = logger.add(sink, level="DEBUG", format="{message}")
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            frames = self._tts_frames(sample_count=3200)
+            matching = [
+                TTSAudioRawFrame(
+                    audio=frame.audio,
+                    sample_rate=self.OUT_RATE,
+                    num_channels=1,
+                    context_id="ctx1",
+                )
+                for frame in frames
+            ]
+            for frame in frames + matching + frames:
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+            output = sink.getvalue()
+            self.assertEqual(
+                output.count(
+                    f"resampling output audio from {self.TTS_RATE} Hz to {self.OUT_RATE} Hz"
+                ),
+                1,
+            )
+            self.assertNotIn(f"resampling output audio from {self.OUT_RATE} Hz", output)
+            self.assertIn(
+                f"output audio sample rate {self.OUT_RATE} Hz (from transport params)", output
+            )
+        finally:
+            await transport.cancel(CancelFrame())
+            logger.remove(handler_id)
 
 
 class TestBaseOutputTransportAudioFilter(unittest.IsolatedAsyncioTestCase):

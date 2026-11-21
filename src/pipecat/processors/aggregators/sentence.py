@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     TextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -61,6 +62,9 @@ class SentenceAggregator(FrameProcessor):
             if match_endofsentence(self._aggregation):
                 await self.push_frame(TextFrame(self._aggregation))
                 self._aggregation = ""
+        elif isinstance(frame, InterruptionFrame):
+            self._aggregation = ""
+            await self.push_frame(frame, direction)
         elif isinstance(frame, EndFrame):
             if self._aggregation:
                 await self.push_frame(TextFrame(self._aggregation))

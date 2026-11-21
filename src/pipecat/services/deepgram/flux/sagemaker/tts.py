@@ -115,6 +115,7 @@ class DeepgramFluxSageMakerTTSService(DeepgramFluxTTSBase):
             language=None,
             speed=None,
             expressivity=None,
+            normalize_volume=None,
         )
 
         if settings is not None:

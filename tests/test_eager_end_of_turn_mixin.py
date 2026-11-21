@@ -83,23 +83,36 @@ class TestEagerEndOfTurnIsOptIn(unittest.IsolatedAsyncioTestCase):
         assert not service.eager_end_of_turn_pending
         assert not service.eager_end_of_turn_enabled
 
-    def test_it_recommends_eager_strategies_only_when_enabled(self):
+    def test_it_builds_eager_strategies_only_when_enabled(self):
         assert isinstance(
-            Predictor().recommended_user_turn_strategies(enable_interruptions=True),
+            Predictor().eager_user_turn_strategies(enable_interruptions=True),
             EagerUserTurnStrategies,
         )
-
-        recommended = Predictor(enable_eager_end_of_turn=False).recommended_user_turn_strategies(
-            enable_interruptions=True
+        assert (
+            Predictor(enable_eager_end_of_turn=False).eager_user_turn_strategies(
+                enable_interruptions=True
+            )
+            is None
         )
-        assert isinstance(recommended, ExternalUserTurnStrategies)
-        assert not isinstance(recommended, EagerUserTurnStrategies)
 
-    def test_the_recommendation_carries_the_match_policy_and_interruptions(self):
+    def test_the_eager_strategies_carry_the_match_policy_and_interruptions(self):
         service = Predictor(eager_match_policy=ExactMatch())
 
-        recommended = service.recommended_user_turn_strategies(enable_interruptions=False)
+        strategies = service.eager_user_turn_strategies(enable_interruptions=False)
 
-        assert isinstance(recommended.stop[0], EagerUserTurnStopStrategy)
-        assert isinstance(recommended.stop[0].match_policy, ExactMatch)
-        assert recommended.enable_interruptions is False
+        assert strategies is not None
+        assert isinstance(strategies.stop[0], EagerUserTurnStopStrategy)
+        assert isinstance(strategies.stop[0].match_policy, ExactMatch)
+        assert strategies.enable_interruptions is False
+
+    def test_the_deprecated_recommendation_falls_back_to_external_strategies(self):
+        with self.assertWarns(DeprecationWarning):
+            recommended = Predictor().recommended_user_turn_strategies(enable_interruptions=True)
+        assert isinstance(recommended, EagerUserTurnStrategies)
+
+        with self.assertWarns(DeprecationWarning):
+            recommended = Predictor(
+                enable_eager_end_of_turn=False
+            ).recommended_user_turn_strategies(enable_interruptions=True)
+        assert isinstance(recommended, ExternalUserTurnStrategies)
+        assert not isinstance(recommended, EagerUserTurnStrategies)

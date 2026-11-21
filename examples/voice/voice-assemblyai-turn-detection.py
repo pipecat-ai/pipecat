@@ -87,7 +87,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     4. Speaker Diarization (Optional)
        - Enable with `speaker_labels=True`
        - Automatically identifies different speakers in multi-party conversations
-       - TranscriptionFrame includes speaker_id field (e.g., "Speaker A", "Speaker B")
+       - TranscriptionFrame includes the speaker in `speaker` (label "A", "B", ...)
 
     5. Language Detection (Optional, multilingual model only)
        - Enable with `language_detection=True`

@@ -35,11 +35,18 @@ class GrokLLMSettings(BaseOpenAILLMService.Settings):
             accepts varies (``grok-4.6`` rejects "none", ``xhigh`` needs
             ``grok-4.6`` or later, and the non-reasoning models reject the
             parameter altogether). When unset, xAI's per-model default applies.
+        guidelines: Per-category content guidelines, e.g.
+            ``[{"type": "policy", "category": "profanity", "behavior": "decline"}]``.
+            xAI documents the categories "nsfw", "violence" and "profanity" and
+            the behavior "decline"; a category left out keeps the model's
+            default handling. Multi-agent models reject guidelines. When unset,
+            xAI's default moderation applies.
     """
 
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+    guidelines: list[dict[str, Any]] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GrokLLMService(OpenAILLMService):
@@ -81,6 +88,7 @@ class GrokLLMService(OpenAILLMService):
         default_settings = self.Settings(
             model="grok-4.20-non-reasoning",
             reasoning_effort=None,
+            guidelines=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -115,7 +123,8 @@ class GrokLLMService(OpenAILLMService):
     ) -> dict[str, Any]:
         """Build parameters for Grok chat completion request.
 
-        Extends the base OpenAI parameters with Grok's reasoning effort control.
+        Extends the base OpenAI parameters with Grok's reasoning effort control
+        and content guidelines.
 
         Args:
             params_from_context: Parameters, derived from the LLM context, to
@@ -130,6 +139,8 @@ class GrokLLMService(OpenAILLMService):
         reasoning_effort = self._settings.reasoning_effort
         if is_given(reasoning_effort) and reasoning_effort is not None:
             params.setdefault("reasoning_effort", reasoning_effort)
+
+        self._merge_extra_body(params, {"guidelines": self._settings.guidelines})
 
         return params
 

@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.services.google.utils import gemini_api_http_options
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -1218,13 +1219,14 @@ class GeminiTTSService(GoogleBaseTTSService):
     with support for natural voice control, prompts for style instructions,
     expressive markup tags, and multi-speaker conversations.
 
-    Model names differ by backend. Cloud Text-to-Speech takes
-    ``gemini-3.1-flash-tts-preview``, ``gemini-2.5-flash-tts``,
-    ``gemini-2.5-flash-lite-preview-tts`` and ``gemini-2.5-pro-tts``; the Gemini API
-    takes ``gemini-3.8-flash-tts``, ``gemini-3.8-flash-lite-tts`` and
-    ``gemini-3.1-flash-tts-preview``. Defaults to ``gemini-3.1-flash-tts-preview``,
-    which both backends accept; the Gemini API shuts that preview model down on
-    November 17, 2026 and names ``gemini-3.8-flash-lite-tts`` as its replacement.
+    Model names differ by backend, and so does the default. Cloud Text-to-Speech
+    takes ``gemini-3.1-flash-tts-preview``, ``gemini-2.5-flash-tts``,
+    ``gemini-2.5-flash-lite-preview-tts`` and ``gemini-2.5-pro-tts``, and defaults
+    to ``gemini-3.1-flash-tts-preview``; the Gemini API takes
+    ``gemini-3.8-flash-tts``, ``gemini-3.8-flash-lite-tts`` and
+    ``gemini-3.1-flash-tts-preview``, and defaults to
+    ``gemini-3.8-flash-lite-tts``, the replacement Google names for the preview
+    model it shuts down there on November 17, 2026.
 
     Gemini 3.8 TTS models (Gemini API backend, google-genai >= 2.25.0) treat the
     input text strictly as a verbatim transcript: the ``prompt`` setting is sent
@@ -1378,15 +1380,22 @@ class GeminiTTSService(GoogleBaseTTSService):
         self._api_key = (api_key or os.environ.get("GOOGLE_API_KEY")) if self._use_genai else None
         self._http_options = http_options
 
-        if sample_rate and sample_rate != self.GOOGLE_SAMPLE_RATE:
+        # The Gemini API backend resamples its 24 kHz stream to any rate.
+        if not self._use_genai and sample_rate and sample_rate != self.GOOGLE_SAMPLE_RATE:
             logger.warning(
                 f"Google TTS only supports {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
 
-        # 1. Initialize default_settings with hardcoded defaults
+        # 1. Initialize default_settings with hardcoded defaults. The backends'
+        # TTS catalogues are disjoint at the top: Cloud Text-to-Speech serves no
+        # Gemini 3.8 model, and the Gemini API retires
+        # gemini-3.1-flash-tts-preview on November 17, 2026 in favour of
+        # gemini-3.8-flash-lite-tts.
         default_settings = self.Settings(
-            model="gemini-3.1-flash-tts-preview",
+            model=(
+                "gemini-3.8-flash-lite-tts" if self._use_genai else "gemini-3.1-flash-tts-preview"
+            ),
             voice="Kore",
             language="en-US",
             prompt=None,
@@ -1462,7 +1471,9 @@ class GeminiTTSService(GoogleBaseTTSService):
         self, credentials: str | None, credentials_path: str | None
     ) -> "texttospeech_v1.TextToSpeechAsyncClient | genai.Client":
         if self._use_genai:
-            return genai.Client(api_key=self._api_key, http_options=self._http_options)
+            return genai.Client(
+                api_key=self._api_key, http_options=gemini_api_http_options(self._http_options)
+            )
         else:
             return super()._create_client(credentials, credentials_path)
 
@@ -1500,7 +1511,8 @@ class GeminiTTSService(GoogleBaseTTSService):
         """Whether the model follows the Gemini 3.8 TTS request contract.
 
         Gemini 3.8 TTS models treat input text as a verbatim transcript, take
-        style instructions via ``speech_metadata``, and return WAV by default.
+        style instructions via ``speech_metadata``, and return WAV by default
+        on unary requests (streaming returns raw L16 PCM).
         Covers the official ``gemini-3.8-*-tts`` names and the ``sonic-*``
         preview codenames.
         """
@@ -1548,7 +1560,8 @@ class GeminiTTSService(GoogleBaseTTSService):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        if self.sample_rate != self.GOOGLE_SAMPLE_RATE:
+        # The Gemini API backend resamples its 24 kHz stream to any rate.
+        if not self._use_genai and self.sample_rate != self.GOOGLE_SAMPLE_RATE:
             logger.warning(
                 f"Google TTS requires {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {self.sample_rate}Hz may cause issues."
@@ -1708,10 +1721,7 @@ class GeminiTTSService(GoogleBaseTTSService):
             contents: Any = text
             if is_gemini_38:
                 # Gemini 3.8 TTS treats the input strictly as a verbatim
-                # transcript: sustained style goes in speech_metadata. The
-                # response defaults to WAV (google-genai 2.25.0 offers no way to
-                # request raw PCM via GenerateContentConfig), so the audio
-                # streaming below strips a RIFF header when one arrives.
+                # transcript: sustained style goes in speech_metadata.
                 part_kwargs: dict[str, Any] = {"text": text}
                 # In expressive conversation, the request's delivery adds to the
                 # prompt's style.
@@ -1767,8 +1777,13 @@ class GeminiTTSService(GoogleBaseTTSService):
                 if buffer:
                     yield bytes(buffer)
 
+            # Streamed audio is headerless 24 kHz L16 (WAV is only the unary
+            # default), so the source rate is given rather than read from a header.
             async for frame in self._stream_audio_frames_from_iterator(
-                audio_chunks(), strip_wav_header=is_gemini_38, context_id=context_id
+                audio_chunks(),
+                strip_wav_header=is_gemini_38,
+                in_sample_rate=self.GOOGLE_SAMPLE_RATE,
+                context_id=context_id,
             ):
                 yield frame
 

@@ -91,7 +91,10 @@ from pipecat.adapters.llm.services.bedrock_adapter import (
     _sanitize_bedrock_document_name,
 )
 from pipecat.adapters.llm.services.deepseek_adapter import DeepSeekLLMAdapter
-from pipecat.adapters.llm.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.llm.services.gemini_adapter import (
+    GeminiLLMAdapter,
+    gemini_text_bookmark_matches,
+)
 from pipecat.adapters.llm.services.gemini_live_adapter import GeminiLiveLLMAdapter
 from pipecat.adapters.llm.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
 from pipecat.adapters.llm.services.inworld_realtime_adapter import InworldRealtimeLLMAdapter
@@ -1178,6 +1181,20 @@ class TestGeminiGetLLMInvocationParams(unittest.IsolatedAsyncioTestCase):
         self.adapter._add_placeholder_thought_signatures(messages)
 
         self.assertTrue(all(p.thought_signature is None for m in messages for p in m.parts))
+
+    def test_text_bookmark_matching(self):
+        """A text bookmark names a reply it equals or shares a prefix with, whitespace aside."""
+        cases = [
+            ("Hello there.", "Hello there.", True),
+            ("Hello there.", "Hello", True),  # interrupted reply
+            ("Hello", "Hello there.", True),  # signature with the first chunk
+            ("Hello  there.\n", " Hello there.", True),
+            ("Hello there.", "Goodbye.", False),
+            ("Hello there.", "  ", False),
+        ]
+        for bookmark_text, text, expected in cases:
+            with self.subTest(bookmark_text=bookmark_text, text=text):
+                self.assertEqual(gemini_text_bookmark_matches(bookmark_text, text), expected)
 
     async def test_ensure_last_message_is_user_appends_when_trailing_model(self):
         """ensure_last_message_is_user=True appends a user message after a trailing model turn."""

@@ -22,6 +22,8 @@ from functools import cache
 from sentencex import segment  # pyright: ignore[reportAttributeAccessIssue]
 
 _QUOTED_WORD_END = re.compile(r"(?<!\w)([\"'“‘«‹„‟「『]+)[\w.]+\.$")
+# A numbered-list marker such as "1." at the start of a line.
+_LIST_MARKER = re.compile(r"(?m)^[ \t]*\d+\.(?=[ \t])")
 
 
 def resolve_sentence_tokenizer_language(language: str | None) -> str:
@@ -159,14 +161,19 @@ def match_endofsentence(text: str, *, language: str | None = None) -> int:
     if not text:
         return 0
 
-    sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(text)
+    # Sentencex splits after a list marker ("1. The" -> "1.", "The"). Blank the
+    # marker with equal-width spaces so it stays with its item; boundary offsets
+    # still refer to the original text. The digits are blanked too because some
+    # languages' rules (German, Finnish, Czech, ...) never start a sentence at a
+    # digit, which would merge each item into the one before it.
+    tokenizer_text = _LIST_MARKER.sub(lambda m: " " * len(m[0]), text)
+    sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(tokenizer_text)
 
     if not sentences:
         return 0
 
     first_sentence = sentences[0]
 
-    tokenizer_text = text
     # With an unfinished quote such as 'She said, "Dr. S', sentencex can split
     # after '"Dr.'. Recheck a proposed split after a quoted word ending in a
     # period, letting sentencex decide whether that word is an abbreviation.
@@ -175,7 +182,7 @@ def match_endofsentence(text: str, *, language: str | None = None) -> int:
         # equal-width spaces so sentencex sees the abbreviation without the quote.
         # Boundary offsets still refer to the original text, which keeps its quotes.
         start, end = quote.span(1)
-        tokenizer_text = text[:start] + " " * (end - start) + text[end:]
+        tokenizer_text = tokenizer_text[:start] + " " * (end - start) + tokenizer_text[end:]
         sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(tokenizer_text)
         first_sentence = sentences[0]
 

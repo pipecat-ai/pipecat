@@ -32,7 +32,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
@@ -85,35 +85,9 @@ jobs:
             exit 1
           fi
 
-          # Validate fragment types
-          VALID_TYPES="added changed deprecated removed fixed performance security other"
-          INVALID_FRAGMENTS=""
-
-          for file in changelog/*.md; do
-            # Skip template
-            if [[ "$file" == "changelog/_template.md.j2" ]]; then
-              continue
-            fi
-            
-            # Extract type from filename (e.g., 1234.added.md -> added)
-            filename=$(basename "$file")
-            # Handle both 1234.added.md and 1234.added.2.md patterns
-            type=$(echo "$filename" | sed -E 's/^[0-9]+\.([a-z]+)(\.[0-9]+)?\.md$/\1/')
-            
-            # Check if type is valid
-            if ! echo "$VALID_TYPES" | grep -wq "$type"; then
-              INVALID_FRAGMENTS="$INVALID_FRAGMENTS\n  - $filename (type: '$type')"
-            fi
-          done
-
-          if [ -n "$INVALID_FRAGMENTS" ]; then
-            echo "❌ Error: Invalid changelog fragment types found:"
-            echo -e "$INVALID_FRAGMENTS"
-            echo ""
-            echo "Valid types are: $VALID_TYPES"
-            echo "Example: 1234.added.md, 5678.fixed.md"
-            exit 1
-          fi
+          # Also runs on every PR in format.yaml, so a misnamed fragment should
+          # never get this far.
+          uv run python scripts/check-changelog-fragments.py
 
           echo "✓ Found $FRAGMENT_COUNT changelog fragment(s)"
           echo "has_fragments=true" >> $GITHUB_OUTPUT
@@ -132,12 +106,23 @@ jobs:
       # deprecations.json against the working tree and appends to removals.json,
       # which rides along in this same release PR. Needs the fetch-depth: 0
       # checkout above (tags + history). No-op on releases that remove nothing.
+      # --draft-removals also drafts removals.json records (deprecated_in null) for
+      # modules that were moved or removed without a deprecation, in the same run;
+      # review and fix those drafts by hand in this release PR.
       - name: Update removals registry
         run: |
-          uv run python scripts/deprecations/generate_removals.py --version "${{ inputs.version }}"
+          uv run python scripts/deprecations/generate_removals.py --version "${{ inputs.version }}" --draft-removals
+
+      # Record the RTVI protocol version this release ships. Adds it to
+      # rtvi/spec/released.json, which rides along in this same release PR, so
+      # tests/test_rtvi_spec.py keeps its wire format from changing. No-op when
+      # an earlier release already shipped the version.
+      - name: Record released RTVI protocol version
+        run: |
+          uv run python scripts/rtvi/record_released_spec.py --version "${{ inputs.version }}"
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "Update changelog for version ${{ inputs.version }}"
@@ -156,10 +141,12 @@ jobs:
             - ✅ Adds new release section to CHANGELOG.md
             - ✅ Removes processed changelog fragments
             - ✅ Updates removals.json with any symbols removed in this release
+            - ✅ Drafts removals.json records (`deprecated_in: null`) for modules moved or removed without a deprecation
+            - ✅ Records the RTVI protocol version this release ships in rtvi/spec/released.json
             - ✅ Ready to merge for release
 
             ### Next Steps
-            1. Review the changelog entries below
+            1. Review the changelog entries below, and any records in `scripts/deprecations/removals.json` with `deprecated_in: null` (drafted, need review)
             2. Make any necessary edits to CHANGELOG.md if needed
             3. Merge this PR
             4. Continue with your release process

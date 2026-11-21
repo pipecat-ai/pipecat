@@ -1220,7 +1220,7 @@ class FrameProcessor(BaseObject):
         try:
             timestamp = self.get_clock().get_time() if self._setup else 0
             if direction == FrameDirection.DOWNSTREAM and self._next:
-                logger.trace(f"Pushing {frame} downstream from {self} to {self._next}")
+                logger.trace("Pushing {} downstream from {} to {}", frame, self, self._next)
 
                 if observer:
                     data = FramePushed(
@@ -1233,7 +1233,7 @@ class FrameProcessor(BaseObject):
                     await observer.on_push_frame(data)
                 await self._next.queue_frame(frame, direction)
             elif direction == FrameDirection.UPSTREAM and self._prev:
-                logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
+                logger.trace("Pushing {} upstream from {} to {}", frame, self, self._prev)
                 if observer:
                     data = FramePushed(
                         source=self,

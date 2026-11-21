@@ -1280,7 +1280,11 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
             )
             return
         # Same encoding the assistant aggregator records in the context.
-        output = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        output = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
         await self._send_function_call_output(frame.tool_call_id, output)
 
     async def _handle_function_call_cancel(self, frame: FunctionCallCancelFrame):

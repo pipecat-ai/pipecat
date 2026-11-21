@@ -37,6 +37,7 @@ sys.modules["pipecat_ai_krisp.audio.krisp_processor"] = MagicMock()
 # test session and corrupt importlib.metadata.version for other tests
 # (e.g. transformers' import-time dependency checks).
 with patch("importlib.metadata.version", return_value="0.0.0-dev"):
+    from pipecat.audio import krisp_instance
     from pipecat.frames.frames import (
         BotStartedSpeakingFrame,
         BotStoppedSpeakingFrame,
@@ -45,9 +46,15 @@ with patch("importlib.metadata.version", return_value="0.0.0-dev"):
         VADUserStartedSpeakingFrame,
         VADUserStoppedSpeakingFrame,
     )
+    from pipecat.turns.user_start import BaseUserTurnStartStrategy
     from pipecat.turns.user_start.krisp_viva_ip_user_turn_start_strategy import (
         KrispVivaIPUserTurnStartStrategy,
     )
+    from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
+    from pipecat.turns.user_turn_controller import UserTurnController
+    from pipecat.turns.user_turn_strategies import UserTurnStrategies
+    from pipecat.utils.asyncio.task_manager import TaskManager
+    from tests.frame_processor_helpers import frame_processor_setup
 
 STRATEGY_MODULE = "pipecat.turns.user_start.krisp_viva_ip_user_turn_start_strategy"
 
@@ -83,6 +90,12 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.krisp_patch = patch(f"{STRATEGY_MODULE}.krisp_audio", self.mock_krisp_audio)
         self.krisp_patch.start()
 
+        self.ip_accepts_bot_speaking_patcher = patch(
+            f"{STRATEGY_MODULE}.krisp_sdk_ip_accepts_bot_speaking"
+        )
+        self.mock_ip_accepts_bot_speaking = self.ip_accepts_bot_speaking_patcher.start()
+        self.mock_ip_accepts_bot_speaking.return_value = True
+
         self.sdk_patcher = patch(f"{STRATEGY_MODULE}.KrispVivaSDKManager")
         self.mock_sdk_manager = self.sdk_patcher.start()
         self.mock_sdk_manager.acquire = MagicMock()
@@ -90,6 +103,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self):
         self.krisp_patch.stop()
+        self.ip_accepts_bot_speaking_patcher.stop()
         self.sdk_patcher.stop()
         if os.path.exists(self.model_path):
             os.unlink(self.model_path)
@@ -126,6 +140,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
                 nonlocal fired
                 fired = True
 
+            await strategy.process_frame(BotStartedSpeakingFrame())
             await strategy.process_frame(VADUserStartedSpeakingFrame())
             await strategy.process_frame(self._audio_frame())
 
@@ -146,6 +161,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
                 nonlocal fired
                 fired = True
 
+            await strategy.process_frame(BotStartedSpeakingFrame())
             await strategy.process_frame(VADUserStartedSpeakingFrame())
             await strategy.process_frame(self._audio_frame())
 
@@ -158,6 +174,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         strategy = self._make_strategy(threshold=0.5)
         try:
+            await strategy.process_frame(BotStartedSpeakingFrame())
             await strategy.process_frame(VADUserStartedSpeakingFrame())
             await strategy.process_frame(self._audio_frame())
             self.mock_ip_session.process.reset_mock()
@@ -177,11 +194,14 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         strategy = self._make_strategy(threshold=0.5)
         try:
+            await strategy.process_frame(BotStartedSpeakingFrame())
             await strategy.process_frame(VADUserStartedSpeakingFrame())
             await strategy.process_frame(self._audio_frame())
             self.mock_ip_session.process.reset_mock()
 
             await strategy.process_frame(BotStoppedSpeakingFrame())
+            # The user turn controller resets the strategy once the turn starts.
+            await strategy.handle_user_turn_started()
             await strategy.process_frame(self._audio_frame())
 
             # process() is still called (continuous state), but with speech_active=False
@@ -205,6 +225,223 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         finally:
             await strategy.cleanup()
 
+    async def test_bot_speaking_flag_is_forwarded_to_model(self):
+        self.mock_ip_session.process = MagicMock(return_value=0.1)
+
+        strategy = self._make_strategy()
+        try:
+            await strategy.process_frame(self._audio_frame())
+            self.assertFalse(self.mock_ip_session.process.call_args[0][2])
+
+            await strategy.process_frame(BotStartedSpeakingFrame())
+            await strategy.process_frame(self._audio_frame())
+            self.assertTrue(self.mock_ip_session.process.call_args[0][2])
+
+            await strategy.process_frame(BotStoppedSpeakingFrame())
+            await strategy.process_frame(self._audio_frame())
+            self.assertFalse(self.mock_ip_session.process.call_args[0][2])
+        finally:
+            await strategy.cleanup()
+
+    async def test_vad_start_while_bot_silent_triggers_turn_immediately(self):
+        strategy = self._make_strategy()
+        try:
+            fired = False
+
+            @strategy.event_handler("on_user_turn_started")
+            async def on_user_turn_started(strategy, params):
+                nonlocal fired
+                fired = True
+
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
+
+            self.assertTrue(fired)
+            self.mock_ip_session.process.assert_not_called()
+        finally:
+            await strategy.cleanup()
+
+    async def test_silent_bot_turn_does_not_trigger_twice(self):
+        self.mock_ip_session.process = MagicMock(return_value=0.99)
+
+        strategy = self._make_strategy()
+        try:
+            count = 0
+
+            @strategy.event_handler("on_user_turn_started")
+            async def on_user_turn_started(strategy, params):
+                nonlocal count
+                count += 1
+
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
+            await strategy.process_frame(self._audio_frame())
+
+            self.assertEqual(count, 1)
+        finally:
+            await strategy.cleanup()
+
+    async def test_old_ip_api_calls_process_without_bot_speaking(self):
+        self.mock_ip_accepts_bot_speaking.return_value = False
+        self.mock_ip_session.process = MagicMock(return_value=0.0)
+
+        strategy = self._make_strategy()
+        try:
+            await strategy.process_frame(BotStartedSpeakingFrame())
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
+            await strategy.process_frame(self._audio_frame())
+
+            args = self.mock_ip_session.process.call_args.args
+            self.assertEqual(len(args), 2)
+            self.assertTrue(args[1])
+        finally:
+            await strategy.cleanup()
+
+    async def test_old_ip_api_silent_bot_still_classifies_with_model(self):
+        self.mock_ip_accepts_bot_speaking.return_value = False
+        self.mock_ip_session.process = MagicMock(return_value=0.1)
+
+        strategy = self._make_strategy(threshold=0.5)
+        try:
+            fired = False
+
+            @strategy.event_handler("on_user_turn_started")
+            async def on_user_turn_started(strategy, params):
+                nonlocal fired
+                fired = True
+
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
+            self.assertFalse(fired)
+            await strategy.process_frame(self._audio_frame())
+            self.assertFalse(fired)
+
+            self.mock_ip_session.process = MagicMock(return_value=0.9)
+            await strategy.process_frame(self._audio_frame())
+            self.assertTrue(fired)
+        finally:
+            await strategy.cleanup()
+
+    async def test_old_ip_api_bot_stop_only_resets(self):
+        self.mock_ip_accepts_bot_speaking.return_value = False
+        self.mock_ip_session.process = MagicMock(return_value=0.1)
+
+        strategy = self._make_strategy()
+        try:
+            fired = False
+
+            @strategy.event_handler("on_user_turn_started")
+            async def on_user_turn_started(strategy, params):
+                nonlocal fired
+                fired = True
+
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
+            await strategy.process_frame(BotStoppedSpeakingFrame())
+            self.assertFalse(fired)
+        finally:
+            await strategy.cleanup()
+
+    async def test_new_ip_api_version_gate(self):
+        for version, expected in [((1, 13, 3), False), ((1, 14, 0), True), ((2, 0, 0), True)]:
+            with self.subTest(version=version):
+                sdk_version = MagicMock(major=version[0], minor=version[1], patch=version[2])
+                with patch.object(
+                    krisp_instance.krisp_audio, "getVersion", return_value=sdk_version
+                ):
+                    self.assertEqual(krisp_instance.krisp_sdk_ip_accepts_bot_speaking(), expected)
+
+    async def test_bot_stops_while_user_still_speaking_triggers_turn(self):
+        self.mock_ip_session.process = MagicMock(return_value=0.1)
+
+        strategy = self._make_strategy()
+        try:
+            count = 0
+
+            @strategy.event_handler("on_user_turn_started")
+            async def on_user_turn_started(strategy, params):
+                nonlocal count
+                count += 1
+
+            await strategy.process_frame(BotStartedSpeakingFrame())
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
+            await strategy.process_frame(self._audio_frame())
+            self.assertEqual(count, 0)
+
+            await strategy.process_frame(BotStoppedSpeakingFrame())
+
+            self.assertEqual(count, 1)
+        finally:
+            await strategy.cleanup()
+
+    async def test_bot_stopped_reaches_strategies_after_it(self):
+        self.mock_ip_session.process = MagicMock(return_value=0.1)
+        seen = []
+
+        class RecordingStrategy(BaseUserTurnStartStrategy):
+            async def process_frame(self, frame):
+                seen.append(frame)
+
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[self._make_strategy(), RecordingStrategy()],
+                stop=[ExternalUserTurnStopStrategy()],
+            )
+        )
+        await controller.setup(frame_processor_setup(TaskManager()))
+        await controller.start()
+        try:
+            turns = 0
+
+            @controller.event_handler("on_user_turn_started")
+            async def on_user_turn_started(controller, strategy, params):
+                nonlocal turns
+                turns += 1
+
+            await controller.process_frame(BotStartedSpeakingFrame())
+            await controller.process_frame(VADUserStartedSpeakingFrame())
+            await controller.process_frame(self._audio_frame())
+            bot_stopped = BotStoppedSpeakingFrame()
+            await controller.process_frame(bot_stopped)
+
+            self.assertEqual(turns, 1)
+            self.assertIn(bot_stopped, seen)
+        finally:
+            await controller.cleanup()
+
+    async def test_bot_stops_after_interruption_does_not_trigger_twice(self):
+        self.mock_ip_session.process = MagicMock(return_value=0.9)
+
+        strategy = self._make_strategy()
+        try:
+            count = 0
+
+            @strategy.event_handler("on_user_turn_started")
+            async def on_user_turn_started(strategy, params):
+                nonlocal count
+                count += 1
+
+            await strategy.process_frame(BotStartedSpeakingFrame())
+            await strategy.process_frame(VADUserStartedSpeakingFrame())
+            await strategy.process_frame(self._audio_frame())
+            await strategy.process_frame(BotStoppedSpeakingFrame())
+
+            self.assertEqual(count, 1)
+        finally:
+            await strategy.cleanup()
+
+    async def test_bot_stops_without_user_speech_does_not_trigger(self):
+        strategy = self._make_strategy()
+        try:
+            fired = False
+
+            @strategy.event_handler("on_user_turn_started")
+            async def on_user_turn_started(strategy, params):
+                nonlocal fired
+                fired = True
+
+            await strategy.process_frame(BotStartedSpeakingFrame())
+            await strategy.process_frame(BotStoppedSpeakingFrame())
+            self.assertFalse(fired)
+        finally:
+            await strategy.cleanup()
+
     async def test_decision_sticks_no_double_trigger(self):
         self.mock_ip_session.process = MagicMock(return_value=0.9)
 
@@ -217,6 +454,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
                 nonlocal count
                 count += 1
 
+            await strategy.process_frame(BotStartedSpeakingFrame())
             await strategy.process_frame(VADUserStartedSpeakingFrame())
             await strategy.process_frame(self._audio_frame())
             await strategy.process_frame(self._audio_frame())
@@ -230,6 +468,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         strategy = self._make_strategy(threshold=0.5)
         try:
+            await strategy.process_frame(BotStartedSpeakingFrame())
             await strategy.process_frame(VADUserStartedSpeakingFrame())
             # Feed a partial frame (smaller than samples_per_frame) so it stays in buffer
             await strategy.process_frame(self._audio_frame(num_samples=10))
@@ -253,6 +492,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
 
         strategy = self._make_strategy(threshold=0.5)
         try:
+            await strategy.process_frame(BotStartedSpeakingFrame())
             await strategy.process_frame(VADUserStartedSpeakingFrame())
             await strategy.process_frame(self._audio_frame(num_samples=10))
             self.assertTrue(strategy._speech_active)
@@ -323,6 +563,7 @@ class TestKrispVivaIPUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
                 nonlocal fired
                 fired = True
 
+            await strategy.process_frame(BotStartedSpeakingFrame())
             await strategy.process_frame(VADUserStartedSpeakingFrame())
             await strategy.process_frame(self._audio_frame())
 

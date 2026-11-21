@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""The text transform callable shared by TTS services and the LLM text processor."""
+"""The text transform callable shared by STT and TTS services and the LLM text processor."""
 
 from collections.abc import Awaitable, Callable
 
@@ -16,5 +16,6 @@ TextTransform = Callable[[str, str | TextType], Awaitable[str]]
 Where a transform is registered decides who sees the rewrite. On a TTS service it
 reaches the synthesizer only, and the context keeps the text as the LLM wrote it. On
 :class:`~pipecat.processors.aggregators.llm_text_processor.LLMTextProcessor` it reaches
-everything downstream: the voice, the context and the client.
+everything downstream: the voice, the context and the client. On an STT service it
+rewrites what the user said before anything else sees it, observers included.
 """

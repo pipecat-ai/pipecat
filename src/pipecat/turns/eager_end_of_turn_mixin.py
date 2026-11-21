@@ -22,6 +22,7 @@ from pipecat.turns.user_turn_strategies import (
     ExternalUserTurnStrategies,
     UserTurnStrategies,
 )
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -49,6 +50,10 @@ class EagerEndOfTurnSTTServiceMixin(FrameProcessor):
     All three are safe to call when no prediction is outstanding, and all three
     are inert while ``enable_eager_end_of_turn`` is off, so a service can call
     them wherever its protocol reports a prediction without guarding each one.
+
+    The service decides which turn strategies it recommends. While eager end of
+    turn is on, :meth:`eager_user_turn_strategies` builds the ones that answer
+    its predictions.
     """
 
     def __init__(
@@ -87,27 +92,55 @@ class EagerEndOfTurnSTTServiceMixin(FrameProcessor):
         """Whether a prediction is awaiting a committed end of turn."""
         return self._eager_end_of_turn_pending
 
-    def recommended_user_turn_strategies(self, *, enable_interruptions: bool) -> UserTurnStrategies:
-        """Build the turn strategies this service recommends.
+    def eager_user_turn_strategies(
+        self, *, enable_interruptions: bool
+    ) -> EagerUserTurnStrategies | None:
+        """Build the turn strategies that answer this service's predictions.
 
-        Both recommendations leave turn detection to the service. The eager one
-        additionally answers a predicted end of turn, which only makes sense for
-        a service configured to report one.
+        They leave turn detection to the service and answer a predicted end of
+        turn while the turn is still open.
 
         Args:
             enable_interruptions: Whether a proposal starting a turn should
                 interrupt the bot.
 
         Returns:
-            Strategies for the caller's ``STTMetadataFrame``.
+            Strategies for the caller's ``STTMetadataFrame``, or None while eager
+            end of turn is off, leaving the recommendation to the service.
         """
         if not self._enable_eager_end_of_turn:
-            return ExternalUserTurnStrategies(enable_interruptions=enable_interruptions)
+            return None
 
         return EagerUserTurnStrategies(
             match_policy=self._eager_match_policy,
             enable_interruptions=enable_interruptions,
         )
+
+    @deprecated(
+        "`EagerEndOfTurnSTTServiceMixin.recommended_user_turn_strategies` is deprecated since "
+        "1.17.0 and will be removed in 2.0.0. "
+        "Use `EagerEndOfTurnSTTServiceMixin.eager_user_turn_strategies` instead."
+    )
+    def recommended_user_turn_strategies(self, *, enable_interruptions: bool) -> UserTurnStrategies:
+        """Build turn strategies that leave turn detection to the service.
+
+        .. deprecated:: 1.17.0
+            Use :meth:`eager_user_turn_strategies` instead, and recommend
+            :class:`~pipecat.turns.user_turn_strategies.ExternalUserTurnStrategies`
+            from the service while eager end of turn is off. Will be removed in
+            2.0.0.
+
+        Args:
+            enable_interruptions: Whether a proposal starting a turn should
+                interrupt the bot.
+
+        Returns:
+            The eager strategies while eager end of turn is on, and
+            ``ExternalUserTurnStrategies`` otherwise.
+        """
+        return self.eager_user_turn_strategies(
+            enable_interruptions=enable_interruptions
+        ) or ExternalUserTurnStrategies(enable_interruptions=enable_interruptions)
 
     async def _push_eager_end_of_turn(
         self,

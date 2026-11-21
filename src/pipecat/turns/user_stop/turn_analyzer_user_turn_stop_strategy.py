@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     SpeechControlParamsFrame,
     StartFrame,
     STTMetadataFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -177,6 +178,8 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self._handle_input_audio(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+        elif isinstance(frame, TranscriptionFinalizedFrame):
+            await self._handle_transcription_finalized()
         elif isinstance(frame, InterimTranscriptionFrame):
             # An interim means more transcription is still on the way, so an
             # earlier finalized transcript no longer covers all of the user's
@@ -273,9 +276,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         # We don't really care about the content.
         self._text = frame.text
         if frame.finalized:
-            self._transcript_finalized = True
-            # For finalized transcripts, trigger immediately if turn is complete
-            await self._maybe_report_user_turn_stopped()
+            await self._handle_transcription_finalized()
         elif self._timeout_expired and self._turn_complete:
             # The p99 timeout already elapsed without a transcript. Now that
             # we have one, trigger the turn stop immediately. This handles the
@@ -297,6 +298,16 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._timeout_task = self.task_manager.create_task(
                 self._timeout_handler(timeout), f"{self}::_timeout_handler"
             )
+
+    async def _handle_transcription_finalized(self):
+        """Handle the STT confirming that no more transcription is coming.
+
+        The confirmation arrives on the last transcript or, when the text came
+        before it, as a ``TranscriptionFinalizedFrame`` of its own.
+        """
+        self._transcript_finalized = True
+        # Trigger immediately if the turn is complete.
+        await self._maybe_report_user_turn_stopped()
 
     async def _handle_prediction_result(self, result: MetricsData | None):
         """Handle a prediction result event from the turn analyzer."""

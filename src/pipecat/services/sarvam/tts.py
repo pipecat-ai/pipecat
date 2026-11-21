@@ -1187,9 +1187,6 @@ class SarvamTTSService(InterruptibleTTSService):
                 msg = json.loads(message)
                 context_id = self.get_active_audio_context_id()
                 if msg.get("type") == "audio":
-                    request_id = msg.get("data", {}).get("request_id", "N/A")
-                    logger.trace(f"TTS request_id={request_id}, context_id={context_id}")
-
                     # Check for interruption before processing audio
                     await self.stop_ttfb_metrics()
                     audio = base64.b64decode(msg["data"]["audio"])
@@ -1210,7 +1207,10 @@ class SarvamTTSService(InterruptibleTTSService):
                 elif msg.get("type") == "error":
                     error_msg = msg["data"]["message"]
                     await self.stop_all_metrics()
-                    await self.push_error(error_msg=f"TTS Error: {error_msg}")
+                    error = f"TTS Error: {error_msg}"
+                    if request_id := msg["data"].get("request_id"):
+                        error += f" (request ID: {request_id})"
+                    await self.push_error(error_msg=error)
 
                     # If it's a timeout error, the connection might need to be reset
                     if "too long" in error_msg.lower() or "timeout" in error_msg.lower():

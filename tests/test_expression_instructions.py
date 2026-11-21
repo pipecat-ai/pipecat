@@ -16,7 +16,11 @@ from pipecat.expressive.expression import (
     ExpressionSound,
     ExpressionTerm,
 )
-from pipecat.expressive.instructions import expression_instructions, expression_policy_warning
+from pipecat.expressive.instructions import (
+    expression_instructions,
+    expression_policy_warning,
+    perception_turn_completion_instructions,
+)
 from pipecat.expressive.perception import PerceptionCapabilities, PerceptionTerm
 from pipecat.expressive.policy import ExpressionGuidance, ExpressionPolicy
 
@@ -26,6 +30,8 @@ FIXED = ExpressionCapabilities(
     pause_range_ms=(100, 5000),
     service_vocabulary={ExpressionDelivery.WARM: ["happy"], ExpressionSound.LAUGH: ["laughter"]},
 )
+
+RCS = "This conversation uses RCS, the Real-time Context Standard, for context beyond plain text."
 
 FREE_TEXT = ExpressionCapabilities(
     sounds=[ExpressionTerm("laughs"), ExpressionTerm("woo", "an excited whoop")],
@@ -178,9 +184,9 @@ def test_a_free_text_service_is_taught_none_of_a_kind_the_policy_names_none_of()
 
     instructions = expression_instructions(capabilities, ExpressionPolicy(delivery=[], sounds=[]))
 
-    assert (
-        instructions
-        == "You can direct how your words are spoken with tags:\n- ^^word^^ stresses a word."
+    assert instructions == (
+        f"{RCS}\n\nRCS tags (output only):\nYou can direct how your words are spoken with tags:\n"
+        "- ^^word^^ stresses a word."
     )
 
 
@@ -210,13 +216,42 @@ PERCEPTION = PerceptionCapabilities(
 )
 
 
-def test_perception_is_taught_with_an_example_and_its_signals():
+def test_perception_is_taught_with_its_signals_and_no_example_reading():
     instructions = expression_instructions(None, perception=PERCEPTION)
 
-    assert "in parentheses, such as ([tone positive=0.86, neutral=0.10]), each" in instructions
     assert "A reading below 0.5 is a guess: don't act on it." in instructions
     assert instructions.endswith(
         "- tone: positive, neutral, sad, frustrated.\n- speech_rate: Words per second."
+    )
+    # An LLM shown a reading learns to write its own.
+    assert "([" not in instructions
+
+
+def test_readings_are_taught_as_input_and_tags_as_output():
+    instructions = expression_instructions(FIXED, perception=PERCEPTION)
+
+    assert instructions.startswith(
+        f"{RCS}\n\nRCS readings (the user's input, never your output):\n"
+        "A user message may start with an RCS reading"
+    )
+    assert "in parentheses, each signal in square brackets" in instructions
+    assert (
+        "Readings appear ONLY in the user's messages, added by a separate system, never by you: "
+        "a reading is part of the user's input and never part of your output."
+    ) in instructions
+    assert "RCS tags (output only):\nYou can direct how your words are spoken" in instructions
+
+
+def test_a_reading_is_left_out_of_the_turn_completion_marker():
+    instructions = perception_turn_completion_instructions("+", "~", "-")
+
+    assert instructions.startswith(
+        "When you choose the turn completion marker, decide it from the user's words alone."
+    )
+    assert "still gets ~ when their words are cut off." in instructions
+    assert instructions.endswith(
+        "it doesn't make a hesitant user's cut-off words -, and it doesn't make words that "
+        "haven't answered you +."
     )
 
 
@@ -225,8 +260,8 @@ def test_perception_comes_before_the_tags_and_the_guidance_last():
 
     instructions = expression_instructions(FIXED, policy, perception=PERCEPTION)
 
-    reading = instructions.index("([tone")
-    tags = instructions.index("You can direct how your words are spoken")
+    reading = instructions.index("RCS readings (the user's input")
+    tags = instructions.index("RCS tags (output only)")
     assert reading < tags < instructions.index(ExpressionGuidance.MATCH_STYLE)
 
 

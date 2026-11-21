@@ -273,6 +273,13 @@ class SpeechifyTTSSettings(TTSSettings):
             Speechify applies these on ``simba-3.5`` in every language it lists under
             ``pronunciation_languages`` in ``GET /v1/audio/models``, which excludes
             English; any other model or language returns ``pronunciations_unsupported``.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
     """
 
     loudness_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)

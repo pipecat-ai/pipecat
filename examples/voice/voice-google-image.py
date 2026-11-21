@@ -97,8 +97,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleLLMService(
         api_key=os.environ["GOOGLE_API_KEY"],
         settings=GoogleLLMService.Settings(
-            model="gemini-2.5-flash-image",
-            # model="gemini-3-pro-image-preview", # A more powerful model, but slower,
+            model="gemini-3.1-flash-lite-image",
+            # model="gemini-nano-banana-2.1", # A more powerful model, but slower,
             system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
         ),
     )

@@ -479,7 +479,7 @@ class TestJevClassifier:
         question = {"answer": YesNoQuestion(instructions="is there a red circle?")}
         assert classifier.supports_images
 
-        await classifier.yes_no("a camera frame", question, images=[png, jpeg])
+        await classifier.yes_no("a camera frame", question, inputs=[png, jpeg])
         await classifier.yes_no("no frame", question)
 
         body = json.loads(requests[0].content)
@@ -517,7 +517,7 @@ class TestJevClassifier:
 
         with pytest.raises(ClassifierError, match="PNG or JPEG images, got image/webp"):
             await classifier.yes_no(
-                "a frame", {"answer": YesNoQuestion(instructions="?")}, images=[webp]
+                "a frame", {"answer": YesNoQuestion(instructions="?")}, inputs=[webp]
             )
         assert sent == []
         await classifier.client.close()
@@ -602,8 +602,8 @@ class TestJevLive:
         classifier = JevClassifier(api_key=os.environ["TYPESAFE_API_KEY"])
         question = {"red": YesNoQuestion(instructions="Is there a red circle in the image?")}
         try:
-            red = await classifier.yes_no("A camera frame.", question, images=[_circle("red")])
-            blue = await classifier.yes_no("A camera frame.", question, images=[_circle("blue")])
+            red = await classifier.yes_no("A camera frame.", question, inputs=[_circle("red")])
+            blue = await classifier.yes_no("A camera frame.", question, inputs=[_circle("blue")])
             assert red["red"].is_yes
             assert not blue["red"].is_yes
         finally:

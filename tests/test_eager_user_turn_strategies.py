@@ -341,6 +341,23 @@ class TestUnresolvedSpeculation(unittest.IsolatedAsyncioTestCase):
         await strategy.handle_user_turn_stopped()
         assert len(withdrawals) == 1
 
+    async def test_cleanup_stops_the_speculation_timer(self):
+        withdrawals = []
+        task_manager = TaskManager()
+
+        strategy = EagerUserTurnStopStrategy(speculation_timeout=0.1)
+        await strategy.setup(frame_processor_setup(task_manager))
+        strategy.add_event_handler(
+            "on_user_turn_speculation_cancelled", lambda s: withdrawals.append(s)
+        )
+
+        await strategy.process_frame(eager("book a flight"))
+        await strategy.cleanup()
+
+        assert task_manager.current_tasks() == []
+        await asyncio.sleep(0.2)
+        assert withdrawals == []
+
 
 class TestTurnCommittedWithoutATranscript(unittest.IsolatedAsyncioTestCase):
     async def test_speculation_is_withdrawn_when_there_is_nothing_to_compare(self):
@@ -403,6 +420,42 @@ class TestDeferredEagerStrategy(unittest.IsolatedAsyncioTestCase):
         await wrapper.process_frame(eager("book a flight"))
 
         assert [s.text for s in triggered] == ["book a flight"]
+
+
+class TestSpeculationAfterACommittedTranscript(unittest.IsolatedAsyncioTestCase):
+    async def test_an_unwritten_transcript_goes_ahead_of_the_prediction(self):
+        # A transcript committed earlier in the turn, while the user is still
+        # speaking, isn't in the context yet, so the speculated turn carries it.
+        context = LLMContext()
+
+        down, _ = await run_test(
+            aggregator(context),
+            frames_to_send=[
+                ProposedUserStartedSpeakingFrame(),
+                SleepFrame(),
+                final("I want to go to Paris"),
+                SleepFrame(),
+                eager("next Tuesday"),
+                SleepFrame(),
+                final("next Tuesday"),
+                SleepFrame(),
+                ProposedUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=1.0),
+            ],
+        )
+
+        contexts = [f for f in down if isinstance(f, LLMContextFrame)]
+        assert [c.speculation for c in contexts] == [True]
+        assert contexts[0].context.messages[-1] == {
+            "role": "user",
+            "content": "I want to go to Paris next Tuesday",
+        }
+        # The prediction is checked against what was committed after it, so the
+        # turn confirms it.
+        assert not any(isinstance(f, UserTurnResponseCancelFrame) for f in down)
+        assert context.messages == [
+            {"role": "user", "content": "I want to go to Paris next Tuesday"}
+        ]
 
 
 class TestExactMatchPolicy(unittest.IsolatedAsyncioTestCase):

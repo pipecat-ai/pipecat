@@ -10,6 +10,7 @@ This module provides a real-time STT service that integrates with Mistral's
 Voxtral Realtime transcription API using the Mistral SDK's RealtimeConnection.
 """
 
+import inspect
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any, cast
@@ -50,6 +51,10 @@ except ModuleNotFoundError as e:
     logger.error('In order to use Mistral STT, you need to `uv add "pipecat-ai[mistral]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
+# Voxtral realtime models that do not accept a session-level language hint.
+# voxtral-mini-transcribe-realtime-3 and later document `language` support.
+_MODELS_WITHOUT_LANGUAGE_SUPPORT = frozenset({"voxtral-mini-transcribe-realtime-2602"})
+
 
 @dataclass
 class MistralSTTSettings(STTSettings):
@@ -57,7 +62,9 @@ class MistralSTTSettings(STTSettings):
 
     Parameters:
         model: STT model identifier.
-        language: Language hint for transcription.
+        language: Language hint for transcription. Requires a model that
+            supports language hints (e.g. voxtral-mini-transcribe-realtime-3)
+            and mistralai>=3.7.0.
     """
 
     pass
@@ -225,11 +232,30 @@ class MistralSTTService(STTService):
             model = assert_given(self._settings.model)
             if model is None:
                 raise ValueError("Mistral STT model must be specified")
-            self._connection = await self._client.audio.realtime.connect(
-                model=model,
-                audio_format=audio_format,
-                target_streaming_delay_ms=self._target_streaming_delay_ms,
-            )
+
+            connect_kwargs: dict[str, Any] = {
+                "model": model,
+                "audio_format": audio_format,
+                "target_streaming_delay_ms": self._target_streaming_delay_ms,
+            }
+
+            if self._settings.language:
+                if model in _MODELS_WITHOUT_LANGUAGE_SUPPORT:
+                    logger.warning(
+                        f"{self}: model {model} does not support a language hint; "
+                        "ignoring the language setting"
+                    )
+                elif (
+                    "language" in inspect.signature(self._client.audio.realtime.connect).parameters
+                ):
+                    connect_kwargs["language"] = str(self._settings.language).split("-")[0].lower()
+                else:
+                    logger.warning(
+                        f"{self}: language hint requires mistralai>=3.7.0; "
+                        "the installed SDK does not support it"
+                    )
+
+            self._connection = await self._client.audio.realtime.connect(**connect_kwargs)
 
             self._receive_task = self.create_task(
                 self._receive_events(), name="mistral_stt_receive"

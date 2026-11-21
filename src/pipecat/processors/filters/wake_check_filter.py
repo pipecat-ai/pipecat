@@ -80,15 +80,16 @@ class WakeCheckFilter(FrameProcessor):
 
         Args:
             wake_phrases: List of wake phrases to detect in transcriptions.
+                Blank entries are ignored.
             keepalive_timeout: Duration in seconds to keep passing frames after
                 wake detection. Defaults to 3 seconds.
         """
         super().__init__()
         self._participant_states = {}
         self._keepalive_timeout = keepalive_timeout
-        self._wake_patterns = []
-        for name in wake_phrases:
-            self._wake_patterns.append(compile_phrase_pattern(name))
+        self._wake_patterns = [
+            compile_phrase_pattern(phrase) for phrase in wake_phrases if phrase.strip()
+        ]
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames, filtering transcriptions based on wake detection.
@@ -101,6 +102,9 @@ class WakeCheckFilter(FrameProcessor):
 
         try:
             if isinstance(frame, TranscriptionFrame):
+                if not self._wake_patterns:
+                    return
+
                 p = self._participant_states.get(frame.user_id)
                 if p is None:
                     p = WakeCheckFilter.ParticipantState(frame.user_id)

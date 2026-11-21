@@ -129,7 +129,7 @@ async def bot(runner_args: RunnerArguments):
     # One filter per session: Tyto attaches its collector to this filter.
     aic_filter = AICFilter(
         license_key=os.environ["AIC_SDK_LICENSE"],
-        model_id="quail-vf-2.2-l-16khz",
+        model_id="quail-vf-2.3-l-16khz",
         enhancement_level=0.8,
     )
 
