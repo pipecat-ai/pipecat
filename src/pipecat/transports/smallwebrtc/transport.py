@@ -1163,9 +1163,9 @@ class SmallWebRTCTransport(BaseTransport):
                         source=video_source, framerate=framerate
                     )
 
-        await self._call_event_handler("on_client_connected", webrtc_connection)
         if self._input:
-            await self._input.push_frame(ClientConnectedFrame())
+            await self._input.broadcast_frame(ClientConnectedFrame)
+        await self._call_event_handler("on_client_connected", webrtc_connection)
 
     async def _on_client_disconnected(self, webrtc_connection):
         """Handle client disconnection events."""

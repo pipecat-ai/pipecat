@@ -2655,8 +2655,9 @@ class BotConnectedFrame(SystemFrame):
 class ClientConnectedFrame(SystemFrame):
     """Frame indicating that a client has connected to the transport.
 
-    Pushed downstream by the input transport when a client (participant)
-    connects. Used by observers to measure transport readiness timing.
+    Pushed downstream by the input transport for transport readiness timing.
+    Transports that support RTVI also send it upstream to start a fresh
+    client handshake.
     """
 
     pass

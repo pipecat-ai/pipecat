@@ -338,8 +338,8 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                 self._monitor_websocket(self._params.session_timeout)
             )
 
+        await self.broadcast_frame(ClientConnectedFrame)
         await self._client.trigger_client_connected()
-        await self.push_frame(ClientConnectedFrame())
 
         if not self._receive_task:
             self._receive_task = self.create_task(self._receive_messages())

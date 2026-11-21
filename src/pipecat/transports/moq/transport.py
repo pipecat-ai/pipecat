@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from pipecat.frames.frames import (
     CancelFrame,
+    ClientConnectedFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -2479,6 +2480,8 @@ class MOQTransport(BaseTransport):
 
     async def _on_client_connected(self):
         """Handle the peer's broadcast being announced."""
+        if self._input:
+            await self._input.broadcast_frame(ClientConnectedFrame)
         await self._call_event_handler("on_client_connected", {"id": self._params.peer_id})
 
     async def _on_client_disconnected(self):

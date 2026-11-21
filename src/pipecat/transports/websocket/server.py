@@ -612,9 +612,9 @@ class SingleClientWebsocketServerTransport(BaseTransport):
         """Handle client connection events."""
         if self._output:
             await self._output.set_client_connection(websocket)
-            await self._call_event_handler("on_client_connected", websocket)
             if self._input:
-                await self._input.push_frame(ClientConnectedFrame())
+                await self._input.broadcast_frame(ClientConnectedFrame)
+            await self._call_event_handler("on_client_connected", websocket)
         else:
             logger.error("A SingleClientWebsocketServerTransport output is missing in the pipeline")
 
