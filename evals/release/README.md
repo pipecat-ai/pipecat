@@ -53,6 +53,11 @@ To judge with Google's Decisions API instead, set
 `factory: evals.judges.google_classifier`. It needs the `google` extra and
 `GOOGLE_API_KEY` exported.
 
+To judge with Zoom's [Decisions API](https://developers.zoom.us/docs/ai-services/decisions/)
+instead, set `factory: evals.judges.zoom_classifier` (add
+`model: zoom-decisions-pro` for the larger model). It needs the `zoom-ai` extra
+and `ZOOM_AI_API_KEY` exported.
+
 These classifiers give verdicts but not reasons. So a local LLM, the
 **explainer**, is told every `no` and every verdict the classifier is not sure
 about, and points to what in the conversation supports it. That is evidence to
