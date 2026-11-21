@@ -21,8 +21,11 @@ LLM's ``bot-llm-*`` reports and function calls, and its TTS's ``bot-tts-text``)
 stay raw messages, as :class:`~pipecat.frames.frames.InputTransportMessageFrame`.
 In this pipeline a ``BotStartedSpeakingFrame``, an ``InterruptionFrame``, an
 ``LLMTextFrame``, a ``FunctionCallInProgressFrame`` or a ``TTSTextFrame`` would
-be about this pipeline's own output, not the bot's. Kept as one kind of frame,
-they also reach the pipeline in the order the bot sent them.
+be about this pipeline's own output, not the bot's. So does its
+``user-transcription``, the bot's transcription of this pipeline's speech,
+which a ``TranscriptionFrame`` would pass off as this pipeline's own. Kept as
+one kind of frame, the bot's reports also reach the pipeline in the order the
+bot sent them.
 
 .. note::
     This covers the messages a conversation needs (the LLM response lifecycle,
@@ -40,16 +43,15 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     Frame,
     InputTransportMessageFrame,
-    InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
-    TranscriptionFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
 
-# The bot's reports about its own output, which stay raw messages (see above).
-_BOT_OUTPUT_REPORTS = frozenset(
+# The bot's reports, about its own output and about this pipeline's speech,
+# which stay raw messages (see above).
+_BOT_REPORTS = frozenset(
     {
         "bot-llm-started",
         "bot-llm-text",
@@ -61,6 +63,7 @@ _BOT_OUTPUT_REPORTS = frozenset(
         "bot-started-speaking",
         "bot-stopped-speaking",
         "bot-interrupted",
+        "user-transcription",
     }
 )
 
@@ -122,8 +125,9 @@ class RTVIClientSerializer(FrameSerializer):
             data: JSON text (or bytes) sent by the bot.
 
         Returns:
-            The corresponding frame, or ``None`` if the message is not an RTVI
-            message or has no frame mapping yet (handled elsewhere).
+            The bot's report as an ``InputTransportMessageFrame``, or ``None`` if
+            the message is not an RTVI message or not one of the reports kept
+            (``bot-ready`` and the others are handled elsewhere).
         """
         try:
             message = json.loads(data)
@@ -134,22 +138,7 @@ class RTVIClientSerializer(FrameSerializer):
         if not isinstance(message, dict) or message.get("label") != RTVI.MESSAGE_LABEL:
             return None
 
-        msg_type = message.get("type")
-        payload = message.get("data") or {}
-
-        if msg_type in _BOT_OUTPUT_REPORTS:
-            # This pipeline's own output frames are about its own output.
+        if message.get("type") in _BOT_REPORTS:
+            # This pipeline's own frames would be about its own output and speech.
             return InputTransportMessageFrame(message=message)
-
-        match msg_type:
-            case "user-transcription":
-                text = payload.get("text", "")
-                user_id = payload.get("user_id", "")
-                timestamp = payload.get("timestamp", "")
-                if payload.get("final", True):
-                    return TranscriptionFrame(text=text, user_id=user_id, timestamp=timestamp)
-                return InterimTranscriptionFrame(text=text, user_id=user_id, timestamp=timestamp)
-            case _:
-                # bot-ready (handshake) and not-yet-mapped messages (metrics, bot
-                # audio) are handled elsewhere / later.
-                return None
+        return None
