@@ -48,7 +48,7 @@ as inline base64 bytes or as a URL, and both flow through to a
 """
 
 # -- Constants --
-PROTOCOL_VERSION = "2.3.0"
+PROTOCOL_VERSION = "2.4.0"
 
 # -- Version compatibility --
 # Any 1.x client is deprecated but still supported with the old bot-output format.

@@ -823,6 +823,14 @@ BEHAVIORS: tuple[RTVIBehaviorSpec, ...] = (
         ("client-ready", "bot-ready"),
     ),
     RTVIBehaviorSpec(
+        "current-version-before-client-ready",
+        "Until client-ready, the server sends messages as it does to a client of its own "
+        "protocol version, so what the bot does before the client says its version, such "
+        "as a greeting, reaches the client. From client-ready on, the client's version "
+        "decides which messages it gets.",
+        ("client-ready",),
+    ),
+    RTVIBehaviorSpec(
         "client-ready-version-check",
         "A client-ready without a version, with a malformed one, or of a major version the "
         "server doesn't speak gets an error-response carrying its id. The session goes on, "

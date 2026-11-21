@@ -651,6 +651,16 @@ class TestRTVIBehaviors(unittest.IsolatedAsyncioTestCase):
         frame.will_be_spoken = True
         return frame
 
+    async def test_current_version_before_client_ready(self):
+        # llm-raw-text is for clients of 2.2.0 and later.
+        session = await self._session(RTVIObserverParams(llm_raw_text_enabled=True))
+        await session.push(LLMTextFrame("Hello."))
+        self.assertIn("llm-raw-text", [m["type"] for m in session.sent])
+        session.sent.clear()
+        await self._ready(session, "2.1.0")
+        await session.push(LLMTextFrame("Hello."))
+        self.assertNotIn("llm-raw-text", [m["type"] for m in session.sent])
+
     async def test_spoken_output_waits_for_speech(self):
         session = await self._session()
         await self._ready(session)
