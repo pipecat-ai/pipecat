@@ -382,6 +382,8 @@ _REPORTED_EVENT_TYPES = frozenset(
         # its transcriptions and backchannels.
         "bot-output",
         "user-input",
+        # The bot's conversation flow entering a node.
+        "flow-node-entered",
     }
 )
 

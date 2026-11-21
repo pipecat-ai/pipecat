@@ -306,6 +306,13 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frame.message["type"], "server-message")
         self.assertEqual(frame.message["data"], data)
 
+    async def test_flow_node_entered_stays_a_raw_message(self):
+        data = {"node": "verify.ask", "previous_node": "start", "parent": "verify"}
+        frame = await self.serializer.deserialize(self._server("flow-node-entered", data))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], "flow-node-entered")
+        self.assertEqual(frame.message["data"], data)
+
     async def test_cancelled_function_call_is_not_a_system_frame(self):
         # Queued like the in-progress and result frames, so it can't overtake
         # the bot's earlier function-call reports.

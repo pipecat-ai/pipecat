@@ -33,7 +33,7 @@ Event names are the friendly names the harness maps RTVI server messages onto:
 ``bot_stopped_speaking``, ``llm_started``, ``response``, ``llm_response``,
 ``llm_marker``, ``tts_response``, ``function_call``, ``function_call_stopped``,
 ``image``, ``bot_backchannel``, ``user_backchannel``, ``expression``, ``metrics``,
-``server_message``. The ``vad_*`` events are the raw VAD signal, useful as a timing anchor when a turn-detection strategy
+``server_message``, ``flow_node``. The ``vad_*`` events are the raw VAD signal, useful as a timing anchor when a turn-detection strategy
 gates or defers the turn-level ``user_stopped_speaking`` (e.g. filtering incomplete
 turns).
 
@@ -77,6 +77,17 @@ expectation records it in the run's result::
         expect:
           - event: server_message
             text_contains: '"done": true'
+
+``flow_node`` is the bot's conversation flow, built with Pipecat Flows,
+entering a node. The event's text is the node's name, so ``text_matches``
+pins the node a turn leads to; a node of a subflow is named
+``<parent>.<node>``::
+
+    turns:
+      - user: "I'd like to book an appointment."
+        expect:
+          - event: flow_node
+            text_matches: ['^verify_to_book[.]']
 
 ``llm_marker`` is the sideband marker the bot's LLM emitted in a response, such
 as the turn-completion markers of ``filter_incomplete_user_turns``. It arrives

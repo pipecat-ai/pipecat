@@ -3868,6 +3868,30 @@ class TestMetricsEvent(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await m.match(looking_back, time.monotonic(), 1000, 0, 1))
 
 
+class TestFlowNodeEvent(unittest.IsolatedAsyncioTestCase):
+    """The bot's flow entering a node is an event named by the node."""
+
+    @staticmethod
+    def _frame(data) -> InputTransportMessageFrame:
+        return InputTransportMessageFrame(
+            message={"label": RTVI.MESSAGE_LABEL, "type": "flow-node-entered", "data": data}
+        )
+
+    def test_a_node_entered_becomes_an_event_with_its_data_and_the_node_as_text(self):
+        data = {"node": "verify.ask", "previous_node": "start", "parent": "verify"}
+        self.assertEqual(
+            _stream().frame_to_event(self._frame(data)),
+            {"type": "flow_node", "data": data, "text": "verify.ask"},
+        )
+
+    async def test_an_expectation_matches_the_node(self):
+        m = _matcher()
+        await m._stream.append(m._stream.frame_to_event(self._frame({"node": "verify.ask"})))
+        expectation = EvalExpectation(event="flow_node", text_matches=["^verify[.]"])
+        self.assertIsNone(await m.match(expectation, time.monotonic(), 1000, 0, 0))
+        self.assertEqual(m.last_match_text, "verify.ask")
+
+
 class TestServerMessageEvent(unittest.IsolatedAsyncioTestCase):
     """A message of the bot's own making is an event a scenario can read."""
 
