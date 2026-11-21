@@ -16,8 +16,6 @@ Provides:
   to the bus).
 """
 
-from typing import TYPE_CHECKING
-
 from pipecat.bus.bus import WorkerBus
 from pipecat.bus.messages import BusFrameMessage, BusMessage
 from pipecat.bus.subscriber import BusSubscriber
@@ -32,9 +30,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.utils.deprecation import warn_deprecated
-
-if TYPE_CHECKING:
-    from pipecat.pipeline.worker import PipelineWorker
 
 _LIFECYCLE_FRAMES = (StartFrame, EndFrame, CancelFrame, StopFrame)
 _PASSTHROUGH_FRAMES = (OutputTransportMessageUrgentFrame,)
@@ -181,7 +176,6 @@ class _BusEdgeProcessor(FrameProcessor):
     def __init__(
         self,
         *,
-        worker: "PipelineWorker",
         direction: FrameDirection,
         exclude_frames: tuple[type[Frame], ...] | None = None,
         **kwargs,
@@ -189,10 +183,6 @@ class _BusEdgeProcessor(FrameProcessor):
         """Initialize the edge processor.
 
         Args:
-            worker: The owning worker; the edge reads ``worker.bus`` lazily
-                so the bus only needs to be set (via
-                :meth:`PipelineWorker.attach`) by the time the processor is
-                set up. ``worker.name`` is the message source.
             direction: Direction this edge captures and publishes to the
                 bus.
             exclude_frames: Extra frame types that should never cross
@@ -200,7 +190,6 @@ class _BusEdgeProcessor(FrameProcessor):
             **kwargs: Additional arguments passed to ``FrameProcessor``.
         """
         super().__init__(**kwargs)
-        self._task = worker
         self._direction = direction
         self._exclude_frames = exclude_frames or ()
 
@@ -216,6 +205,7 @@ class _BusEdgeProcessor(FrameProcessor):
         if self._exclude_frames and isinstance(frame, self._exclude_frames):
             return
 
-        await self._task.bus.send(
-            BusFrameMessage(source=self._task.name, frame=frame, direction=direction)
-        )
+        # The worker that set this edge up owns it, so its bus is the one to
+        # publish on and its name is the message source.
+        worker = self.pipeline_worker
+        await worker.bus.send(BusFrameMessage(source=worker.name, frame=frame, direction=direction))

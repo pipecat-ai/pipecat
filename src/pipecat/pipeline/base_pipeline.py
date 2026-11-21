@@ -100,5 +100,6 @@ class BasePipeline(FrameProcessor):
                 await processor.cleanup()
             except Exception as e:
                 logger.error(f"Error cleaning up {processor}: {e}")
+            processor._cleanup_finished()
 
         await asyncio.gather(*[cleanup_processor(p) for p in processors])

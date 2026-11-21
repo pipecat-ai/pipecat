@@ -380,6 +380,22 @@ class BaseWorker(BaseObject, BusSubscriber):
         self._worker_runner = worker_runner
         await self._bus.subscribe(self)
 
+    async def detach(self) -> None:
+        """Detach the worker from its runner once it has finished.
+
+        Called by the runner after :meth:`run` returns. Undoes
+        :meth:`attach`: the worker stops receiving bus messages, and it lets
+        go of the bus, the registry and the runner, which all hold the worker
+        in turn. A worker runs once, so its event handlers, which usually
+        close over the worker or the objects around it, are dropped too.
+        """
+        if self._bus:
+            await self._bus.unsubscribe(self)
+        self._bus = None
+        self._registry = None
+        self._worker_runner = None
+        self._clear_event_handlers()
+
     async def cleanup(self) -> None:
         """Clean up the worker and release resources.
 

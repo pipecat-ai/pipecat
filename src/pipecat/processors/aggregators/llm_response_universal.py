@@ -923,6 +923,11 @@ class LLMUserAggregator(LLMContextAggregator):
         for s in self._params.user_mute_strategies:
             await s.cleanup()
 
+    def _cleanup_finished(self):
+        """Drop the setups held by this processor and its turn controller."""
+        super()._cleanup_finished()
+        self._user_turn_controller._cleanup_finished()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for user speech aggregation and context management.
 

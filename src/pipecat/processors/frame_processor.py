@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import traceback
+import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -244,7 +245,9 @@ class FrameProcessor(BaseObject):
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(name=name, **kwargs)
-        self._prev: FrameProcessor | None = None
+        # The pipeline holds its processors, so the link back is weak, or every
+        # pair of neighbours would be a reference cycle.
+        self._prev: weakref.ref[FrameProcessor] | None = None
         self._next: FrameProcessor | None = None
 
         # Enable direct mode to skip queues and process frames right away.
@@ -410,7 +413,7 @@ class FrameProcessor(BaseObject):
         Returns:
             The previous processor, or None if there's no previous processor.
         """
-        return self._prev
+        return self._prev() if self._prev else None
 
     @property
     def processor_setup(self) -> FrameProcessorSetup:
@@ -694,6 +697,14 @@ class FrameProcessor(BaseObject):
         if self._metrics is not None:
             await self._metrics.cleanup()
 
+    def _cleanup_finished(self):
+        """Drop the setup, which holds the worker, once :meth:`cleanup` has returned.
+
+        Called by the pipeline that cleaned this processor up. Setting the
+        processor up again gives it a new one.
+        """
+        self._setup = None
+
     def link(self, processor: FrameProcessor):
         """Link this processor to the next processor in the pipeline.
 
@@ -701,7 +712,7 @@ class FrameProcessor(BaseObject):
             processor: The processor to link to.
         """
         self._next = processor
-        processor._prev = self
+        processor._prev = weakref.ref(self)
         logger.debug(f"Linking {self} -> {self._next}")
 
     def get_clock(self) -> BaseClock:
@@ -1232,18 +1243,18 @@ class FrameProcessor(BaseObject):
                     )
                     await observer.on_push_frame(data)
                 await self._next.queue_frame(frame, direction)
-            elif direction == FrameDirection.UPSTREAM and self._prev:
-                logger.trace("Pushing {} upstream from {} to {}", frame, self, self._prev)
+            elif direction == FrameDirection.UPSTREAM and (prev := self.previous):
+                logger.trace("Pushing {} upstream from {} to {}", frame, self, prev)
                 if observer:
                     data = FramePushed(
                         source=self,
-                        destination=self._prev,
+                        destination=prev,
                         frame=frame,
                         direction=direction,
                         timestamp=timestamp,
                     )
                     await observer.on_push_frame(data)
-                await self._prev.queue_frame(frame, direction)
+                await prev.queue_frame(frame, direction)
         except Exception as e:
             # Observers and the downstream processor run inside this
             # block, so the cause of an unexpected failure can't be attributed.

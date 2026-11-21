@@ -166,6 +166,11 @@ class WorkerObserver(BaseObserver):
             except Exception as e:
                 logger.error(f"Error cleaning up {observer}: {e}")
 
+        # An observer may be used again by another worker, and its handlers
+        # often close over this one, so let go of it rather than its handlers.
+        self._observers.clear()
+        self._proxies.clear()
+
     async def on_pipeline_started(self):
         """Forward pipeline started signal to all managed observers."""
         await self._send_to_proxy(_PipelineStartedSignal())

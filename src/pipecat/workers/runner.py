@@ -473,6 +473,8 @@ class WorkerRunner(BaseObject, BusSubscriber):
         except asyncio.CancelledError:
             pass
         finally:
+            await self._registry.unwatch(worker.name, self._on_local_worker_ready)
+            await worker.detach()
             # End the runner once every root worker has finished. The
             # current worker's task is still "running" (we're inside its
             # body), so exclude it from the check.
