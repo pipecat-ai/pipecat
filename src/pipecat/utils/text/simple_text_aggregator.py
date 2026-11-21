@@ -14,7 +14,11 @@ text processing scenarios.
 from collections.abc import AsyncIterator
 from enum import Enum, auto
 
-from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, match_endofsentence
+from pipecat.utils.string import (
+    SENTENCE_ENDING_PUNCTUATION,
+    is_closing_punctuation,
+    match_endofsentence,
+)
 from pipecat.utils.text.base_text_aggregator import Aggregation, BaseTextAggregator, TextType
 
 
@@ -166,7 +170,9 @@ class SimpleTextAggregator(BaseTextAggregator):
         """Advance the pending candidate and decide whether to check its boundary.
 
         Check once at the first non-whitespace character, then once more when
-        the following word ends. Opening quotes or symbols do not start a word.
+        the following word ends. Closing quotes and brackets right after the
+        punctuation belong to the pending sentence, so the check waits for the
+        character after them. Opening quotes or symbols do not start a word.
 
         If the first tokenizer check finds no boundary::
 
@@ -189,7 +195,10 @@ class SimpleTextAggregator(BaseTextAggregator):
                 return False
 
             case _LookaheadState.AWAITING_CHARACTER:
-                if char.isspace() or is_punctuation:
+                # After a space, a closing quote such as "»" can open the next
+                # sentence (German »Hallo«), so only an adjacent one is skipped.
+                closes = is_closing_punctuation(char) and not self._text[-2:-1].isspace()
+                if char.isspace() or is_punctuation or closes:
                     return False
                 self._lookahead_state = (
                     _LookaheadState.IN_WORD if char.isalnum() else _LookaheadState.AWAITING_WORD
