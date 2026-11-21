@@ -1338,76 +1338,41 @@ def traced_openai_realtime(operation: str) -> Callable:
                         # Base service attributes
                         model_name = _get_model_name(self)
 
-                        # Operation-specific attribute collection
-                        operation_attrs = {}
-
-                        if operation == "llm_setup":
-                            # Capture session properties and tools
-                            session_properties = getattr(self, "_session_properties", None)
-                            if session_properties:
-                                try:
-                                    # Convert to dict for easier processing
-                                    if hasattr(session_properties, "model_dump"):
-                                        props_dict = session_properties.model_dump()
-                                    elif hasattr(session_properties, "__dict__"):
-                                        props_dict = session_properties.__dict__
-                                    else:
-                                        props_dict = {}
-
-                                    operation_attrs["session_properties"] = props_dict
-
-                                    # Extract tools if available
-                                    tools = props_dict.get("tools")
-                                    if tools:
-                                        operation_attrs["tools"] = tools
-                                        try:
-                                            operation_attrs["tools_serialized"] = json.dumps(tools)
-                                        except Exception as e:
-                                            logging.warning(f"Error serializing OpenAI tools: {e}")
-
-                                    # Extract instructions
-                                    instructions = props_dict.get("instructions")
-                                    if instructions:
-                                        operation_attrs["instructions"] = instructions[:500]
-
-                                except Exception as e:
-                                    logging.warning(f"Error processing session properties: {e}")
-
-                            # Also check context for tools
-                            if hasattr(self, "_context") and self._context:
-                                try:
-                                    context_tools = getattr(self._context, "tools", None)
-                                    if context_tools and not operation_attrs.get("tools"):
-                                        tools = None
-                                        if hasattr(self, "get_llm_adapter"):
-                                            adapter = self.get_llm_adapter()
-                                            tools = adapter.from_standard_tools(context_tools)
-
-                                        if tools is not None and tools is not NOT_GIVEN:
-                                            operation_attrs["tools"] = tools
-                                            try:
-                                                operation_attrs["tools_serialized"] = json.dumps(
-                                                    tools
-                                                )
-                                            except Exception as e:
-                                                logging.warning(
-                                                    f"Error serializing OpenAI Realtime tools: {e}"
-                                                )
-                                except Exception as e:
-                                    logging.warning(f"Error extracting context tools: {e}")
-
-                        # Add all attributes to the span
                         add_openai_realtime_span_attributes(
                             span=current_span,
                             service_name=service_class_name,
                             model=model_name,
                             operation_name=operation,
-                            **operation_attrs,
                         )
 
                         # Run the original function
                         fn_called = True
                         result = await func(self, *args, **kwargs)
+
+                        # The handler returns the session it sent.
+                        if operation == "llm_setup" and hasattr(result, "model_dump"):
+                            try:
+                                props_dict = result.model_dump()
+                                operation_attrs = {"session_properties": props_dict}
+
+                                tools = props_dict.get("tools")
+                                if tools:
+                                    operation_attrs["tools"] = tools
+                                    operation_attrs["tools_serialized"] = json.dumps(tools)
+
+                                instructions = props_dict.get("instructions")
+                                if instructions:
+                                    operation_attrs["instructions"] = instructions[:500]
+
+                                add_openai_realtime_span_attributes(
+                                    span=current_span,
+                                    service_name=service_class_name,
+                                    model=model_name,
+                                    operation_name=operation,
+                                    **operation_attrs,
+                                )
+                            except Exception as e:
+                                logging.warning(f"Error processing session properties: {e}")
 
                         return result
 
