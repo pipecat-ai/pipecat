@@ -668,6 +668,8 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
         await self._ws_send(update)
         self._configuring = self._configuring or not self._listen_configured
         self._listen_configured = True
+        # Settings with the instructions and tools this update resolved, for the llm_setup span.
+        return properties.model_copy(update={"instructions": instructions, "tools": tools})
 
     def _build_session(
         self, *, instructions: str | None, tools: list[dict[str, Any]] | None
