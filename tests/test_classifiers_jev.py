@@ -9,6 +9,7 @@ import base64
 import io
 import json
 import os
+import ssl
 from collections.abc import Callable
 
 import httpx
@@ -246,6 +247,28 @@ class TestJevClient:
             await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
         await client.close()
 
+    @pytest.mark.asyncio
+    async def test_a_broken_tls_connection_is_an_error(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise ssl.SSLError("bad record mac")
+
+        client = _client(handler)
+
+        with pytest.raises(ClassifierError, match="failed"):
+            await client.ask("a", {"answer": {"type": "noul", "instructions": "?"}})
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_a_broken_tls_connection_at_connect_is_an_error(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise ssl.SSLError("bad record mac")
+
+        client = _client(handler)
+
+        with pytest.raises(ClassifierError, match="could not connect"):
+            await client.connect()
+        await client.close()
+
     def test_needs_an_api_key(self):
         with pytest.raises(ValueError):
             JevClient(api_key="")
@@ -456,7 +479,7 @@ class TestJevClassifier:
         question = {"answer": YesNoQuestion(instructions="is there a red circle?")}
         assert classifier.supports_images
 
-        await classifier.yes_no("a camera frame", question, images=[png, jpeg])
+        await classifier.yes_no("a camera frame", question, inputs=[png, jpeg])
         await classifier.yes_no("no frame", question)
 
         body = json.loads(requests[0].content)
@@ -494,7 +517,7 @@ class TestJevClassifier:
 
         with pytest.raises(ClassifierError, match="PNG or JPEG images, got image/webp"):
             await classifier.yes_no(
-                "a frame", {"answer": YesNoQuestion(instructions="?")}, images=[webp]
+                "a frame", {"answer": YesNoQuestion(instructions="?")}, inputs=[webp]
             )
         assert sent == []
         await classifier.client.close()
@@ -579,8 +602,8 @@ class TestJevLive:
         classifier = JevClassifier(api_key=os.environ["TYPESAFE_API_KEY"])
         question = {"red": YesNoQuestion(instructions="Is there a red circle in the image?")}
         try:
-            red = await classifier.yes_no("A camera frame.", question, images=[_circle("red")])
-            blue = await classifier.yes_no("A camera frame.", question, images=[_circle("blue")])
+            red = await classifier.yes_no("A camera frame.", question, inputs=[_circle("red")])
+            blue = await classifier.yes_no("A camera frame.", question, inputs=[_circle("blue")])
             assert red["red"].is_yes
             assert not blue["red"].is_yes
         finally:

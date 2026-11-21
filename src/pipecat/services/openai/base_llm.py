@@ -48,6 +48,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.openai._errors import classify_openai_error
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
@@ -684,6 +685,17 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
             await self.run_function_calls(function_calls)
 
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify a content-filter rejection as ``ErrorCategory.CONTENT_FILTERED``.
+
+        Args:
+            exception: The exception to classify.
+
+        Returns:
+            The category, or None to fall back to the status code.
+        """
+        return classify_openai_error(exception)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
 
@@ -724,7 +736,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 # application-supplied content and the context is repaired, so
                 # the error is pushed as APPLICATION instead of letting the
                 # rejection classify as permanent and cost the service its
-                # usability.
+                # usability. A content-filter rejection keeps its own category
+                # even when a file is removed, since no response is coming.
                 removed = (
                     isinstance(e, (BadRequestError, UnprocessableEntityError))
                     or (isinstance(e, APIStatusError) and e.status_code == 413)
@@ -732,7 +745,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 await self.push_error(
                     error_msg=f"Error during completion: {e}",
                     exception=e,
-                    category=ErrorCategory.APPLICATION if removed else None,
+                    category=classify_openai_error(e)
+                    or (ErrorCategory.APPLICATION if removed else None),
                 )
             finally:
                 await self.stop_processing_metrics()

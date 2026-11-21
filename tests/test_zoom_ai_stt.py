@@ -19,10 +19,15 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    InputAudioRawFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_latency import ZOOM_AI_TTFS_P99
 from pipecat.services.zoom_ai import stt as zoom_ai_stt
 from pipecat.services.zoom_ai.stt import ZoomAISTTService
 from pipecat.transcriptions.language import Language
@@ -167,7 +172,7 @@ async def test_input_gap_mid_turn_sends_silence_to_end_it(monkeypatch, turn_open
 
 
 @pytest.mark.asyncio
-async def test_input_gap_silence_is_resampled_and_counted_at_the_pipeline_rate(monkeypatch):
+async def test_input_gap_silence_is_sent_and_counted_at_16_khz(monkeypatch):
     monkeypatch.setattr(zoom_ai_stt, "INPUT_GAP_SECS", 0.02)
     service = _live(sample_rate=8000)
     websocket = _FakeWebsocket()
@@ -180,21 +185,20 @@ async def test_input_gap_silence_is_resampled_and_counted_at_the_pipeline_rate(m
     task.cancel()
 
     sent = b"".join(m for m in websocket.sent if isinstance(m, bytes))
-    # Up to 450 ms at 16 kHz; the resampler holds back the rest.
-    assert 0 < len(sent) <= 16000 * 2 * 450 // 1000
+    assert len(sent) == 16000 * 2 * 450 // 1000
     assert service._stt_usage_pending_seconds == pytest.approx(0.45)
 
 
 @pytest.mark.asyncio
-async def test_keepalive_silence_is_resampled_and_counted(monkeypatch):
+async def test_keepalive_silence_is_sent_and_counted(monkeypatch):
     service = _live(sample_rate=24000)
     websocket = _FakeWebsocket()
     service._websocket = websocket
 
-    await service._send_keepalive(bytes(24000 * 2 // 10))  # 100 ms at 24 kHz
+    await service._send_keepalive(bytes(16000 * 2 // 10))  # 100 ms at 16 kHz
 
     sent = b"".join(m for m in websocket.sent if isinstance(m, bytes))
-    assert 0 < len(sent) <= 16000 * 2 // 10
+    assert len(sent) == 16000 * 2 // 10
     assert service._stt_usage_pending_seconds == pytest.approx(0.1)
 
 
@@ -228,8 +232,8 @@ async def test_off_rate_audio_is_resampled_to_16_khz(monkeypatch):
     service._websocket = _FakeWebsocket()
 
     for _ in range(10):
-        async for _ in service.run_stt(b"\x00" * 1600):
-            pass
+        frame = InputAudioRawFrame(audio=b"\x00" * 1600, sample_rate=8000, num_channels=1)
+        await service.process_audio_frame(frame, FrameDirection.DOWNSTREAM)
 
     audio_sent = b"".join(service._websocket.sent)
     # 8 kHz in, 16 kHz out: twice the bytes, less what the resampler still holds.
@@ -567,7 +571,42 @@ async def test_live_text_polishing_pushes_the_polished_text(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_live_speaker_labels_stay_in_the_raw_result(monkeypatch):
+async def test_live_transcripts_carry_scribes_speaker(monkeypatch):
+    service = _live(
+        settings=ZoomAISTTService.Settings(
+            diarization=True, speaker_format="[Speaker {speaker_number}] {text}"
+        )
+    )
+    service._websocket = _FakeWebsocket(
+        [
+            _event(
+                "transcription.completed",
+                item_id="item_1",
+                transcript="My favorite fruit is the mango.",
+                speaker="Speaker 1",
+            ),
+            _event(
+                "transcription.completed",
+                item_id="item_2",
+                transcript="Mine is the banana.",
+                speaker="Speaker 2",
+            ),
+        ]
+    )
+    frames = _record_frames(monkeypatch, service)
+
+    await service._receive_messages()
+
+    first, second = [f for f in frames if isinstance(f, TranscriptionFrame)]
+    assert (first.speaker.label, first.speaker.number) == ("Speaker 1", 1)
+    assert first.text == "[Speaker 1] My favorite fruit is the mango."
+    assert (second.speaker.label, second.speaker.number) == ("Speaker 2", 2)
+    assert second.text == "[Speaker 2] Mine is the banana."
+    assert first.finalized and second.finalized
+
+
+@pytest.mark.asyncio
+async def test_live_transcript_with_several_speakers_is_split_by_speaker(monkeypatch):
     service = _live(settings=ZoomAISTTService.Settings(diarization=True))
     spans = [  # sent only when the speaker changed mid-utterance
         {"speaker": "Speaker 1", "transcript": "Hi", "audio_start_ms": 0, "audio_end_ms": 500},
@@ -578,13 +617,7 @@ async def test_live_speaker_labels_stay_in_the_raw_result(monkeypatch):
             _event(
                 "transcription.completed",
                 item_id="item_1",
-                transcript="[Speaker 1] Hello there.",
-                speaker="Speaker 1",
-            ),
-            _event(
-                "transcription.completed",
-                item_id="item_2",
-                transcript="Hi fine",
+                transcript="[Speaker 1] Hi [Speaker 2] fine",
                 speaker="Speaker 1",
                 speaker_segments=spans,
             ),
@@ -594,11 +627,73 @@ async def test_live_speaker_labels_stay_in_the_raw_result(monkeypatch):
 
     await service._receive_messages()
 
-    first, second = [f for f in frames if isinstance(f, TranscriptionFrame)]
-    assert first.text == "Hello there."
-    assert first.result["speaker"] == "Speaker 1"
-    assert "speaker_segments" not in first.result
-    assert second.result["speaker_segments"] == spans
+    runs = [f for f in frames if isinstance(f, TranscriptionFrame)]
+    assert [(f.speaker.label, f.text, f.finalized) for f in runs] == [
+        ("Speaker 1", "Hi", False),
+        ("Speaker 2", "fine", True),
+    ]
+    assert all(f.result["speaker_segments"] == spans for f in runs)
+
+
+@pytest.mark.asyncio
+async def test_live_transcripts_have_no_speaker_without_diarization(monkeypatch):
+    service = _live(settings=ZoomAISTTService.Settings(speaker_format="{speaker}: {text}"))
+    service._websocket = _FakeWebsocket(
+        [_event("transcription.completed", item_id="item_1", transcript="Hi", speaker="Speaker 1")]
+    )
+    frames = _record_frames(monkeypatch, service)
+
+    await service._receive_messages()
+
+    [frame] = [f for f in frames if isinstance(f, TranscriptionFrame)]
+    assert frame.speaker is None
+    assert frame.text == "Hi"
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_finalizes_only_the_last_speaker_run(monkeypatch):
+    service = _live(
+        vad_force_turn_endpoint=True, settings=ZoomAISTTService.Settings(diarization=True)
+    )
+    spans = [
+        {"speaker": "Speaker 1", "transcript": "Hi"},
+        {"speaker": "Speaker 2", "transcript": "fine"},
+    ]
+    service._websocket = _FakeWebsocket(
+        [
+            _event(
+                "transcription.completed",
+                item_id="item_1",
+                transcript="Hi fine",
+                speaker="Speaker 1",
+                speaker_segments=spans,
+            ),
+        ]
+    )
+    frames = _record_frames(monkeypatch, service)
+    service.request_finalize()  # as the VAD stop's commit does
+
+    await service._receive_messages()
+
+    assert [(f.speaker.label, f.finalized) for f in frames] == [
+        ("Speaker 1", False),
+        ("Speaker 2", True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_speaker_format_change_does_not_reconnect(monkeypatch):
+    service = _live()
+    reconnect = AsyncMock()
+    monkeypatch.setattr(service, "_request_reconnect", reconnect)
+
+    changed = await service._update_settings(
+        ZoomAISTTService.Settings(speaker_format="{speaker}: {text}")
+    )
+
+    assert "speaker_format" in changed
+    reconnect.assert_not_awaited()
+    assert "speaker_format" not in json.dumps(service._session_update())
 
 
 @pytest.mark.asyncio
@@ -937,3 +1032,104 @@ async def test_refused_handshake_reports_zoom_reason(monkeypatch, body, expected
 
     push_error.assert_awaited_once_with(error_msg=expected, exception=refusal)
     assert connection_errors == [expected.removeprefix("Unable to connect to Zoom Scribe Live: ")]
+
+
+# Pipecat turn detection (vad_force_turn_endpoint=True)
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_turns_off_scribe_vad(monkeypatch):
+    websocket = _FakeWebsocket()
+    _patch_connect(monkeypatch, websocket)
+    service = _live(
+        vad_force_turn_endpoint=True,
+        # Neither the silence length nor ``extra`` can turn Scribe's VAD back on.
+        settings=ZoomAISTTService.Settings(
+            silence_duration_ms=500, extra={"turn_detection": {"silence_duration_ms": 600}}
+        ),
+    )
+
+    await service._connect_websocket()
+
+    assert json.loads(websocket.sent[0])["turn_detection"] == {"type": "none"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vad_force_turn_endpoint", [True, False])
+async def test_vad_stop_commits_only_in_pipecat_mode(monkeypatch, vad_force_turn_endpoint):
+    service = _live(vad_force_turn_endpoint=vad_force_turn_endpoint)
+    service._websocket = _FakeWebsocket()
+    monkeypatch.setattr(service, "push_frame", AsyncMock())
+
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    sent = [json.loads(m) for m in service._websocket.sent if isinstance(m, str)]
+    assert (sent == [{"type": "input_audio_buffer.commit"}]) is vad_force_turn_endpoint
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_pushes_the_committed_final_without_turn_frames(monkeypatch):
+    service = _live(vad_force_turn_endpoint=True)
+    service._websocket = _FakeWebsocket(
+        [
+            _event("session.updated"),
+            _event("input_audio_buffer.speech_started", item_id="item_1", audio_start_ms=0),
+            _event("input_audio_buffer.committed", item_id="item_1"),
+            _event(
+                "transcription.completed",
+                item_id="item_1",
+                transcript="What is the capital of France?",
+                audio_start_ms=0,
+                audio_end_ms=900,
+            ),
+            # Scribe opens its next turn right after the commit.
+            _event("input_audio_buffer.speech_started", item_id="item_2", audio_start_ms=900),
+        ]
+    )
+    frames = _record_frames(monkeypatch, service)
+    service.request_finalize()  # as the VAD stop's commit does
+
+    await service._receive_messages()
+
+    assert [type(f) for f in frames] == [TranscriptionFrame]
+    assert frames[0].text == "What is the capital of France?"
+    assert frames[0].finalized
+    assert service._can_reconnect  # Scribe's turn events don't hold reconnects
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_skips_an_empty_final(monkeypatch):
+    service = _live(vad_force_turn_endpoint=True)
+    service._websocket = _FakeWebsocket([_event("transcription.completed", transcript="")])
+    frames = _record_frames(monkeypatch, service)
+
+    await service._receive_messages()
+
+    assert frames == []
+
+
+def test_pipecat_mode_reports_ttfs_and_keeps_default_turn_strategies():
+    service = _live(vad_force_turn_endpoint=True)
+
+    frame = service.service_metadata_frame()
+
+    assert frame.user_turn_strategies is None
+    assert service.supports_ttfs is True
+    assert frame.ttfs_p99_latency == ZOOM_AI_TTFS_P99
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_sends_no_input_gap_silence(monkeypatch):
+    websocket = _FakeWebsocket()
+    _patch_connect(monkeypatch, websocket)
+    service = _live(vad_force_turn_endpoint=True)
+    started = []
+    monkeypatch.setattr(
+        service, "create_task", lambda coro, name=None: started.append(name) or coro.close()
+    )
+
+    await service._connect()
+
+    assert "receive" in started
+    assert "input_gap" not in started

@@ -80,6 +80,13 @@ class TogetherTTSSettings(TTSSettings):
         extra_params: Model-specific synthesis options sent in the session
             update, such as ``pronunciation_dict``, a list of
             ``"<source>/<replacement>"`` entries.
+
+            Another way to guide pronunciation, besides ``pronunciation_dict``, is to
+            pass :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace
+            rules through the ``text_transforms`` parameter. Pipecat applies them before
+            the text reaches the provider, so the same rules can work across TTS
+            services and depend less on what each provider supports. They're worth
+            trying if ``pronunciation_dict`` isn't giving you the results you want.
     """
 
     max_partial_length: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)

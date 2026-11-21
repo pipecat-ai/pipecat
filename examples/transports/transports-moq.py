@@ -115,7 +115,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
-            model="gpt-4o",
             system_instruction=(
                 "You are a helpful assistant in a real-time voice call. "
                 "Your goal is to demonstrate your capabilities in a succinct way. "
@@ -165,7 +164,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     await runner.add_workers(worker)
 
     @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport):
+    async def on_client_connected(transport, client):
         logger.info("Client subscribed — starting conversation")
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
@@ -173,7 +172,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport):
+    async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
         await runner.cancel()
 

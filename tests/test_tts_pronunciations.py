@@ -74,6 +74,22 @@ class TestIpaPhones(unittest.TestCase):
         phones = stress_before_vowels(ipa_phones("ˌsɪpɹoʊˈflɑksəsɪn"))
         self.assertEqual("".join(phones), "sˌɪpɹoʊflˈɑksəsɪn")
 
+    def test_stress_before_composed_and_decomposed_nasal_vowels(self):
+        for vowel, base in (("ã", "a"), ("ẽ", "e"), ("ĩ", "i"), ("õ", "o"), ("ũ", "u"), ("ỹ", "y")):
+            for notation in (vowel, base + "\u0303"):
+                for stress in ("ˈ", "ˌ"):
+                    with self.subTest(notation=notation, stress=stress):
+                        self.assertEqual(
+                            stress_before_vowels(ipa_phones(stress + "k" + notation)),
+                            ["k", stress, vowel],
+                        )
+
+    def test_stress_does_not_skip_a_nasal_vowel(self):
+        self.assertEqual("".join(stress_before_vowels(ipa_phones("ˈkãtu"))), "kˈãtu")
+
+    def test_stress_skips_nasal_consonants_and_keeps_uncomposed_vowels(self):
+        self.assertEqual(stress_before_vowels(ipa_phones("ˈɲɑ̃")), ["ɲ", "ˈ", "ɑ̃"])
+
 
 class TestCartesiaPronunciation(unittest.TestCase):
     def test_ipa(self):
@@ -86,6 +102,12 @@ class TestCartesiaPronunciation(unittest.TestCase):
         a = CartesiaTTSService.format_pronunciation("Achoo", "/əˈʧu/")
         b = CartesiaTTSService.format_pronunciation("Achoo", "ə'tʃu")
         self.assertEqual(a, b)
+
+    def test_stress_stays_on_a_nasal_vowel(self):
+        self.assertEqual(
+            CartesiaTTSService.format_pronunciation("Canto", "ˈkãtu"),
+            "<<k|ˈ|ã|t|u>>",
+        )
 
     def test_phrase(self):
         self.assertEqual(

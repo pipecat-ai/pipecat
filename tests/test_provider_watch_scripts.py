@@ -74,7 +74,7 @@ class TestInventory:
         for unit in units:
             for cls in unit.classes:
                 source = (REPO_ROOT / "src" / Path(*cls.module.split("."))).with_suffix(".py")
-                text = source.read_text()
+                text = source.read_text(encoding="utf-8")
                 if f"class {cls.name}(" not in text:
                     continue
                 section = text.split(f"class {cls.name}(")[1].split("\nclass ")[0]
@@ -170,7 +170,7 @@ class TestDigest:
         def write(unit, body):
             path = tmp_path / "reports" / unit / "2026-08-20.md"
             path.parent.mkdir(parents=True)
-            path.write_text(body)
+            path.write_text(body, encoding="utf-8")
 
         write(
             "openai/llm",
@@ -247,6 +247,46 @@ class TestDigest:
         )
         assert text.rstrip().endswith("#the-weekly-loop).")
 
+    def test_render_issue_lists_only_high_priority_titles(self, reports_dir):
+        reports = digest.load_reports(reports_dir, "2026-08-20")
+        text = digest.render_issue(
+            reports,
+            date="2026-08-20",
+            highlights="- Big week for LLMs",
+            repo_url="https://x/y",
+            digest_url="https://x/y/blob/main/digests/2026-08-20.md",
+        )
+
+        assert text.startswith("# Provider watch — 2026-08-20\n\n- Big week for LLMs")
+        sections = [line for line in text.splitlines() if line.startswith("## ")]
+        assert sections == [
+            "## PRs to review",
+            "## Branches not opened as PRs (dry run)",
+            "## Changes to consider",
+            "## Did not complete",
+            "## Nothing new",
+        ]
+        consider = text.split("## Changes to consider")[1].split("## Did not complete")[0]
+        assert "emotion controls unreachable\n" in consider
+        assert "needs a call" not in consider
+        assert "sonic-4 preview" not in consider
+        assert (
+            "The [full digest](https://x/y/blob/main/digests/2026-08-20.md) lists every change "
+            "to consider with its notes, including 1 low." in consider
+        )
+        assert text.rstrip().endswith("#the-weekly-loop).")
+
+    def test_highlights_of_a_rendered_digest(self, reports_dir):
+        reports = digest.load_reports(reports_dir, "2026-08-20")
+        highlights = "- Big week for LLMs\n- **Two** services broke"
+        rendered = digest.render(
+            reports, date="2026-08-20", highlights=highlights, repo_url="https://x/y"
+        )
+        plain = digest.render(reports, date="2026-08-20", highlights=None, repo_url="https://x/y")
+
+        assert digest.highlights_of(rendered) == highlights
+        assert digest.highlights_of(plain) is None
+
     def test_cli_writes_file(self, reports_dir):
         out = reports_dir / "digests" / "2026-08-20.md"
         subprocess.run(
@@ -264,8 +304,8 @@ class TestDigest:
             ],
             check=True,
         )
-        assert out.read_text().startswith("# Provider watch — 2026-08-20")
-        assert "`openai/llm`" in out.read_text()
+        assert out.read_text(encoding="utf-8").startswith("# Provider watch — 2026-08-20")
+        assert "`openai/llm`" in out.read_text(encoding="utf-8")
 
 
 class TestProbe:
@@ -371,16 +411,14 @@ class TestPublish:
     """publish.py against a fake git/gh so nothing leaves the machine."""
 
     class FakeShell:
-        def __init__(
-            self, open_prs=None, branches=None, commits=None, fragments=None, label_prs=None
-        ):
+        def __init__(self, open_prs=None, branches=None, commits=None, label_prs=None):
             self.calls = []
             self.open_prs = open_prs or {}
             self.branches = set(branches or [])
             self.commits = commits or {}  # branch -> [(subject, body), ...]
-            self.fragments = fragments or {}  # branch/ref -> [changelog paths added]
             self.label_prs = label_prs or []  # rows for `gh pr list --label`
-            self.pr_files = {}  # number -> [changed paths]
+            # number -> [path added, or (path, changeType)]
+            self.pr_files = {}
             self.pr_counter = 100
 
         def run(self, *args, cwd=None, check=True):
@@ -392,13 +430,16 @@ class TestPublish:
                 url = self.open_prs.get(head)
                 return json.dumps([{"url": url}] if url else [])
             if args[:3] == ("gh", "pr", "view") and "files" in args:
-                return json.dumps({"files": [{"path": p} for p in self.pr_files.get(args[3], [])]})
+                files = [
+                    {"path": f, "changeType": "ADDED"}
+                    if isinstance(f, str)
+                    else {"path": f[0], "changeType": f[1]}
+                    for f in self.pr_files.get(args[3], [])
+                ]
+                return json.dumps({"files": files})
             if args[:3] == ("gh", "pr", "create"):
                 self.pr_counter += 1
                 return f"https://github.com/pipecat-ai/pipecat/pull/{self.pr_counter}\n"
-            if args[:2] == ("git", "diff") and "--name-only" in args:
-                branch = args[4].split("..")[-1].lstrip(".")
-                return "\n".join(self.fragments.get(branch, []))
             if args[:2] == ("git", "rev-list"):
                 branch = args[-1].split("..")[-1]
                 return "\n".join(f"{branch}@{i}" for i in range(len(self.commits.get(branch, ()))))
@@ -436,7 +477,8 @@ class TestPublish:
             path.write_text(
                 f"---\nservice: {unit}\nprs:\n  - branch: {branch}\n"
                 f"    state: branch\n    summary: s\n---\n\n# R\n\n## PRs\n"
-                f"- `{branch}` — review: `git show {branch}` — s\n"
+                f"- `{branch}` — review: `git show {branch}` — s\n",
+                encoding="utf-8",
             )
 
         write("fireworks/llm", "provider-watch/fireworks-llm-default")
@@ -471,14 +513,14 @@ class TestPublish:
         ]
         assert outcome.adopted == ["https://github.com/pipecat-ai/pipecat/pull/7"]
 
-        fireworks = (tmp_path / "reports/fireworks/llm/2026-08-20.md").read_text()
+        fireworks = (tmp_path / "reports/fireworks/llm/2026-08-20.md").read_text(encoding="utf-8")
         assert (
             "state: open" in fireworks
             and "url: https://github.com/pipecat-ai/pipecat/pull/101" in fireworks
         )
         assert "- https://github.com/pipecat-ai/pipecat/pull/101 — s" in fireworks
         assert "git diff" not in fireworks
-        ollama = (tmp_path / "reports/ollama/llm/2026-08-20.md").read_text()
+        ollama = (tmp_path / "reports/ollama/llm/2026-08-20.md").read_text(encoding="utf-8")
         assert (
             "state: open" in ollama
             and "url: https://github.com/pipecat-ai/pipecat/pull/102" in ollama
@@ -503,7 +545,8 @@ class TestPublish:
         path.write_text(
             f"---\nservice: cartesia/tts\nprs:\n  - branch: {branch}\n"
             f"    state: branch\n    summary: Track Cartesia's sonic-4 rollout\n---\n\n"
-            f"# R\n\n## PRs\n- `{branch}` — review: `git show {branch}` — s\n"
+            f"# R\n\n## PRs\n- `{branch}` — review: `git show {branch}` — s\n",
+            encoding="utf-8",
         )
         sh = self.FakeShell(
             branches=[branch],
@@ -549,7 +592,6 @@ class TestPublish:
                     "headRepositoryOwner": {"login": "pipecat-ai"},
                 }
             ],
-            fragments={"FETCH_HEAD": frags},
         )
         sh.pr_files = {"101": frags}
         assert publish.rename_open_pr_fragments(sh, tmp_path, "pipecat-ai/pipecat") == []
@@ -563,6 +605,38 @@ class TestPublish:
         assert any(c[:2] == ("git", "commit") and "#101" in c[-1] for c in sh.calls)
         assert ("git", "push", "origin", f"HEAD:refs/heads/{branch}") in [
             c[:4] for c in sh.calls if c[:2] == ("git", "push")
+        ]
+
+    def test_renames_only_fragments_the_pr_adds(self, tmp_path):
+        import publish
+
+        branch = "provider-watch/together-llm-reasoning-effort"
+        sh = self.FakeShell(
+            label_prs=[
+                {
+                    "number": 6437,
+                    "headRefName": branch,
+                    "headRepositoryOwner": {"login": "pipecat-ai"},
+                }
+            ],
+        )
+        sh.pr_files = {
+            "6437": [
+                "changelog/+together-reasoning-effort.added.md",
+                ("changelog/6385.added.md", "MODIFIED"),
+                ("changelog/6387.fixed.md", "REMOVED"),
+                "src/pipecat/services/together/llm.py",
+            ]
+        }
+        assert publish.rename_open_pr_fragments(sh, tmp_path, "pipecat-ai/pipecat") == []
+        moves = [c for c in sh.calls if c[:2] == ("git", "mv")]
+        assert moves == [
+            (
+                "git",
+                "mv",
+                "changelog/+together-reasoning-effort.added.md",
+                "changelog/6437.added.md",
+            )
         ]
 
     def test_sweep_leaves_correct_and_non_bot_prs_alone(self, tmp_path):
@@ -586,7 +660,6 @@ class TestPublish:
                     "headRepositoryOwner": {"login": "someone"},
                 },
             ],
-            fragments={"FETCH_HEAD": ["changelog/+deepseek-thinking.added.md"]},
         )
         sh.pr_files = {
             "5528": ["changelog/+deepseek-thinking.added.md", "src/x.py"],
@@ -632,16 +705,31 @@ class TestPublish:
         tmp_path, publish = reports_dir
         digest_file = tmp_path / "digests" / "2026-08-20.md"
         digest_file.parent.mkdir(parents=True)
-        digest_file.write_text("# Provider watch — 2026-08-20\n\n- authored highlight\n")
+        digest_file.write_text(
+            "# Provider watch — 2026-08-20\n\n- authored highlight\n", encoding="utf-8"
+        )
         assert publish.ensure_digest(tmp_path, "2026-08-20", "o/r") == digest_file
-        assert "authored highlight" in digest_file.read_text()
+        assert "authored highlight" in digest_file.read_text(encoding="utf-8")
 
     def test_ensure_digest_renders_plain_when_missing(self, reports_dir):
         tmp_path, publish = reports_dir
         out = publish.ensure_digest(tmp_path, "2026-08-20", "o/r")
-        text = out.read_text()
+        text = out.read_text(encoding="utf-8")
         assert out == tmp_path / "digests" / "2026-08-20.md"
         assert "3 units researched" in text and "fireworks/llm" in text
+
+    def test_issue_body_keeps_the_digest_highlights_and_links_it(self, reports_dir):
+        tmp_path, publish = reports_dir
+        digest_file = tmp_path / "digests" / "2026-08-20.md"
+        digest_file.parent.mkdir(parents=True)
+        digest_file.write_text(
+            "# Provider watch — 2026-08-20\n\n- authored highlight\n\n**3 units researched** — …\n",
+            encoding="utf-8",
+        )
+        body = publish.issue_body(tmp_path, "2026-08-20", "o/r", digest_file)
+
+        assert body.startswith("# Provider watch — 2026-08-20\n\n- authored highlight\n")
+        assert "3 units researched" in body and "fireworks/llm" in body
 
     def test_worth_an_issue(self, reports_dir, tmp_path):
         _, publish = reports_dir
@@ -649,10 +737,13 @@ class TestPublish:
         quiet = tmp_path / "quiet" / "reports" / "groq" / "llm"
         quiet.mkdir(parents=True)
         (quiet / "2026-08-20.md").write_text(
-            "---\nservice: groq/llm\ngaps: []\nprs: []\nerror: null\n---\n"
+            "---\nservice: groq/llm\ngaps: []\nprs: []\nerror: null\n---\n",
+            encoding="utf-8",
         )
         assert not publish.worth_an_issue(publish.load_reports(tmp_path / "quiet", "2026-08-20"))
-        (quiet / "2026-08-20.md").write_text("---\nservice: groq/llm\nerror: boom\n---\n")
+        (quiet / "2026-08-20.md").write_text(
+            "---\nservice: groq/llm\nerror: boom\n---\n", encoding="utf-8"
+        )
         assert publish.worth_an_issue(publish.load_reports(tmp_path / "quiet", "2026-08-20"))
 
     def test_missing_branch_is_skipped(self, reports_dir):

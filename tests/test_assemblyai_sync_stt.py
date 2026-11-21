@@ -131,19 +131,20 @@ async def test_transcribe_posts_the_audio_and_config_parts(aiohttp_client):
 
 
 @pytest.mark.asyncio
-async def test_an_explicit_model_routes_the_request(aiohttp_client):
+@pytest.mark.parametrize("model", ["universal-3-5-pro", "assemblyai-stt-3-7"])
+async def test_an_explicit_model_routes_the_request(aiohttp_client, model):
     captured = {}
     async with aiohttp.ClientSession() as session:
         service = await _service(
             aiohttp_client,
             _transcribe_app(captured),
             session,
-            settings=AssemblyAISyncSTTService.Settings(model="universal-3-5-pro"),
+            settings=AssemblyAISyncSTTService.Settings(model=model),
         )
 
         await service._transcribe(WAV)
 
-    assert captured["headers"]["X-AAI-Model"] == "universal-3-5-pro"
+    assert captured["headers"]["X-AAI-Model"] == model
 
 
 @pytest.mark.asyncio

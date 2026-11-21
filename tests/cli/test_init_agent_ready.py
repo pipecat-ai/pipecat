@@ -240,7 +240,9 @@ class TestInitAgentReady:
         afile.write_text("x", encoding="utf-8")
         result = runner.invoke(app, ["init", str(afile)])
         assert result.exit_code == 1
-        assert "not a directory" in result.output
+        # Rich wraps the message at the terminal width, and the path before it can be long
+        # enough (a macOS temp directory) to put a line break inside "not a directory".
+        assert "not a directory" in " ".join(result.output.split())
 
 
 class TestBuildMethodRouting:

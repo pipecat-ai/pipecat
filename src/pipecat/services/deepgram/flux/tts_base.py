@@ -45,12 +45,17 @@ class DeepgramFluxTTSSettings(TTSSettings):
         expressivity: Expressive range on a calm-to-animated axis. ``None``
             leaves Flux at its default range. Flux fixes expressivity when the
             connection opens, so a change reconnects.
+        normalize_volume: Whether Flux levels the loudness of the generated
+            speech across voices and turns. ``None`` leaves Flux at its default,
+            which normalizes. Fixed when the connection opens, so a change
+            reconnects.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     expressivity: Literal[-2, -1, 0, 1, 2] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+    normalize_volume: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramFluxTTSBase(TTSService):
@@ -240,6 +245,9 @@ class DeepgramFluxTTSBase(TTSService):
 
         if self._settings.expressivity is not None:
             params.append(f"expressivity={self._settings.expressivity}")
+
+        if self._settings.normalize_volume is not None:
+            params.append(f"normalize_volume={str(self._settings.normalize_volume).lower()}")
 
         if self._mip_opt_out is not None:
             params.append(f"mip_opt_out={str(self._mip_opt_out).lower()}")

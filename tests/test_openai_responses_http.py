@@ -10,7 +10,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from openai import APITimeoutError
+from openai import APITimeoutError, BadRequestError
 from openai.types.responses import (
     ResponseCompletedEvent,
     ResponseErrorEvent,
@@ -46,8 +46,10 @@ from pipecat.frames.frames import (
     LLMThoughtTextFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
 from pipecat.tests.utils import run_test
+from pipecat.utils.errors import ErrorCategory
 from tests.openai_http_helpers import http
 
 
@@ -753,6 +755,52 @@ class TestHttpRetryOnTimeout:
 
         assert await service._create_stream({}) is stream
         assert attempts == 2
+
+
+# ---------------------------------------------------------------------------
+# process_frame — error classification
+# ---------------------------------------------------------------------------
+
+
+def _bad_request_with_code(code: str | None):
+    """Build a real OpenAI ``BadRequestError`` carrying the given error ``code``."""
+    response = http.Response(
+        400, request=http.Request("POST", "https://api.openai.com/v1/responses")
+    )
+    return BadRequestError(
+        "simulated api error",
+        response=response,
+        body={"code": code, "message": "simulated api error"},
+    )
+
+
+class TestHttpErrorClassification:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "code, category, usable",
+        [
+            ("content_filter", ErrorCategory.CONTENT_FILTERED, True),
+            (None, ErrorCategory.INVALID_REQUEST, False),
+        ],
+    )
+    async def test_bad_request_usability(self, code, category, usable):
+        """Only a content-filter 400 leaves the service usable."""
+        service = _make_service()
+        service.push_frame = AsyncMock()
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+        service._process_context = AsyncMock(side_effect=_bad_request_with_code(code))
+
+        errors = []
+
+        @service.event_handler("on_error")
+        async def on_error(processor, error):
+            errors.append(error.category)
+
+        await service.process_frame(LLMContextFrame(LLMContext()), FrameDirection.DOWNSTREAM)
+
+        assert errors == [category]
+        assert service.is_usable is usable
 
 
 # ---------------------------------------------------------------------------

@@ -14,6 +14,8 @@ from pipecat.frames.frames import TextType
 # +1 800 555 1234, etc.
 _PHONE_RE = re.compile(
     r"(?<!\d)"  # not preceded by a digit (no partial match inside a longer number)
+    r"(?<!\d\.)"  # not the fraction of a decimal ("3.1415926535")
+    r"(?<![$€£¥₹])"  # not a currency amount ("$2500000000")
     r"(\+?1[\s.\-]?)?"  # optional country code
     r"(\(?\d{3}\)?[\s.\-]?)"  # area code
     r"(\d{3}[\s.\-]?)"  # exchange

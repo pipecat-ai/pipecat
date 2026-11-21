@@ -22,6 +22,8 @@ from functools import cache
 from sentencex import segment  # pyright: ignore[reportAttributeAccessIssue]
 
 _QUOTED_WORD_END = re.compile(r"(?<!\w)([\"'“‘«‹„‟「『]+)[\w.]+\.$")
+# A numbered-list marker such as "1." at the start of a line.
+_LIST_MARKER = re.compile(r"(?m)^[ \t]*\d+\.(?=[ \t])")
 
 
 def resolve_sentence_tokenizer_language(language: str | None) -> str:
@@ -159,14 +161,19 @@ def match_endofsentence(text: str, *, language: str | None = None) -> int:
     if not text:
         return 0
 
-    sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(text)
+    # Sentencex splits after a list marker ("1. The" -> "1.", "The"). Blank the
+    # marker with equal-width spaces so it stays with its item; boundary offsets
+    # still refer to the original text. The digits are blanked too because some
+    # languages' rules (German, Finnish, Czech, ...) never start a sentence at a
+    # digit, which would merge each item into the one before it.
+    tokenizer_text = _LIST_MARKER.sub(lambda m: " " * len(m[0]), text)
+    sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(tokenizer_text)
 
     if not sentences:
         return 0
 
     first_sentence = sentences[0]
 
-    tokenizer_text = text
     # With an unfinished quote such as 'She said, "Dr. S', sentencex can split
     # after '"Dr.'. Recheck a proposed split after a quoted word ending in a
     # period, letting sentencex decide whether that word is an abbreviation.
@@ -175,7 +182,7 @@ def match_endofsentence(text: str, *, language: str | None = None) -> int:
         # equal-width spaces so sentencex sees the abbreviation without the quote.
         # Boundary offsets still refer to the original text, which keeps its quotes.
         start, end = quote.span(1)
-        tokenizer_text = text[:start] + " " * (end - start) + text[end:]
+        tokenizer_text = tokenizer_text[:start] + " " * (end - start) + tokenizer_text[end:]
         sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(tokenizer_text)
         first_sentence = sentences[0]
 
@@ -341,3 +348,33 @@ def concatenate_aggregated_text(text_parts: list[TextPartForConcatenation]) -> s
     result = result.strip()
 
     return result
+
+
+# Characters of scripts that are written without spaces between words (Chinese,
+# Japanese kana, Thai). A word boundary can't be required next to them: in
+# "你好小助手今天天气怎么样" there is no boundary between "手" and "今", because both
+# are word characters.
+_UNSPACED_SCRIPT_CHAR_RE = re.compile(
+    r"[\u0e00-\u0e7f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0002fa1f]"
+)
+
+
+def compile_phrase_pattern(phrase: str) -> re.Pattern:
+    """Compile a case-insensitive pattern that finds a spoken phrase in text.
+
+    The words of the phrase may be separated by any amount of whitespace
+    (including none). The match must start and end on a word boundary, except
+    next to characters of scripts written without spaces (Chinese, Japanese,
+    Thai), where speech-to-text output has no boundaries between words.
+
+    Args:
+        phrase: The phrase to find, for example "hey pipecat" or "小助手".
+
+    Returns:
+        The compiled pattern.
+    """
+    words = phrase.split()
+    body = r"\s*".join(re.escape(word) for word in words)
+    start = "" if words and _UNSPACED_SCRIPT_CHAR_RE.match(words[0][0]) else r"\b"
+    end = "" if words and _UNSPACED_SCRIPT_CHAR_RE.match(words[-1][-1]) else r"\b"
+    return re.compile(start + body + end, re.IGNORECASE)

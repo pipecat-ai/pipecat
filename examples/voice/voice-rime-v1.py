@@ -27,8 +27,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.rime.stt import RimeSTTService
 from pipecat.services.rime.tts_v1 import RimeV1TTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -66,7 +66,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     """Run the bot on the selected transport."""
     logger.info("Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+    stt = RimeSTTService(api_key=os.environ["RIME_API_KEY"])
 
     tts = RimeV1TTSService(
         api_key=os.environ["RIME_API_KEY"],

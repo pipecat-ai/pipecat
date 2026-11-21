@@ -144,18 +144,14 @@ def _use_polly(service: AWSPollyTTSService, polly):
     service._client = polly
 
 
-def _stub_for_run_tts(service: AWSPollyTTSService):
-    """Stub sample rate, resampler and metrics so run_tts can run offline."""
-    service._sample_rate = 16000
+def _stub_for_run_tts(service: AWSPollyTTSService, sample_rate: int = 16000):
+    """Stub sample rate and metrics so run_tts can run offline."""
+    service._sample_rate = sample_rate
     service._task_manager = TaskManager()
-
-    async def _aresample(data, in_rate, out_rate):
-        return data
 
     async def _anoop(*args, **kwargs):
         pass
 
-    service._resampler.resample = _aresample
     service.start_tts_usage_metrics = _anoop
     service.stop_ttfb_metrics = _anoop
 
@@ -322,18 +318,22 @@ async def test_fetch_word_marks_returns_empty_on_failure():
 
 
 @pytest.mark.asyncio
-async def test_cumulative_offset_across_sentences():
+@pytest.mark.parametrize("sample_rate", [8000, 16000])
+async def test_cumulative_offset_across_sentences(sample_rate):
     """A later sentence in the same turn is offset by the prior audio duration."""
     service = _make_service()
-    _stub_for_run_tts(service)
+    _stub_for_run_tts(service, sample_rate)
     captured = _capture_word_timestamps(service)
 
-    # Sentence 1: 1.0s of audio (32000 bytes), word "Hello" at 0 ms.
-    _use_polly(service, _FakePolly(pcm=_pcm(1.0), marks=_ndjson([("Hello", 0)])))
+    # Sentence 1: 1.0s of audio, word "Hello" at 0 ms.
+    polly = _FakePolly(pcm=_pcm(1.0, sample_rate), marks=_ndjson([("Hello", 0)]))
+    _use_polly(service, polly)
     await _drain(service, "Hello")
+    assert polly.calls[0]["SampleRate"] == str(sample_rate)
 
     # Sentence 2: word "World" at 100 ms -> 0.1 + 1.0 (prior duration) = 1.1s.
-    _use_polly(service, _FakePolly(pcm=_pcm(0.5), marks=_ndjson([("World", 100)])))
+    polly = _FakePolly(pcm=_pcm(0.5, sample_rate), marks=_ndjson([("World", 100)]))
+    _use_polly(service, polly)
     await _drain(service, "World")
 
     assert captured == [("Hello", pytest.approx(0.0)), ("World", pytest.approx(1.1))]

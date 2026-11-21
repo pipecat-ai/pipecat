@@ -81,9 +81,8 @@ def _resolve_sample_rate(sample_rate: int) -> int:
     """Pick the rate Bland will synthesize at.
 
     Bland renders a fixed set of rates. A pipeline running at any other rate is
-    served at 48 kHz and resampled by the output transport, which costs a
-    resample rather than fidelity: the audio frames carry the rate Bland
-    actually produced, not the pipeline's.
+    served at 48 kHz and its audio is resampled to the pipeline's rate, which
+    costs a resample rather than fidelity.
 
     Args:
         sample_rate: The pipeline's output rate.
@@ -174,8 +173,8 @@ class BlandTTSService(WebsocketTTSService):
             url: WebSocket URL for the Bland realtime TTS API. Defaults to
                 ``wss://api.bland.ai/v2/tts/ws``.
             sample_rate: Output sample rate in Hz. If None, uses the pipeline
-                default. A rate Bland does not render is replaced with 48000 and
-                resampled by the output transport.
+                default. A rate Bland does not render is replaced with 48000, and
+                the audio is resampled to this rate.
             text_aggregation_mode: How to aggregate incoming text before sending.
                 Defaults to ``TextAggregationMode.TOKEN``, streaming LLM tokens
                 straight to Bland for the lowest latency.

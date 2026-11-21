@@ -17,6 +17,8 @@ from typing import Any, Literal, Self
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.adapters.tts.base_expression_adapter import BaseExpressionAdapter
+from pipecat.adapters.tts.services.fish_adapter import FishAudioS2ExpressionAdapter
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -50,6 +52,9 @@ class FishAudioTTSSettings(TTSSettings):
     """Settings for FishAudioTTSService.
 
     Parameters:
+        language: BCP-47 tag of the text, such as ``en`` or ``es-MX``. Fish Audio uses it
+            only to spell out numbers, dates, units and symbols; it does not change the
+            voice. Unset detects the language of each chunk.
         latency: Latency mode ("normal" or "balanced"). Defaults to "balanced".
         normalize: Whether to normalize audio output. Defaults to True.
         temperature: Controls randomness in speech generation (0.0-1.0).
@@ -100,7 +105,7 @@ class FishAudioTTSService(InterruptibleTTSService):
     audio generation with interruption handling.
 
     Uses the ``s2.1-pro`` model by default. Set ``Settings(model=...)`` to use
-    another Fish Audio model, such as ``s1``, ``s2-pro``, or ``drama-3``.
+    another Fish Audio model, such as ``s2-pro`` or ``drama-3``.
     """
 
     Settings = FishAudioTTSSettings
@@ -224,6 +229,7 @@ class FishAudioTTSService(InterruptibleTTSService):
 
         self._api_key = api_key
         self._base_url = "wss://api.fish.audio/v1/tts/live"
+        self._s2_expression_adapter = FishAudioS2ExpressionAdapter()
         self._websocket = None
         self._receive_task = None
 
@@ -238,6 +244,17 @@ class FishAudioTTSService(InterruptibleTTSService):
             True, as Fish Audio service supports metrics generation.
         """
         return True
+
+    def get_expression_adapter(self) -> BaseExpressionAdapter:
+        """The adapter for the model: S2 tags on S2 models, otherwise none.
+
+        Returns:
+            The expression adapter for the current model.
+        """
+        model = self._settings.model
+        if isinstance(model, str) and model.startswith("s2"):
+            return self._s2_expression_adapter
+        return super().get_expression_adapter()
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if needed.
@@ -313,7 +330,11 @@ class FishAudioTTSService(InterruptibleTTSService):
             model = assert_given(self._settings.model)
             if model is not None:
                 headers["model"] = model
-            websocket = await self._websocket_connect(self._base_url, additional_headers=headers)
+            # With latency="normal", Fish sends a long sentence's audio in a few
+            # large messages, which can exceed the websockets default of 1 MiB.
+            websocket = await self._websocket_connect(
+                self._base_url, additional_headers=headers, max_size=16 * 1024 * 1024
+            )
             self._websocket = websocket
 
             prosody: dict[str, Any] = {
@@ -343,6 +364,9 @@ class FishAudioTTSService(InterruptibleTTSService):
                 value = getattr(self._settings, name)
                 if value is not None:
                     request_settings[name] = value
+
+            if self._settings.language is not None:
+                request_settings["language"] = str(self._settings.language)
             start_message = {"event": "start", "request": {"text": "", **request_settings}}
             await websocket.send(ormsgpack.packb(start_message))
             logger.debug("Sent start message to Fish Audio")

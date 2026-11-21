@@ -149,6 +149,14 @@ def test_coda_uses_binary_and_public_endpoint() -> None:
     assert service._text_aggregation_mode is TextAggregationMode.SENTENCE
 
 
+def test_spell_tag_aggregator_keeps_the_settings_language() -> None:
+    service = RimeV1TTSService(
+        api_key="key", settings=RimeV1TTSService.Settings(model="coda", language=Language.FR)
+    )
+
+    assert service._text_aggregator.language == "fr"
+
+
 @pytest.mark.parametrize(
     "model, url",
     [
@@ -613,7 +621,8 @@ async def test_context_error_reports_and_skips_the_rest_of_the_turn() -> None:
     assert sum(isinstance(frame, TTSStartedFrame) for frame in down_frames) == 2
     assert sum(isinstance(frame, TTSStoppedFrame) for frame in down_frames) == 2
     assert elapsed < 2.0
-    assert _texts(down_frames) == ["First one.", "First two.", "Second one.", "Second two."]
+    # Nothing was spoken, so none of the text reaches the context.
+    assert _texts(down_frames) == []
     assert service.is_usable
 
 
@@ -636,7 +645,7 @@ async def test_permanent_context_error_leaves_the_service_usable() -> None:
 
     errors = [frame for frame in up_frames if isinstance(frame, ErrorFrame)]
     assert errors and errors[0].category is ErrorCategory.UNKNOWN
-    assert _texts(down_frames) == ["Rejected text."]
+    assert _texts(down_frames) == []
     assert service.is_usable
 
 
@@ -664,7 +673,7 @@ async def test_done_without_audio_ends_the_context() -> None:
 
     assert not any(isinstance(frame, TTSAudioRawFrame) for frame in down_frames)
     assert any(isinstance(frame, TTSStoppedFrame) for frame in down_frames)
-    assert _texts(down_frames) == ["This audio is empty."]
+    assert _texts(down_frames) == []
 
 
 @pytest.mark.asyncio

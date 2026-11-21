@@ -25,7 +25,8 @@ scenario ``event:``             RTVI server message(s)
 ``llm_started``                 ``bot-llm-started``
 ``llm_response``                the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
 ``llm_marker``                  ``bot-llm-marker``: the sideband marker the LLM emitted in a
-                                response, such as a turn-completion marker, with its
+                                response, such as a turn-completion marker or the
+                                silent mark of a reply dropped unspoken, with its
                                 ``kind`` and the response's raw text; sent when the
                                 response ends, only on request
 ``tts_response``                the TTS's spoken text: one segment per ``bot-tts-text``
@@ -50,16 +51,31 @@ scenario ``event:``             RTVI server message(s)
                                 acknowledgment the user said while the bot
                                 talked, which neither interrupted it nor reached
                                 the LLM
+``metrics``                     ``metrics``: what the bot's processors measured (TTFB,
+                                processing time, usage), as sent, under ``data``.
+                                Kept in :attr:`EvalEventStream.metrics` and out of
+                                ``events_seen``
+``server_message``              ``server-message``: a message of the bot's own making
+                                (an ``RTVIServerMessageFrame``), with its ``data``
+                                and, as ``text``, the data as JSON
+``expression``                  ``bot-output`` in expressive conversation (alpha):
+                                expression the bot's TTS performed, in the tags
+                                the LLM writes: ``<<excited>>`` where the delivery of
+                                its spoken text changes (``<<neutral>>`` back to
+                                the baseline), ``[[laughter]]`` for a sound,
+                                ``[[pause 600]]`` for a pause. A tag the TTS can't
+                                perform is never reported
 ==========================      ==============================================
 """
 
 import asyncio
+import json
 import math
 import time
 from collections.abc import Callable
 
 from pipecat.evals.results import EvalTrace
-from pipecat.evals.serializer import EVAL_BOT_IMAGE_TYPE
+from pipecat.evals.serializer import EVAL_BOT_IMAGE_TYPE, EvalFunctionCallCancelFrame
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -67,7 +83,6 @@ from pipecat.frames.frames import (
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
     Frame,
-    FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InputTransportMessageFrame,
@@ -85,6 +100,10 @@ _INTERRUPTION_EVENTS = ("user_started_speaking", "bot_interrupted")
 
 class EvalBotEndedError(Exception):
     """The bot ended the call before the awaited event arrived, so it never will."""
+
+
+class EvalHarnessError(Exception):
+    """A service in the harness's own pipeline failed, so what the bot does next is no evidence."""
 
 
 class EvalEventStream:
@@ -118,6 +137,10 @@ class EvalEventStream:
         self._claimed: set[int] = set()
         # Every event in arrival order, for the result's diagnostics.
         self.events_seen: list[dict] = []
+        # Every metrics message the bot sent, in arrival order. Kept apart from
+        # events_seen: a bot reports several per turn, and they are measurements
+        # to read rather than the behavior a failed run is diagnosed from.
+        self.metrics: list[dict] = []
         # When each event type last arrived, for send_after anchoring.
         self.latest_event_times: dict[str, float] = {}
         # Accumulates the bot's LLM text for the current response, emitted as one
@@ -130,6 +153,11 @@ class EvalEventStream:
         # buffers toward one (a bot token, a persona sentence).
         self.last_activity = self._t0
         self._llm_text_at: float | None = None
+        # The delivery the bot last reported speaking in during the current response,
+        # so an ``expression`` event marks only where the delivery changes, and the
+        # event and pause segments already reported.
+        self._expression_delivery: list[str] = []
+        self._expression_segments: set = set()
         # The reply rule's flag: set by a send or an interruption, cleared at the
         # bot's next llm-started. While set, LLM text is dropped: an interrupted
         # response can still flush a trailing token after the interruption (it
@@ -164,6 +192,9 @@ class EvalEventStream:
         # Whether the bot closed the connection. Kept apart from its queued
         # bot_ended event, which a drop of the bot's pending output discards.
         self._bot_ended = False
+        # The harness's first pipeline error, kept apart from its queued
+        # harness_error event for the same reason.
+        self._harness_error: str | None = None
 
     @property
     def bot_speaking(self) -> bool:
@@ -190,6 +221,11 @@ class EvalEventStream:
     def bot_has_ended(self) -> bool:
         """Whether the bot ended the call (see :meth:`bot_ended`)."""
         return self._bot_ended
+
+    @property
+    def harness_error(self) -> str | None:
+        """The harness's first pipeline error, if any (see :meth:`harness_failed`)."""
+        return self._harness_error
 
     @property
     def bot_speech_outstanding(self) -> str:
@@ -245,6 +281,15 @@ class EvalEventStream:
         self._bot_ended = True
         self._bot_quiet.set()
 
+    def harness_failed(self, error: str) -> None:
+        """A service in the harness's own pipeline failed; the first error is kept.
+
+        Args:
+            error: The error's description.
+        """
+        if self._harness_error is None:
+            self._harness_error = error
+
     def _update_bot_transcribed(self) -> None:
         if (
             not self._bot_segment_open
@@ -273,16 +318,21 @@ class EvalEventStream:
         """Queue an event for the drivers.
 
         Stamps its arrival time as ``at`` (seconds since the stream began) unless
-        it has one, records it, and logs it.
+        it has one, records it, and logs it. A ``metrics`` event is recorded in
+        :attr:`metrics` rather than :attr:`events_seen`.
 
         Args:
             event: The event dict, with at least a ``type``.
         """
         event.setdefault("at", self.elapsed())
         self.touch()
-        self.events_seen.append(event)
+        if event["type"] == "metrics":
+            self.metrics.append(event)
+            preview = ", ".join(event.get("data") or {})
+        else:
+            self.events_seen.append(event)
+            preview = event.get("text") or event.get("transcript") or event.get("name") or ""
         self.latest_event_times[event["type"]] = time.monotonic()
-        preview = event.get("text") or event.get("transcript") or event.get("name") or ""
         self._trace.log(f"event: {event['type']}" + (f"  {str(preview)!r}" if preview else ""))
         await self._queue.put(event)
 
@@ -353,6 +403,7 @@ class EvalEventStream:
                 arrive. The harness's transcription of what the bot said last
                 (audio mode) is waited for first, since it can land after the
                 bot is gone.
+            EvalHarnessError: If the harness's own pipeline failed.
         """
 
         def wanted(event: dict) -> bool:
@@ -365,6 +416,8 @@ class EvalEventStream:
                     self._trace.log(f"match: {event_type!r} from earlier in the turn")
                     return self._turn_log[i]
         while True:
+            if self._harness_error is not None:
+                raise EvalHarnessError(self._harness_error)
             if self._bot_ended and self._queue.empty():
                 if not await self.wait_bot_transcribed(deadline - time.monotonic()):
                     raise TimeoutError()
@@ -439,6 +492,7 @@ class EvalEventStream:
             self._awaiting_reply = False
             self._text_buffer = []
             self._llm_text_at = None
+            self._expression_delivery = []
             return {"type": "llm_started"}
         elif isinstance(frame, LLMTextFrame):
             if self._awaiting_reply:
@@ -492,7 +546,7 @@ class EvalEventStream:
             frame,
             (
                 FunctionCallResultFrame,
-                FunctionCallCancelFrame,
+                EvalFunctionCallCancelFrame,
                 ExternalFunctionCallResultFrame,
                 ExternalFunctionCallCancelFrame,
             ),
@@ -506,7 +560,7 @@ class EvalEventStream:
                 "args": {
                     "tool_call_id": frame.tool_call_id,
                     "cancelled": isinstance(
-                        frame, (FunctionCallCancelFrame, ExternalFunctionCallCancelFrame)
+                        frame, (EvalFunctionCallCancelFrame, ExternalFunctionCallCancelFrame)
                     ),
                 },
             }
@@ -565,8 +619,15 @@ class EvalEventStream:
         self._observing = True
 
     def _interrupted(self) -> None:
-        """The bot reported an interruption: drop its pending output and wait for a fresh reply."""
-        self.drop_pending_bot_output("on interruption")
+        """The bot reported an interruption: drop its unfinished response and wait for a fresh reply.
+
+        The queue is left as it is. The bot reports the user's turn starting
+        just ahead of the interruption, and a driver may not have read those
+        reports yet. The interrupted response's text and spoken turn that
+        still arrive are held back until the bot's next response starts (see
+        ``_awaiting_reply``), and a send drops whatever is left before it.
+        """
+        self._text_buffer = []
         self._awaiting_reply = True
         self._bot_quiet.set()
 
@@ -587,9 +648,17 @@ class EvalEventStream:
         elif msg_type == "vad-user-stopped-speaking":
             return {"type": "vad_user_stopped_speaking"}
         elif msg_type == "bot-output":
-            return self._bot_backchannel_event(data)
+            return self._bot_backchannel_event(data) or self._expression_event(data)
         elif msg_type == "user-input":
             return self._user_input_event(data)
+        elif msg_type == "metrics":
+            return {"type": "metrics", "data": dict(data)}
+        elif msg_type == "server-message":
+            # The data is the bot's own, in any JSON shape; its text is what a
+            # scenario's content checks read and what a match records.
+            data = message.get("data")
+            text = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+            return {"type": "server_message", "data": data, "text": text}
         elif msg_type == EVAL_BOT_IMAGE_TYPE:
             return {
                 "type": "image",
@@ -617,6 +686,31 @@ class EvalEventStream:
             "type": "bot_backchannel",
             "text": progress.get("accumulated_text") or data.get("text", ""),
         }
+
+    def _expression_event(self, data: dict) -> dict | None:
+        """The expression the bot performed, from a ``bot-output``, written as the LLM writes it.
+
+        Only expressive conversation reports it: an event or pause segment,
+        once, or spoken text carrying ``delivery``, where it differs from the
+        delivery before it in the response. Each is reported as it is spoken
+        rather than announced, so they keep the order they were performed in.
+        """
+        text_type = data.get("text_type")
+        segment_id = data.get("segment_id")
+        if not data.get("will_be_spoken") or data.get("spoken_status") == "new":
+            return None
+        if text_type in ("expression_sound", "expression_pause"):
+            if segment_id in self._expression_segments:
+                return None
+            self._expression_segments.add(segment_id)
+            text = data.get("text", "")
+            tag = f"[[{text}]]" if text_type == "expression_sound" else f"[[pause {text}]]"
+            return {"type": "expression", "text": tag}
+        delivery = data.get("delivery")
+        if delivery is None or delivery == self._expression_delivery:
+            return None
+        self._expression_delivery = delivery
+        return {"type": "expression", "text": f"<<{', '.join(delivery) or 'neutral'}>>"}
 
     def _segment_event(self, event_type: str, text: str) -> dict:
         """One response segment; the text may be empty, as after an interruption."""

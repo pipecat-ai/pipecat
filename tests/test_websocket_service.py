@@ -14,10 +14,13 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from loguru import logger
 from websockets.asyncio.client import ClientConnection
+from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.frames import Close
+from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
 from pipecat.services.websocket_service import (
@@ -652,3 +655,133 @@ async def test_bounded_send_against_peer_that_stops_reading():
     finally:
         release_peer.set()
         server.close()
+
+
+# ---------------------------------------------------------------------------
+# Dropped connections — replacing or clearing an open connection aborts it
+# ---------------------------------------------------------------------------
+
+
+class _Peer:
+    """A local WebSocket server that records which connections are still open."""
+
+    def __init__(self):
+        self.open = set()
+        self.close_codes: list[int | None] = []
+
+    async def handle(self, websocket):
+        self.open.add(websocket)
+        try:
+            await websocket.wait_closed()
+        finally:
+            self.open.discard(websocket)
+            self.close_codes.append(websocket.close_code)
+
+    async def wait_until_all_closed(self, timeout: float = 2.0):
+        deadline = time.monotonic() + timeout
+        while self.open and time.monotonic() < deadline:
+            await _real_sleep(0.01)
+        return not self.open
+
+
+@pytest_asyncio.fixture
+async def peer():
+    peer = _Peer()
+    async with serve(peer.handle, "127.0.0.1", 0) as server:
+        peer.url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        yield peer
+
+
+class _CancellableDisconnectService(ConcreteWebsocketService):
+    """Disconnects the way most services do, with an await before the close."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.disconnecting = asyncio.Event()
+
+    async def _disconnect_websocket(self):
+        try:
+            if self._websocket:
+                # Stands in for a final message to the provider.
+                self.disconnecting.set()
+                await asyncio.Event().wait()
+                await self._websocket.close()
+        finally:
+            self._websocket = None
+
+
+@pytest.mark.asyncio
+async def test_clearing_an_open_connection_aborts_it(service, peer):
+    """The service never leaves an open connection behind when it clears the reference."""
+    service._websocket = await service._websocket_connect(peer.url)
+    websocket = service._websocket
+
+    service._websocket = None
+
+    assert await peer.wait_until_all_closed()
+    assert websocket.state is State.CLOSED
+
+
+@pytest.mark.asyncio
+async def test_clearing_a_closed_connection_leaves_its_close_alone(service, peer):
+    """A connection closed before it is cleared keeps its clean close."""
+    service._websocket = await service._websocket_connect(peer.url)
+    websocket = service._websocket
+    await websocket.close()
+
+    with patch.object(websocket.transport, "abort") as abort:
+        service._websocket = None
+
+    abort.assert_not_called()
+    assert await peer.wait_until_all_closed()
+    assert peer.close_codes == [1000]
+
+
+@pytest.mark.asyncio
+async def test_replacing_a_connection_aborts_only_the_old_one(service, peer):
+    """The replacement stays open while the connection it replaces is aborted."""
+    old = await service._websocket_connect(peer.url)
+    new = await service._websocket_connect(peer.url)
+    service._websocket = old
+
+    service._websocket = new
+
+    await _real_sleep(0.05)
+    assert old.state is State.CLOSED
+    assert new.state is State.OPEN
+    assert len(peer.open) == 1
+    await new.close()
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_disconnect_still_ends_the_connection(peer):
+    """A disconnect cancelled before its close ends the connection as it clears it."""
+    service = _CancellableDisconnectService()
+    service._websocket = await service._websocket_connect(peer.url)
+    disconnect = asyncio.create_task(service._disconnect_websocket())
+    await service.disconnecting.wait()
+
+    disconnect.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await disconnect
+
+    assert service._websocket is None
+    assert await peer.wait_until_all_closed()
+
+
+@pytest.mark.asyncio
+async def test_clearing_something_other_than_a_connection_does_nothing(service):
+    """Only real connections are aborted, so test doubles pass through untouched."""
+    fake = MagicMock()
+    service._websocket = fake
+
+    service._websocket = None
+
+    fake.transport.abort.assert_not_called()
+
+
+def test_the_connection_reads_as_none_before_init():
+    """Subclasses that initialize their other bases first can read it early."""
+    service = ConcreteWebsocketService.__new__(ConcreteWebsocketService)
+
+    assert service._websocket is None

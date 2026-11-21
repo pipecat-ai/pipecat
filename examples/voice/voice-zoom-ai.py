@@ -7,6 +7,7 @@
 
 import os
 
+import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -22,9 +23,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.zoom_ai.stt import ZoomAISTTService
+from pipecat.services.zoom_ai.tts import ZoomAIHttpTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
@@ -61,88 +62,88 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Zoom Scribe Live speech-to-text with Scribe's own turn detection.
+    """Zoom Scribe Live speech-to-text with Pipecat's turn detection.
 
-    Scribe's voice activity detection decides when the user starts and stops
-    speaking (by default after 350 ms of silence; see
-    `ZoomAISTTService.Settings(silence_duration_ms=...)`). The service
-    proposes those turn boundaries and recommends `ExternalUserTurnStrategies`,
-    so the user aggregator resolves them into turns and interruptions without
-    any extra configuration.
+    With `vad_force_turn_endpoint=True`, Scribe's voice activity detection is
+    turned off, and Pipecat's local VAD and default user turn strategies
+    (Smart Turn) decide when the user is done speaking. At each local VAD stop
+    the service commits the audio, and Scribe returns that turn's final
+    transcript. The local VAD analyzer below is required in this mode.
 
-    The local Silero VAD below does not decide turns; it only provides STT
-    latency (TTFB) metrics, measured from the local end of speech to Scribe's
-    final transcript.
+    For Scribe's own turn detection, see `voice-zoom-ai-turn-detection.py`.
     """
     logger.info("Starting bot")
 
-    stt = ZoomAISTTService(api_key=os.environ["ZOOM_AI_API_KEY"])
-
-    tts = CartesiaTTSService(
-        api_key=os.environ["CARTESIA_API_KEY"],
-        settings=CartesiaTTSService.Settings(
-            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
-        ),
-    )
-
-    llm = OpenAILLMService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
-            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
-        ),
-    )
-
-    context = LLMContext()
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        # Turns come from Scribe; local VAD is kept for metrics (see the docstring).
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-    )
-
-    pipeline = Pipeline(
-        [
-            transport.input(),  # Transport user input
-            stt,  # STT
-            user_aggregator,  # User responses
-            llm,  # LLM
-            tts,  # TTS
-            transport.output(),  # Transport bot output
-            assistant_aggregator,  # Assistant spoken responses
-        ]
-    )
-
-    worker = PipelineWorker(
-        pipeline,
-        params=PipelineParams(
-            enable_metrics=True,
-            enable_usage_metrics=True,
-        ),
-        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        processor_unusable_policy=ProcessorUnusablePolicy.END,
-    )
-
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    await runner.add_workers(worker)
-
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
-        logger.info("Client connected")
-        # Kick off the conversation.
-        context.add_message(
-            {
-                "role": "developer",
-                "content": "Please introduce yourself to the user.",
-            }
+    async with aiohttp.ClientSession() as session:
+        stt = ZoomAISTTService(
+            api_key=os.environ["ZOOM_AI_API_KEY"],
+            vad_force_turn_endpoint=True,  # Use Pipecat's VAD and turn strategies
         )
-        await worker.queue_frames([LLMRunFrame()])
 
-    @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport, client):
-        logger.info("Client disconnected")
-        await runner.cancel()
+        tts = ZoomAIHttpTTSService(
+            api_key=os.environ["ZOOM_AI_API_KEY"],
+            aiohttp_session=session,
+            settings=ZoomAIHttpTTSService.Settings(voice="ava"),
+        )
 
-    await runner.run()
+        llm = OpenAILLMService(
+            api_key=os.environ["OPENAI_API_KEY"],
+            settings=OpenAILLMService.Settings(
+                system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+            ),
+        )
+
+        context = LLMContext()
+        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+            context,
+            # Local VAD drives turns and the commit at each VAD stop.
+            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        )
+
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                stt,  # STT
+                user_aggregator,  # User responses
+                llm,  # LLM
+                tts,  # TTS
+                transport.output(),  # Transport bot output
+                assistant_aggregator,  # Assistant spoken responses
+            ]
+        )
+
+        worker = PipelineWorker(
+            pipeline,
+            params=PipelineParams(
+                enable_metrics=True,
+                enable_usage_metrics=True,
+            ),
+            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+            processor_unusable_policy=ProcessorUnusablePolicy.END,
+        )
+
+        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+        await runner.add_workers(worker)
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            logger.info("Client connected")
+            # Kick off the conversation.
+            context.add_message(
+                {
+                    "role": "developer",
+                    "content": "Please introduce yourself to the user.",
+                }
+            )
+            await worker.queue_frames([LLMRunFrame()])
+
+        @transport.event_handler("on_client_disconnected")
+        async def on_client_disconnected(transport, client):
+            logger.info("Client disconnected")
+            await runner.cancel()
+
+        await runner.run()
 
 
 async def bot(runner_args: RunnerArguments):

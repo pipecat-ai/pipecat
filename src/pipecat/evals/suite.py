@@ -123,7 +123,7 @@ from pipecat.evals.results import (
 from pipecat.evals.scenario import EvalKind, EvalScenarioFile
 from pipecat.evals.script import EvalScriptScenario
 from pipecat.evals.session import EvalSessionParams, _params_with_deprecated_knobs
-from pipecat.evals.simulation import EvalSimulationScenario
+from pipecat.evals.simulation import EvalRubric, EvalSimulationScenario
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.deprecation import warn_deprecated
 
@@ -200,7 +200,7 @@ def capture_pipeline_logs(
         ]
         if sections:
             logs_dir.mkdir(parents=True, exist_ok=True)
-            (logs_dir / f"{prefix}.debug.log").write_text("\n".join(sections))
+            (logs_dir / f"{prefix}.debug.log").write_text("\n".join(sections), encoding="utf-8")
 
 
 def _append_result(
@@ -213,7 +213,8 @@ def _append_result(
     """Append one JSON line describing a finished run, flushed at once.
 
     The record carries enough to compute pass rates and group failures by
-    kind, plus paths to the artifacts. ``events_seen`` is included only for
+    kind, plus paths to the artifacts, and ``bot_metrics``, what the bot's
+    processors measured during the run. ``events_seen`` is included only for
     runs that did not pass, since that is what a failure is diagnosed from.
     """
     artifacts = {"log": str(logs_dir / f"{stem}.log")}
@@ -233,7 +234,7 @@ def _append_result(
         record = _scenario_record(run, artifacts)
 
     with contextlib.suppress(OSError):
-        with results_path.open("a") as f:
+        with results_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
 
 
@@ -277,6 +278,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
             }
             for t in (result.turns if result else [])
         ],
+        "bot_metrics": result.bot_metrics if result else [],
         "artifacts": artifacts,
     }
     if result is not None and not record["passed"]:
@@ -297,6 +299,7 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "passed": bool(result and result.passed),
         "succeeded": bool(result and result.succeeded),
         "error": run.error or (result.error if result else None),
+        "failure_kind": result.failure_kind if result else None,
         "confidence": result.confidence if result else None,
         "probabilities": result.probabilities if result else {},
         "ended_by": result.ended_by if result else "error",
@@ -329,6 +332,7 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "end_call": result.end_call if result else None,
         "duration_ms": run.duration_ms,
         "messages": result.messages if result else [],
+        "bot_metrics": result.bot_metrics if result else [],
         "artifacts": artifacts,
     }
     if result is not None and not record["passed"]:
@@ -345,6 +349,7 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         confidence=data.get("confidence"),
         probabilities=data.get("probabilities", {}),
         error=data.get("error"),
+        failure_kind=data.get("failure_kind"),
         metrics=[
             EvalSimulationMetricScore(
                 **{k: v for k, v in m.items() if k != "verdicts"},
@@ -361,6 +366,7 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         events_seen=data.get("events_seen", []),
         debug_log=data.get("debug_log", []),
         success=data.get("success", ""),
+        bot_metrics=data.get("bot_metrics", []),
     )
 
 
@@ -384,6 +390,7 @@ def _result_from_dict(data: dict) -> EvalScriptResult:
         events_seen=data.get("events_seen", []),
         debug_log=data.get("debug_log", []),
         skipped=data.get("skipped"),
+        bot_metrics=data.get("bot_metrics", []),
     )
 
 
@@ -478,13 +485,17 @@ class EvalRun:
         """The run's scenario: as loaded when the run was built, else read from its file.
 
         Raises:
-            ValueError: If the file is invalid.
+            ValueError: If the file is invalid, or the scenario is a rubric,
+                which has nothing to run.
             KeyError: If the file holds no scenario of this name.
             FileNotFoundError: If the file doesn't exist.
         """
         loaded = self.loaded
         if loaded is None:
-            loaded = self.loaded = EvalScenarioFile.load(self.scenario_path)[self.scenario]
+            found = EvalScenarioFile.load(self.scenario_path)[self.scenario]
+            if isinstance(found, EvalRubric):
+                raise ValueError(f"{self.scenario} is a rubric, which has nothing to run")
+            loaded = self.loaded = found
         return loaded
 
 
@@ -587,7 +598,7 @@ class EvalManifest:
         """
         path = Path(path).resolve()
         base = path.parent
-        data = yaml.safe_load(path.read_text()) or {}
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         settings = cls._settings(
             data,
             base,
@@ -712,6 +723,9 @@ class EvalManifest:
                 except (ValueError, FileNotFoundError):
                     named = [(file_name, None)]
                 for run_name, one in named:
+                    # A rubric judges a call that already happened; there's nothing to run.
+                    if isinstance(one, EvalRubric):
+                        continue
                     kind, attempts = EvalKind.SCRIPT, settings.repeat
                     if isinstance(one, EvalSimulationScenario):
                         kind = EvalKind.SIMULATION
@@ -1074,7 +1088,7 @@ class EvalSuite(BaseObject):
             # problem on the suite's side (spawning, reading the result back).
             run.error = f"error: {type(e).__name__}: {e}"
             with contextlib.suppress(OSError):
-                files.trace.write_text(traceback.format_exc())
+                files.trace.write_text(traceback.format_exc(), encoding="utf-8")
         finally:
             await self._finish(
                 run,
@@ -1128,7 +1142,7 @@ class EvalSuite(BaseObject):
         body_path = run.runner_body_path
         if run.runner_body is not None:
             body_path = files.body
-            body_path.write_text(json.dumps(run.runner_body))
+            body_path.write_text(json.dumps(run.runner_body), encoding="utf-8")
         with files.log.open("wb") as logf:
             return await asyncio.create_subprocess_exec(
                 *self._spawn_argv(run.bot_path, port, body_path),
@@ -1168,7 +1182,7 @@ class EvalSuite(BaseObject):
             "prefix": files.prefix,
             "result_path": str(files.result),
         }
-        files.config.write_text(json.dumps(config))
+        files.config.write_text(json.dumps(config), encoding="utf-8")
         with contextlib.suppress(OSError):
             files.result.unlink()
         with files.harness_log.open("wb") as logf:
@@ -1193,7 +1207,7 @@ class EvalSuite(BaseObject):
                 f"error: harness worker exited {worker.returncode} (see {files.prefix}.harness.log)"
             )
             return worker
-        data = json.loads(files.result.read_text())
+        data = json.loads(files.result.read_text(encoding="utf-8"))
         if run.kind == EvalKind.SIMULATION:
             run.result = _simulation_result_from_dict(data)
         else:
@@ -1234,9 +1248,11 @@ class EvalSuite(BaseObject):
             with contextlib.suppress(OSError):
                 handoff.unlink()
         if run.result is not None and run.result.debug_log:
-            files.trace.write_text("\n".join(run.result.debug_log) + "\n")
+            files.trace.write_text("\n".join(run.result.debug_log) + "\n", encoding="utf-8")
         if isinstance(run.result, EvalSimulationResult):
-            files.conversation.write_text(json.dumps(run.result.conversation, indent=2) + "\n")
+            files.conversation.write_text(
+                json.dumps(run.result.conversation, indent=2) + "\n", encoding="utf-8"
+            )
         if results_path is not None:
             _append_result(results_path, run, files.prefix, logs_dir, record_dir)
 

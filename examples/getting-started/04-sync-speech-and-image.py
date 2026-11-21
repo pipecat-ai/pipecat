@@ -113,8 +113,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     """Run the Calendar Month Narration bot using WebRTC transport.
 
     Args:
-        webrtc_connection: The WebRTC connection to use
-        room_name: Optional room name for display purposes
+        transport: The transport instance carrying the session.
+        runner_args: Arguments controlling how the runner starts the bot.
     """
     logger.info("Starting bot")
 

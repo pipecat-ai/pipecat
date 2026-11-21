@@ -187,6 +187,9 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                             item["document"]["source"]["bytes"] = "..."
                         if item.get("video"):
                             item["video"]["source"]["bytes"] = "..."
+                        reasoning_text = item.get("reasoningContent", {}).get("reasoningText")
+                        if reasoning_text and reasoning_text.get("signature"):
+                            reasoning_text["signature"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
 
@@ -222,7 +225,11 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         # (e.g. a malformed message) is wrapped so it surfaces with its
         # underlying cause.
         try:
-            messages = [self._from_universal_context_message(m) for m in remaining]
+            messages = [
+                converted
+                for m in remaining
+                if (converted := self._from_universal_context_message(m)) is not None
+            ]
         except Exception as e:
             raise LLMContextConversionError(e) from e
 
@@ -324,10 +331,47 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
             }
         }
 
-    def _from_universal_context_message(self, message: LLMContextMessage) -> dict[str, Any]:
+    def _from_universal_context_message(self, message: LLMContextMessage) -> dict[str, Any] | None:
         if isinstance(message, LLMSpecificMessage):
-            return copy.deepcopy(message.message)
+            return self._from_bedrock_specific_message(message)
         return self._from_standard_message(message)
+
+    def _from_bedrock_specific_message(self, message: LLMSpecificMessage) -> dict[str, Any] | None:
+        """Convert an LLMSpecificMessage to AWS Bedrock format.
+
+        Bedrock-specific messages are either thought messages, which become
+        ``reasoningContent`` blocks, or messages already in Bedrock format.
+
+        Args:
+            message: AWS Bedrock-specific message.
+
+        Returns:
+            The message in Bedrock format, or None for a thought that can't be
+            passed back to the model.
+        """
+        # A thought becomes a standalone assistant message, which is merged into
+        # the assistant response that follows it.
+        if isinstance(message.message, dict) and message.message.get("type") == "thought":
+            # Reasoning is passed back only with its signature, which models
+            # such as Claude use to verify it.
+            signature = message.message.get("signature")
+            if not signature:
+                return None
+            return {
+                "role": "assistant",
+                "content": [
+                    {
+                        "reasoningContent": {
+                            "reasoningText": {
+                                "text": message.message.get("text") or "",
+                                "signature": signature,
+                            }
+                        }
+                    }
+                ],
+            }
+
+        return copy.deepcopy(message.message)
 
     def _from_standard_message(self, message: LLMStandardMessage) -> dict[str, Any]:
         """Convert standard format message to AWS Bedrock format.

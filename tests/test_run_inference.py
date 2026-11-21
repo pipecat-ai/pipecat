@@ -1395,3 +1395,91 @@ async def test_google_run_inference_response_schema_ignored_on_legacy_model():
     config = service._client.aio.models.generate_content.call_args.kwargs["config"]
     assert config.response_mime_type is None
     assert config.response_json_schema is None
+
+
+def _google_interactions_service(text: str = "Hello!", **kwargs):
+    """A GoogleInteractionsLLMService whose client returns one interaction replying `text`."""
+    from types import SimpleNamespace
+
+    from pipecat.services.google.interactions.llm import GoogleInteractionsLLMService
+
+    service = GoogleInteractionsLLMService(api_key="test-key", **kwargs)
+    interaction = SimpleNamespace(
+        status="completed",
+        steps=[
+            SimpleNamespace(type="thought", content=None),
+            SimpleNamespace(type="model_output", content=[SimpleNamespace(text=text)]),
+        ],
+    )
+    create = AsyncMock(return_value=interaction)
+    service._client = SimpleNamespace(
+        aio=SimpleNamespace(interactions=SimpleNamespace(create=create), aclose=AsyncMock())
+    )
+    return service, create
+
+
+@pytest.mark.asyncio
+async def test_google_interactions_run_inference_with_llm_context():
+    """Test run_inference returning the interaction's text from a one-shot, unstored request."""
+    service, create = _google_interactions_service("Hello! How can I help?")
+    context = LLMContext(messages=[{"role": "user", "content": "Hello, world!"}])
+
+    result = await service.run_inference(context)
+
+    assert result == "Hello! How can I help?"
+    request = create.call_args.kwargs
+    assert "stream" not in request
+    assert request["store"] is False
+    assert request["input"] == [
+        {"type": "user_input", "content": [{"type": "text", "text": "Hello, world!"}]}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_google_interactions_run_inference_client_exception():
+    """Test that exceptions from the Interactions API client are propagated."""
+    service, create = _google_interactions_service()
+    create.side_effect = Exception("Interactions API Error")
+
+    with pytest.raises(Exception, match="Interactions API Error"):
+        await service.run_inference(LLMContext(messages=[{"role": "user", "content": "Hi"}]))
+
+
+@pytest.mark.asyncio
+async def test_google_interactions_run_inference_overrides():
+    """Test system_instruction and max_tokens overriding the service's settings."""
+    from pipecat.services.google.interactions.llm import GoogleInteractionsLLMService
+
+    service, create = _google_interactions_service(
+        settings=GoogleInteractionsLLMService.Settings(
+            system_instruction="Original.", max_tokens=1000
+        )
+    )
+
+    await service.run_inference(
+        LLMContext(messages=[{"role": "user", "content": "Hi"}]),
+        max_tokens=50,
+        system_instruction="Summarize.",
+    )
+
+    request = create.call_args.kwargs
+    assert request["system_instruction"] == "Summarize."
+    assert request["generation_config"]["max_output_tokens"] == 50
+
+
+@pytest.mark.asyncio
+async def test_google_interactions_run_inference_response_schema():
+    """Test a response schema being sent as a JSON response format."""
+    service, create = _google_interactions_service('{"answer": "yes"}')
+    schema = {"type": "object", "properties": {"answer": {"type": "string"}}}
+
+    result = await service.run_inference(
+        LLMContext(messages=[{"role": "user", "content": "Yes?"}]), response_schema=schema
+    )
+
+    assert result == '{"answer": "yes"}'
+    assert create.call_args.kwargs["response_format"] == {
+        "type": "text",
+        "mime_type": "application/json",
+        "schema": schema,
+    }

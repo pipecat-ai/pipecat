@@ -19,7 +19,6 @@ from xml.sax.saxutils import escape, unescape
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -146,6 +145,13 @@ class AWSPollyTTSSettings(TTSSettings):
         rate: Speech rate adjustment.
         volume: Voice volume adjustment.
         lexicon_names: List of pronunciation lexicons to apply.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
     """
 
     engine: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -294,8 +300,6 @@ class AWSPollyTTSService(TTSService):
         ).to_boto_kwargs()
 
         self._aws_session = aiobotocore.session.get_session()
-
-        self._resampler = create_stream_resampler()
 
         self._word_timestamps = word_timestamps
         self._warned_generative_untimed = False
@@ -490,6 +494,8 @@ class AWSPollyTTSService(TTSService):
             Frame: Audio frames containing the synthesized speech.
         """
         ssml = self._construct_ssml(text)
+        # AWS only supports 8000 and 16000 for PCM.
+        sample_rate = 8000 if self.sample_rate == 8000 else 16000
 
         # Parameters shared by the audio call and the marks call. Both must use
         # identical Text/Voice/Engine so the word timings line up with the audio.
@@ -498,8 +504,7 @@ class AWSPollyTTSService(TTSService):
             "TextType": "ssml",
             "VoiceId": self._settings.voice,
             "Engine": self._settings.engine,
-            # AWS only supports 8000 and 16000 for PCM. We select 16000.
-            "SampleRate": "16000",
+            "SampleRate": str(sample_rate),
             "LexiconNames": self._settings.lexicon_names,
         }
         # Filter out None values
@@ -528,20 +533,18 @@ class AWSPollyTTSService(TTSService):
 
                 pcm = await response["AudioStream"].read()
                 # Marks carry only start times, so derive the utterance duration
-                # from the PCM length (16-bit mono at 16000 Hz).
-                utterance_seconds = len(pcm) / (16000 * 2)
-
-                audio = await self._resampler.resample(pcm, 16000, self.sample_rate)
+                # from the PCM length (16-bit mono).
+                utterance_seconds = len(pcm) / (sample_rate * 2)
 
                 await self.start_tts_usage_metrics(text)
 
                 # Yield audio first so the first chunk stops TTFB and anchors the
                 # word-timestamp baseline.
-                for i in range(0, len(audio), self.chunk_size):
-                    chunk = audio[i : i + self.chunk_size]
+                for i in range(0, len(pcm), self.chunk_size):
+                    chunk = pcm[i : i + self.chunk_size]
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        yield TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
+                        yield TTSAudioRawFrame(chunk, sample_rate, 1, context_id=context_id)
 
                 if self._word_timestamps:
                     word_marks = []

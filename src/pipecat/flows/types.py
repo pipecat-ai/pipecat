@@ -202,6 +202,12 @@ class NodeConfig(TypedDict, total=False):
         context_strategy: Strategy for updating context during transitions.
         respond_immediately: Whether to run LLM inference as soon as the node is
             set (default: True).
+        metadata: JSON-serializable data the application attaches to the
+            node. Flows never acts on it and never sends it to the LLM. An
+            RTVI client receives it when the node is entered, so keep anything
+            the end user should not see out of it.
+        parent: For a node of a subflow, the name of the node that runs the
+            subflow. :class:`~pipecat.flows.Flow` sets it.
 
     Example::
 
@@ -235,6 +241,8 @@ class NodeConfig(TypedDict, total=False):
     post_actions: list[ActionConfig]
     context_strategy: ContextStrategyConfig
     respond_immediately: bool
+    metadata: dict[str, Any]
+    parent: str
 
 
 class _NoResponse:
@@ -385,6 +393,10 @@ class FlowsFunctionSchema:
             interruption occurs. Defaults to False.
         timeout_secs: Optional per-tool timeout in seconds, overriding the global
             ``function_call_timeout_secs``. Defaults to None (use global timeout).
+        metadata: JSON-serializable data the application attaches to the
+            function. Flows never acts on it and never sends it to the LLM. An
+            RTVI client receives it when the function's call enters a node, so
+            keep anything the end user should not see out of it.
     """
 
     name: str
@@ -394,6 +406,7 @@ class FlowsFunctionSchema:
     handler: FunctionHandler
     cancel_on_interruption: bool = False
     timeout_secs: float | None = None
+    metadata: dict[str, Any] | None = None
 
     def to_function_schema(self) -> FunctionSchema:
         """Convert to a standard FunctionSchema for use with LLMs.
@@ -407,6 +420,30 @@ class FlowsFunctionSchema:
             properties=self.properties,
             required=self.required,
         )
+
+
+@dataclass
+class NodeEntered:
+    """Where a flow has just arrived, as passed to ``on_node_entered`` handlers.
+
+    Parameters:
+        node: The node entered, by name.
+        previous_node: The node the flow left, or None when this is the first
+            node.
+        function: The function whose call caused the move, or None when the
+            node was set directly (``initialize``, ``set_node_from_config``).
+        metadata: The entered node's ``metadata``, or None.
+        function_metadata: The ``metadata`` of ``function``, or None.
+        parent: When the entered node is a node of a subflow, the name of the
+            node that runs the subflow; None otherwise.
+    """
+
+    node: str
+    previous_node: str | None = None
+    function: str | None = None
+    metadata: dict[str, Any] | None = None
+    function_metadata: dict[str, Any] | None = None
+    parent: str | None = None
 
 
 def flows_tool_options(

@@ -19,6 +19,11 @@ the configured-flow contract: a tool returns ``(result, TRANSITION_IN_YAML)``
 and the config decides the next node. ``{{ key }}`` placeholders in prompts
 are left in place; :class:`~pipecat.flows.FlowManager` fills them from its
 state when it enters the node.
+
+A config's subflows are flattened before anything is built: a subflow's nodes
+are copied in once for each node that runs it, under the name
+``<node>.<subflow node>``, with every transition pointing at the node it
+leads to.
 """
 
 import inspect
@@ -28,7 +33,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from pipecat.flows.config import case_key
+from pipecat.flows.config import RETURN, case_key
 from pipecat.flows.exceptions import FlowError, FlowProblem, FlowReferenceError
 from pipecat.flows.types import (
     NO_RESPONSE,
@@ -89,12 +94,15 @@ class Flow:
         self._handlers = list(handlers) if isinstance(handlers, (list, tuple)) else [handlers]
         self._problems: list[FlowProblem] = []
 
+        nodes, global_functions, self._entries, parents = _flatten(config)
         self._nodes: dict[str, NodeConfig] = {
-            name: self._build_node(name, node) for name, node in config.nodes.items()
+            name: self._build_node(name, node) for name, node in nodes.items()
         }
+        for name, parent in parents.items():
+            self._nodes[name]["parent"] = parent
         self._global_functions = [
             schema
-            for ref in config.global_functions
+            for ref in global_functions
             if (schema := self._build_function(ref, where="global_functions", node=None))
         ]
         # Building continues past each problem so all of them are found; the
@@ -110,7 +118,7 @@ class Flow:
     @property
     def initial_node(self) -> NodeConfig:
         """The node config the flow starts in."""
-        return self._nodes[self._config.initial_node]
+        return self._nodes[self._entries[self._config.initial_node]]
 
     @property
     def global_functions(self) -> list[FlowsFunctionSchema | FlowsDirectFunction]:
@@ -124,13 +132,15 @@ class Flow:
         """The node config for ``name``.
 
         Args:
-            name: A node name from the config.
+            name: A node name from the config, or ``<node>.<subflow node>``
+                for a node of a subflow. For a node that runs a subflow, this
+                is the subflow's first node.
 
         Raises:
             ~pipecat.flows.FlowError: If the config has no such node.
         """
         try:
-            return self._nodes[name]
+            return self._nodes[self._entries.get(name, name)]
         except KeyError:
             raise FlowError(f"flow has no node '{name}'") from None
 
@@ -164,6 +174,8 @@ class Flow:
         strategy = node.context_strategy_enum()
         if strategy is not None:
             config["context_strategy"] = ContextStrategyConfig(strategy=strategy)
+        if node.metadata is not None:
+            config["metadata"] = node.metadata
         return config
 
     def _build_function(
@@ -177,6 +189,7 @@ class Flow:
                 properties={},
                 required=[],
                 handler=self._make_transition_handler(ref),
+                metadata=ref.metadata,
             )
         function = self._lookup(ref.name, kind="tool", where=where, node=node)
         if function is None:
@@ -205,6 +218,7 @@ class Flow:
             handler=self._make_handler(ref, wrapper, where),
             cancel_on_interruption=wrapper.cancel_on_interruption,
             timeout_secs=wrapper.timeout_secs,
+            metadata=ref.metadata,
         )
 
     def _build_action(self, action: "FlowConfig.Action", *, where: str, node: str) -> ActionConfig:
@@ -313,6 +327,66 @@ class Flow:
             logger.debug(f"{where} tool '{ref.name}': no branch case matched, staying")
             return None
         return self._nodes[node_name]
+
+
+def _flatten(
+    config: "FlowConfig",
+) -> tuple[
+    dict[str, "FlowConfig.Node"], list["FlowConfig.Function"], dict[str, str], dict[str, str]
+]:
+    """Copy each subflow in under the node that runs it.
+
+    Returns:
+        The nodes to build, keyed by the name each is built under; the global
+        functions; for every node name in the config, the name of the built
+        node it leads to; and, for every node copied from a subflow, the name
+        of the node that runs the subflow. Every transition in the nodes and
+        functions returned names a built node.
+    """
+
+    def entry(name: str) -> str:
+        flow = config.nodes[name].flow
+        return name if flow is None else f"{name}.{config.flows[flow].initial_node}"
+
+    nodes: dict[str, FlowConfig.Node] = {}
+    parents: dict[str, str] = {}
+    for name, node in config.nodes.items():
+        if node.flow is None:
+            nodes[name] = _retarget_node(node, entry)
+            continue
+
+        def inside(target: str, name: str = name, return_to: str | None = node.return_to) -> str:
+            if target == RETURN:
+                return entry(return_to)  # type: ignore[arg-type]
+            return f"{name}.{target}"
+
+        for inner_name, inner in config.flows[node.flow].nodes.items():
+            nodes[f"{name}.{inner_name}"] = _retarget_node(inner, inside)
+            parents[f"{name}.{inner_name}"] = name
+
+    global_functions = [_retarget(func, entry) for func in config.global_functions]
+    return nodes, global_functions, {name: entry(name) for name in config.nodes}, parents
+
+
+def _retarget_node(node: "FlowConfig.Node", resolve: Callable[[str], str]) -> "FlowConfig.Node":
+    """A copy of ``node`` with each function's transition targets passed through ``resolve``."""
+    functions = [_retarget(func, resolve) for func in node.functions]
+    return node.model_copy(update={"functions": functions})
+
+
+def _retarget(func: "FlowConfig.Function", resolve: Callable[[str], str]) -> "FlowConfig.Function":
+    target = func.transition_to
+    if target is None:
+        return func
+    if isinstance(target, str):
+        return func.model_copy(update={"transition_to": resolve(target)})
+    branch = target.model_copy(
+        update={
+            "cases": {key: resolve(value) for key, value in target.cases.items()},
+            "default": resolve(target.default) if target.default else None,
+        }
+    )
+    return func.model_copy(update={"transition_to": branch})
 
 
 def _check_contract(response: Any, name: str, where: str) -> tuple[Any, Any]:
