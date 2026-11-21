@@ -74,6 +74,9 @@ class TestStripCompleteMarkupHelper(unittest.TestCase):
     def test_strip_complete_markup_keeps_emoticon(self):
         self.assertEqual(strip_complete_markup("I love you <3 always"), "I love you <3 always")
 
+    def test_strip_complete_markup_keeps_comparisons(self):
+        self.assertEqual(strip_complete_markup("Is 3 < 5 and 7 > 2?"), "Is 3 < 5 and 7 > 2?")
+
 
 class TestSplitMarkupRuns(unittest.TestCase):
     """split_markup_runs() gives a tag its own run so TextSegmentMap._build can
@@ -99,6 +102,9 @@ class TestSplitMarkupRuns(unittest.TestCase):
 
     def test_lone_angle_bracket_is_content(self):
         self.assertEqual(split_markup_runs("5 < 10 always"), ["5 < 10 always"])
+
+    def test_comparisons_are_content(self):
+        self.assertEqual(split_markup_runs("Is 3 < 5 and 7 > 2?"), ["Is 3 < 5 and 7 > 2?"])
 
     def test_runs_concatenate_back_to_the_input(self):
         for text in [

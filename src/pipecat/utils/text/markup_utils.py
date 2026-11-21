@@ -59,8 +59,11 @@ def strip_markup(text: str) -> str:
     return "".join(ch for _, ch in _iter_clean_chars(text))
 
 
-_COMPLETE_MARKUP_RE = re.compile(r"<[^>]+>")
+_COMPLETE_MARKUP_RE = re.compile(r"<[^\s>][^>]*>")
 """Matched '<...>' pairs in a complete text.
+
+A tag never has whitespace right after its '<', so a '<' and a later '>' used
+as comparisons (``"3 < 5 and 7 > 2"``) stay content.
 
 The definition of markup for a static text, shared by
 :func:`strip_complete_markup` and :func:`split_markup_runs` so the two can't
