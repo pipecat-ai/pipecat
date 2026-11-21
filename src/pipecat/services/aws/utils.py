@@ -90,7 +90,11 @@ def get_presigned_url(
     *,
     region: str,
     credentials: dict[str, str | None],
-    language_code: str,
+    language_code: str | None = None,
+    identify_language: bool = False,
+    identify_multiple_languages: bool = False,
+    language_options: list[str] | None = None,
+    preferred_language: str | None = None,
     media_encoding: str = "pcm",
     sample_rate: int = 16000,
     number_of_channels: int = 1,
@@ -107,7 +111,14 @@ def get_presigned_url(
         region: AWS region for the service.
         credentials: Dictionary containing AWS credentials. Must include
             'access_key' and 'secret_key', with optional 'session_token'.
-        language_code: Language code for transcription (e.g., "en-US").
+        language_code: Language code for transcription (e.g., "en-US"). AWS
+            rejects it alongside language identification.
+        identify_language: Whether to identify the dominant language among
+            ``language_options``.
+        identify_multiple_languages: Whether to identify and transcribe each
+            language among ``language_options`` as it is spoken.
+        language_options: Candidate language codes for language identification.
+        preferred_language: The most likely of ``language_options``.
         media_encoding: Audio encoding format. Defaults to "pcm".
         sample_rate: Audio sample rate in Hz. Defaults to 16000.
         number_of_channels: Number of audio channels. Defaults to 1.
@@ -140,6 +151,10 @@ def get_presigned_url(
     return url_generator.get_request_url(
         sample_rate=sample_rate,
         language_code=language_code,
+        identify_language=identify_language,
+        identify_multiple_languages=identify_multiple_languages,
+        language_options=language_options,
+        preferred_language=preferred_language,
         media_encoding=media_encoding,
         vocabulary_name=vocabulary_name,
         vocabulary_filter_name=vocabulary_filter_name,
@@ -198,7 +213,11 @@ class AWSTranscribePresignedURL:
     def get_request_url(
         self,
         sample_rate: int,
-        language_code: str = "",
+        language_code: str | None = None,
+        identify_language: bool = False,
+        identify_multiple_languages: bool = False,
+        language_options: list[str] | None = None,
+        preferred_language: str | None = None,
         media_encoding: str = "pcm",
         vocabulary_name: str | None = None,
         vocabulary_filter_name: str | None = None,
@@ -213,6 +232,10 @@ class AWSTranscribePresignedURL:
         Args:
             sample_rate: Audio sample rate in Hz.
             language_code: Language code for transcription.
+            identify_language: Whether to identify the dominant language.
+            identify_multiple_languages: Whether to identify each language as it is spoken.
+            language_options: Candidate language codes for language identification.
+            preferred_language: The most likely of ``language_options``.
             media_encoding: Audio encoding format.
             vocabulary_name: Custom vocabulary name.
             vocabulary_filter_name: Vocabulary filter name.
@@ -247,18 +270,30 @@ class AWSTranscribePresignedURL:
             )
         self.canonical_querystring += "&X-Amz-SignedHeaders=" + self.signed_headers
 
+        # SigV4 signs the canonical query string with its parameters sorted by
+        # name, so each one is appended in name order.
         if enable_channel_identification:
             self.canonical_querystring += "&enable-channel-identification=true"
         if enable_partial_results_stabilization:
             self.canonical_querystring += "&enable-partial-results-stabilization=true"
+        if identify_language:
+            self.canonical_querystring += "&identify-language=true"
+        if identify_multiple_languages:
+            self.canonical_querystring += "&identify-multiple-languages=true"
         if language_code:
             self.canonical_querystring += "&language-code=" + language_code
+        if language_options:
+            self.canonical_querystring += "&language-options=" + urllib.parse.quote(
+                ",".join(language_options), safe=""
+            )
         if media_encoding:
             self.canonical_querystring += "&media-encoding=" + media_encoding
         if number_of_channels > 1:
             self.canonical_querystring += "&number-of-channels=" + str(number_of_channels)
         if partial_results_stability:
             self.canonical_querystring += "&partial-results-stability=" + partial_results_stability
+        if preferred_language:
+            self.canonical_querystring += "&preferred-language=" + preferred_language
         if sample_rate:
             self.canonical_querystring += "&sample-rate=" + str(sample_rate)
         if show_speaker_label:

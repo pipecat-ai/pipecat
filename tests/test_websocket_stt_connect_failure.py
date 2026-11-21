@@ -211,3 +211,22 @@ async def test_failed_connect_starts_the_receive_loop(module, name, kwargs):
 
     assert service._websocket is None
     assert "_receive_task_handler" in started
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("module", "name", "kwargs"), SERVICES)
+async def test_teardown_without_a_connection_stops_the_receive_loop(module, name, kwargs):
+    """Ending the pipeline stops a receive loop waiting to reconnect."""
+    cls = getattr(importlib.import_module(f"pipecat.services.{module}"), name)
+    service = cls(api_key="test-key", sample_rate=SAMPLE_RATE, **kwargs)
+    service._session_url = "wss://example.invalid"  # Gladia opens its session over HTTP first.
+    service._reconnect_backoff_min_wait = 30
+    service._reconnect_backoff_max_wait = 30
+
+    async def fail_connect(uri, **kwargs):
+        raise ConnectionRefusedError(111, "Connection refused")
+
+    with patch("pipecat.services.websocket_service.websocket_connect", fail_connect):
+        await _run(service, 0.2)
+
+    assert not service.task_manager.current_tasks()

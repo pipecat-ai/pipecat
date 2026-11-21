@@ -19,6 +19,7 @@ import asyncio
 import base64
 import io
 import json
+from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
@@ -28,6 +29,7 @@ from pydantic import BaseModel
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     CancelWorkerFrame,
+    ControlFrame,
     Frame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
@@ -132,6 +134,26 @@ def parse_eval_connect(message: Any) -> EvalConnectionFlags | None:
         return None
     payload = data.get("d")
     return EvalConnectionFlags.model_validate(payload if isinstance(payload, dict) else {})
+
+
+@dataclass
+class EvalFunctionCallCancelFrame(ControlFrame):
+    """A function call the bot reported cancelled, as the harness receives it.
+
+    The bot's own ``FunctionCallCancelFrame`` is a system frame, which would
+    overtake the bot's earlier reports on its way through the harness. This one
+    is queued like ``FunctionCallInProgressFrame`` and ``FunctionCallResultFrame``,
+    so the harness sees the bot's function calls in the order the bot sent them.
+
+    Parameters:
+        function_name: Name of the function that was cancelled.
+        tool_call_id: Unique identifier for the cancelled function call.
+    """
+
+    interruptible: bool = field(default=False, init=False)
+
+    function_name: str
+    tool_call_id: str
 
 
 class EvalSerializer(FrameSerializer):
@@ -384,9 +406,13 @@ class EvalClientSerializer(RTVIClientSerializer):
     harness (its transcription, VAD, and speaking messages) stay raw messages
     rather than becoming frames, so they cannot be mistaken for what the
     harness computes from the bot's audio. So does ``eval-bot-image``, which
-    has no frame on the harness's side to become. The deprecated
-    ``user-transcription`` is dropped: ``user-input`` carries the same
-    transcriptions.
+    has no frame on the harness's side to become. A cancelled
+    ``llm-function-call-stopped`` becomes an :class:`EvalFunctionCallCancelFrame`,
+    which keeps its place among the bot's other function-call reports. The
+    bot's ``metrics`` stay raw messages too, so the sink can report them as
+    they were sent, and so does a ``server-message``, whose data is the bot's
+    own. The deprecated ``user-transcription`` is dropped:
+    ``user-input`` carries the same transcriptions.
     """
 
     def __init__(self, **kwargs):
@@ -430,7 +456,22 @@ class EvalClientSerializer(RTVIClientSerializer):
                 )
             if msg_type == "user-transcription":
                 return None
-            if msg_type in _REPORTED_EVENT_TYPES or msg_type == EVAL_BOT_IMAGE_TYPE:
+            if msg_type == "llm-function-call-stopped":
+                payload = message.get("data") or {}
+                if payload.get("cancelled"):
+                    return EvalFunctionCallCancelFrame(
+                        function_name=payload.get("function_name") or "",
+                        tool_call_id=payload.get("tool_call_id", ""),
+                    )
+            if (
+                msg_type in _REPORTED_EVENT_TYPES
+                or msg_type == EVAL_BOT_IMAGE_TYPE
+                # The bot's metrics, reported as sent: no per-metric mapping
+                # here to fall behind the protocol.
+                or msg_type == "metrics"
+                # A message of the bot's own making, for the scenario to read.
+                or msg_type == "server-message"
+            ):
                 # Kept as the raw message so the sink maps it to a scenario event;
                 # see the class docstring for why these aren't frames.
                 return InputTransportMessageFrame(message=message)

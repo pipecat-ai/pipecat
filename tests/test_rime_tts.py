@@ -11,6 +11,7 @@ from pipecat.services.rime.tts import (
     RimeNonJsonTTSService,
     RimeTTSService,
 )
+from pipecat.transcriptions.language import Language
 
 
 def test_coda_sampling_params_are_included_in_websocket_params():
@@ -136,3 +137,12 @@ async def test_mist_text_settings_are_included_in_http_payload():
     assert session.payload["pauseBetweenBrackets"] is True
     assert session.payload["phonemizeBetweenBrackets"] is True
     assert session.payload["noTextNormalization"] is True
+
+
+def test_spell_tag_aggregator_keeps_the_settings_language():
+    service = RimeTTSService(
+        api_key="test-api-key",
+        settings=RimeTTSService.Settings(voice="voice", language=Language.FR),
+    )
+
+    assert service._text_aggregator.language == "fr"

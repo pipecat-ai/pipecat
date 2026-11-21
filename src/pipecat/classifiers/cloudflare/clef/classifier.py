@@ -22,6 +22,7 @@ from pipecat.classifiers.base_classifier import (
     ChoiceResult,
     ClassifierError,
     ClassifierImage,
+    ClassifierInput,
     ClassifierQuestion,
     ClassifierResult,
     ScoreLevel,
@@ -132,9 +133,10 @@ class ClefClassifier(BaseClassifier):
         self,
         state: str | dict[str, Any] | list[Any],
         questions: Mapping[str, ClassifierQuestion],
-        images: Sequence[ClassifierImage] = (),
+        inputs: Sequence[ClassifierInput] = (),
     ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage]:
         """Answer the questions in one request."""
+        images = [item for item in inputs if isinstance(item, ClassifierImage)]
         if len(images) > CLEF_MAX_IMAGES:
             raise ClassifierError(f"Clef takes at most {CLEF_MAX_IMAGES} images, got {len(images)}")
         answers, usage = await self._client.ask(

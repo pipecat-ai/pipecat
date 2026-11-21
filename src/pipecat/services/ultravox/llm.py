@@ -58,6 +58,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, LLMWithBackendRole
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Result shipped as the client_tool_result when we see an async-tool
@@ -172,6 +173,7 @@ class JoinUrlInputParams(BaseModel):
     join_url: str
 
 
+@traced_realtime_llm
 class UltravoxRealtimeLLMService(LLMService):
     """Provides access to the Ultravox Realtime API.
 
@@ -496,7 +498,11 @@ class UltravoxRealtimeLLMService(LLMService):
         channel, or as text when the call was already settled with the
         placeholder that unfreezes an async one.
         """
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
         is_final = frame.properties.is_final if frame.properties else True
 
         if not is_final:

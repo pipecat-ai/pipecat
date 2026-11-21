@@ -100,7 +100,6 @@ autodoc_mock_imports = [
     "torch",
     "torch.nn",
     "torch.nn.functional",
-    "torchaudio",
     # moondream dependencies
     "transformers",
     "transformers.AutoTokenizer",
@@ -116,9 +115,6 @@ autodoc_mock_imports = [
     # pocket-tts dependencies (torch is mocked above)
     "pocket_tts",
     # Pydantic v2 compatibility issues in third-party SDKs
-    "hume",
-    "hume.tts",
-    "hume.tts.types",
     "cartesia",
     "camb",
     "sarvamai",

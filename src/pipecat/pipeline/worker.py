@@ -43,6 +43,7 @@ from pipecat.bus.ui.messages import (
 )
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
+from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     CancelFrame,
@@ -173,6 +174,13 @@ class PipelineParams(BaseModel):
     Parameters:
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
+        enable_expressive_conversation: Whether the agent takes part in an
+            expressive conversation (alpha). TTS services then read the
+            expression tags an LLM writes into its reply instead of speaking them.
+        expression_policy: Which expression tags the LLMs are offered and when
+            to use them, with expressive conversation on. Defaults to None,
+            which offers every tag the TTS service performs, with no guidance.
+            Part of expressive conversation (alpha).
         enable_heartbeats: Whether to enable heartbeat monitoring.
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
@@ -188,6 +196,8 @@ class PipelineParams(BaseModel):
 
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
+    enable_expressive_conversation: bool = False
+    expression_policy: ExpressionPolicy | None = None
     enable_heartbeats: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
@@ -224,6 +234,10 @@ class PipelineWorker(BaseWorker):
           Use this event for cleanup, logging, or post-processing tasks. Users can inspect
           the frame if they need to handle specific cases.
 
+    - on_pipeline_flushed: Called when a flush has made its whole trip through this
+          pipeline, so every frame queued ahead of it has been processed. The frame's
+          ``flush_id`` tells flushes apart; pass a probe to :meth:`flush_pipeline` to
+          know it beforehand.
     - on_pipeline_timeout: Called when a frame the worker was waiting on never
           reached the end of the pipeline, meaning a processor is blocked. Inspect
           the frame to tell the cases apart:
@@ -258,6 +272,10 @@ class PipelineWorker(BaseWorker):
 
         @worker.event_handler("on_pipeline_finished")
         async def on_pipeline_finished(worker, frame):
+            ...
+
+        @worker.event_handler("on_pipeline_flushed")
+        async def on_pipeline_flushed(worker, frame):
             ...
 
         @worker.event_handler("on_pipeline_timeout")
@@ -433,6 +451,14 @@ class PipelineWorker(BaseWorker):
             if app_resources is None:
                 app_resources = tool_resources
         self._params = params or PipelineParams()
+        if (
+            self._params.expression_policy is not None
+            and not self._params.enable_expressive_conversation
+        ):
+            logger.warning(
+                f"{self}: expression_policy has no effect without "
+                "enable_expressive_conversation=True"
+            )
         self._capabilities_override = capabilities or BotCapabilities()
         self._additional_span_attributes = additional_span_attributes or {}
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
@@ -611,6 +637,7 @@ class PipelineWorker(BaseWorker):
         self._register_event_handler("on_idle_timeout")
         self._register_event_handler("on_pipeline_started")
         self._register_event_handler("on_pipeline_finished")
+        self._register_event_handler("on_pipeline_flushed")
         self._register_event_handler("on_pipeline_timeout")
         self._register_event_handler("on_setup_timeout")
         self._register_event_handler("on_pipeline_error")
@@ -951,7 +978,14 @@ class PipelineWorker(BaseWorker):
             for frame in frames:
                 await self.queue_frame(frame, direction)
 
-    async def flush_pipeline(self, timeout: float = 5.0) -> bool:
+    async def flush_pipeline(
+        self,
+        positional_timeout: float | None = None,
+        /,
+        *,
+        probe: PipelineFlushFrame | None = None,
+        timeout: float = 5.0,
+    ) -> bool:
         """Flush all in-flight frames from the pipeline and wait for it to drain.
 
         Pushes a :class:`~pipecat.frames.frames.PipelineFlushFrame` downstream
@@ -963,6 +997,14 @@ class PipelineWorker(BaseWorker):
         bypasses any ``queue_frame`` override (e.g. tool-call deferral).
 
         Args:
+            positional_timeout: ``timeout`` passed positionally.
+
+                .. deprecated:: 1.17.0
+                    Use ``timeout=`` instead. Will be removed in 2.0.0.
+
+            probe: The probe to push, so the caller knows its ``flush_id`` (e.g. to
+                match it in ``on_pipeline_flushed``). Its ``event`` and ``origin``
+                are set here. A new probe is made if not given.
             timeout: Seconds of no progress before giving up. Progress is a
                 frame reaching this worker's sink, or a report from the
                 pipeline answering the probe when it crossed into another
@@ -974,10 +1016,20 @@ class PipelineWorker(BaseWorker):
         Returns:
             True if the pipeline drained, False if it went quiet first.
         """
-        event = asyncio.Event()
-        probe = PipelineFlushFrame(event=event, origin=self.name)
+        if positional_timeout is not None:
+            warn_deprecated(
+                "`flush_pipeline(timeout)` is deprecated since 1.17.0 and will be removed in "
+                "2.0.0. Use `flush_pipeline(timeout=...)` instead.",
+                stacklevel=2,
+            )
+            timeout = positional_timeout
 
-        logger.debug(f"{self}: pushing flush probe downstream")
+        probe = probe if probe else PipelineFlushFrame()
+        event = asyncio.Event()
+        probe.event = event
+        probe.origin = self.name
+
+        logger.debug(f"{self}: pushing {probe} downstream")
 
         self._flush_progress[probe.flush_id] = 0
         try:
@@ -1409,9 +1461,11 @@ class PipelineWorker(BaseWorker):
             audio_in_sample_rate=self._params.audio_in_sample_rate,
             audio_out_sample_rate=self._params.audio_out_sample_rate,
             clock=self._clock,
+            enable_expressive_conversation=self._params.enable_expressive_conversation,
             enable_metrics=self._params.enable_metrics,
             enable_tracing=self._enable_tracing,
             enable_usage_metrics=self._params.enable_usage_metrics,
+            expression_policy=self._params.expression_policy,
             observer=self._observer,
             pipeline_worker=self,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
@@ -1550,20 +1604,21 @@ class PipelineWorker(BaseWorker):
             at_sink: Whether the probe has arrived at the sink or the source.
         """
         if not at_sink:
-            logger.debug(f"{self}: flush probe reached source — sending it down again")
+            logger.debug(f"{self}: {frame} reached source, sending it down again")
             probe = PipelineFlushFrame(
                 event=frame.event, origin=frame.origin, flush_id=frame.flush_id, returning=True
             )
             await self._source.push_frame(probe, FrameDirection.DOWNSTREAM)
         elif not frame.returning:
-            logger.debug(f"{self}: flush probe reached sink — bouncing upstream")
+            logger.debug(f"{self}: {frame} reached sink, bouncing upstream")
             probe = PipelineFlushFrame(
                 event=frame.event, origin=frame.origin, flush_id=frame.flush_id
             )
             await self._sink.push_frame(probe, FrameDirection.UPSTREAM)
         else:
-            logger.debug(f"{self}: flush probe reached sink again — pipeline drained")
+            logger.debug(f"{self}: {frame} reached sink again, pipeline drained")
             self._foreign_probes.pop(frame.flush_id, None)
+            await self._call_event_handler("on_pipeline_flushed", frame)
             if frame.event:
                 frame.event.set()
 

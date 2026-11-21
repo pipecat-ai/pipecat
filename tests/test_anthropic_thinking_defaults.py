@@ -71,7 +71,6 @@ async def _request(service: AnthropicLLMService, **kwargs) -> dict[str, Any]:
     [
         "claude-opus-5",
         "claude-sonnet-5",
-        "claude-haiku-5-5",
         "claude-opus-4-8",
         "claude-sonnet-4-6",
         "claude-haiku-4-5",
@@ -91,6 +90,11 @@ def test_sonnet_5_5_gets_between_tools():
 def test_models_that_always_think_get_low_effort(model):
     """Models whose thinking can't be turned off get the lowest effort instead."""
     assert _applied_default(model) == {"output_config": {"effort": "low"}}
+
+
+def test_haiku_5_5_gets_low_effort():
+    """Haiku 5.5 speaks its reasoning with thinking disabled, so it gets low effort."""
+    assert _applied_default("claude-haiku-5-5") == {"output_config": {"effort": "low"}}
 
 
 def test_low_effort_joins_a_response_schema_in_output_config():

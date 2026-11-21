@@ -1,0 +1,45 @@
+name: concurrent_tts_contexts
+
+# The bot pushes three TTSSpeakFrames at once, on connect and again from the
+# read_list tool, so a TTS that doesn't hold frames per turn synthesizes the
+# three contexts concurrently on one socket. Each burst is checked twice:
+#
+# - tts_response, the words the TTS reports with their timestamps, must hold
+#   every sentence word for word and in order. A word split across one
+#   context's alignment chunks that picks up another context's characters
+#   breaks the match.
+# - response, the harness's transcription of the audio, must hear the
+#   sentences in order, so the contexts played one after another and didn't
+#   overlap. Its keywords are ones a local STT transcribes reliably.
+#
+# Runs against examples/voice/voice-concurrent-tts.py.
+
+user: !include ../user_audio.yaml
+
+judge: !include ../judge_audio.yaml
+
+scenarios:
+  - name: concurrent_tts_contexts
+    turns:
+      - expect:
+          - event: tts_response
+            text_contains: concert
+            text_matches: '(?is)First\W+the\W+striped\W+zebra\W+crossed\W+the\W+wide\W+muddy\W+river\W+at\W+dawn\W+Second\W+the\W+old\W+lighthouse\W+keeper\W+polished\W+every\W+brass\W+lamp\W+in\W+the\W+tower\W+Third\W+a\W+quiet\W+violinist\W+tuned\W+her\W+strings\W+before\W+the\W+evening\W+concert'
+          - event: response
+            check_from: turn_start
+            text_contains: concert
+            text_matches: '(?is)zebra.*river.*lighthouse.*lamp.*violin.*concert'
+
+      - user: "Please read me the list."
+        expect:
+          - event: function_call
+            calls:
+              - name: read_list
+          - event: tts_response
+            check_from: turn_start
+            text_contains: lantern
+            text_matches: '(?is)One\W+a\W+basket\W+of\W+ripe\W+orange\W+tangerines\W+Two\W+a\W+heavy\W+wool\W+blanket\W+for\W+the\W+cabin\W+Three\W+a\W+box\W+of\W+matches\W+and\W+a\W+lantern'
+          - event: response
+            check_from: turn_start
+            text_contains: lantern
+            text_matches: '(?is)basket.*blanket.*lantern'

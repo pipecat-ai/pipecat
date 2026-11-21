@@ -20,9 +20,12 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import STTUsageMetricsData
-from pipecat.pipeline.worker import PipelineParams
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, WorkerParams
+from pipecat.processors.frame_processor import FrameProcessor, FrameProcessorSetup
 from pipecat.services.stt_service import SegmentedSTTService
-from pipecat.tests.utils import run_test
+from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.utils.asyncio.task_manager import TaskManager
 
 SAMPLE_RATE = 16000
 # Distinct, non-zero 16-bit samples so a misread WAV header would be obvious.
@@ -32,7 +35,10 @@ DEFAULT_SILENCE = bytes(int(SAMPLE_RATE * 0.5) * 2)
 
 
 def _make_capturing_service(
-    wants_wav: bool | None = None, transcribe_secs: float = 0.0, **kwargs
+    wants_wav: bool | None = None,
+    segment_sample_rate: int | None = None,
+    transcribe_secs: float = 0.0,
+    **kwargs,
 ) -> SegmentedSTTService:
     """Build a SegmentedSTTService that captures the bytes handed to run_stt().
 
@@ -43,6 +49,8 @@ def _make_capturing_service(
     Args:
         wants_wav: If None, inherit the base default; otherwise force the
             ``wants_wav_segments`` contract to this value.
+        segment_sample_rate: If None, inherit the base default; otherwise force
+            ``segment_sample_rate`` to this value.
         transcribe_secs: When set, ``run_stt`` takes this long and then yields
             a ``TranscriptionFrame`` naming the segment ("segment 1", ...).
         **kwargs: Passed to the service constructor.
@@ -66,6 +74,10 @@ def _make_capturing_service(
 
     if wants_wav is not None:
         _CapturingSegmentedSTTService.wants_wav_segments = property(lambda self: wants_wav)
+    if segment_sample_rate is not None:
+        _CapturingSegmentedSTTService.segment_sample_rate = property(
+            lambda self: segment_sample_rate
+        )
 
     return _CapturingSegmentedSTTService(**kwargs)
 
@@ -140,6 +152,66 @@ async def test_segments_are_transcribed_in_order_and_flushed_on_stop():
 
 
 @pytest.mark.asyncio
+async def test_cleanup_stops_the_transcription_task():
+    # A processor after the service times out setting up, so the pipeline that
+    # the service already started in is only cleaned up: no EndFrame or
+    # CancelFrame ever reaches it.
+    class _BlockedSetup(FrameProcessor):
+        async def setup(self, setup: FrameProcessorSetup):
+            await super().setup(setup)
+            await asyncio.sleep(30)
+
+    task_manager = TaskManager()
+    worker = PipelineWorker(
+        Pipeline([_make_capturing_service(), _BlockedSetup()]), setup_timeout_secs=0.2
+    )
+
+    await asyncio.wait_for(worker.run(WorkerParams(task_manager=task_manager)), timeout=5.0)
+
+    assert not task_manager.current_tasks()
+
+
+@pytest.mark.asyncio
+async def test_a_transcript_is_finalized_when_its_segment_is_the_latest():
+    service = _make_capturing_service(transcribe_secs=0.05, trailing_silence_secs=0)
+
+    received_down, _ = await run_test(service, frames_to_send=_segment_frames())
+
+    (transcript,) = [f for f in received_down if isinstance(f, TranscriptionFrame)]
+    assert transcript.finalized
+
+
+@pytest.mark.asyncio
+async def test_transcripts_of_segments_spoken_past_are_not_finalized():
+    # Segments are transcribed in order, so an earlier one can finish after
+    # the user's next stop.
+    service = _make_capturing_service(transcribe_secs=0.2, trailing_silence_secs=0)
+
+    received_down, _ = await run_test(
+        service, frames_to_send=_segment_frames() + _segment_frames() + _segment_frames()
+    )
+
+    finalized = [f.finalized for f in received_down if isinstance(f, TranscriptionFrame)]
+    assert finalized == [False, False, True]
+
+
+@pytest.mark.asyncio
+async def test_a_transcript_landing_while_the_user_speaks_again_is_not_finalized():
+    service = _make_capturing_service(transcribe_secs=0.1, trailing_silence_secs=0)
+    resumed = [
+        VADUserStartedSpeakingFrame(),
+        InputAudioRawFrame(audio=PCM, sample_rate=SAMPLE_RATE, num_channels=1),
+        SleepFrame(sleep=0.3),
+        VADUserStoppedSpeakingFrame(),
+    ]
+
+    received_down, _ = await run_test(service, frames_to_send=_segment_frames() + resumed)
+
+    finalized = [f.finalized for f in received_down if isinstance(f, TranscriptionFrame)]
+    assert finalized == [False, True]
+
+
+@pytest.mark.asyncio
 async def test_default_mode_wraps_segment_in_wav():
     service = _make_capturing_service(trailing_silence_secs=0)
     assert service.wants_wav_segments is True
@@ -161,6 +233,57 @@ async def test_passthrough_mode_preserves_exact_pcm():
     assert len(service.captured) == 1
     # Raw PCM, byte-for-byte: no WAV header prepended.
     assert service.captured[0] == PCM
+
+
+@pytest.mark.asyncio
+async def test_segment_is_resampled_to_the_segment_sample_rate():
+    service = _make_capturing_service(
+        wants_wav=False, segment_sample_rate=SAMPLE_RATE // 2, trailing_silence_secs=0
+    )
+
+    await _drive_one_segment(service)
+
+    # The same duration at half the rate.
+    assert len(service.captured) == 1
+    assert len(service.captured[0]) == len(PCM) // 2
+
+
+@pytest.mark.asyncio
+async def test_wav_segment_is_labeled_with_the_segment_sample_rate():
+    service = _make_capturing_service(segment_sample_rate=SAMPLE_RATE // 2, trailing_silence_secs=0)
+
+    await _drive_one_segment(service)
+
+    with wave.open(io.BytesIO(service.captured[0]), "rb") as wav:
+        assert wav.getframerate() == SAMPLE_RATE // 2
+        assert wav.getnframes() == len(PCM) // 4
+
+
+@pytest.mark.asyncio
+async def test_usage_measures_the_input_audio_of_a_resampled_segment():
+    service = _make_capturing_service(segment_sample_rate=SAMPLE_RATE // 2, trailing_silence_secs=0)
+
+    audio_seconds = await _drive_one_segment_with_usage(service)
+
+    assert audio_seconds == pytest.approx(len(PCM) / (SAMPLE_RATE * 2))
+
+
+@pytest.mark.asyncio
+async def test_a_segment_starts_with_the_last_second_before_speech():
+    service = _make_capturing_service(wants_wav=False, trailing_silence_secs=0)
+    earlier = bytes([1]) * (SAMPLE_RATE * 2 * 2)
+    last_second = bytes([2]) * (SAMPLE_RATE * 2)
+
+    await run_test(
+        service,
+        frames_to_send=[
+            InputAudioRawFrame(audio=earlier, sample_rate=SAMPLE_RATE, num_channels=1),
+            InputAudioRawFrame(audio=last_second, sample_rate=SAMPLE_RATE, num_channels=1),
+            *_segment_frames(),
+        ],
+    )
+
+    assert service.captured == [last_second + PCM]
 
 
 @pytest.mark.asyncio

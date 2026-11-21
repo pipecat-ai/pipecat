@@ -57,7 +57,10 @@ The harness asks three kinds of question, and each is one classifier call:
   suite whose judged replies are all final answers, with nothing for the bot
   to fetch first, sets ``allow_continue: false``, and a reply is then yes or
   no; a reply that is still arriving is still judged again as more of it
-  comes.
+  comes. An expectation can set ``allow_continue: false`` on itself alone,
+  which forces the judge to consider its reply as final, the thing to be
+  judged, rather than skipping it: a wait reassurance ("still working on
+  it...") is judged that way (see :mod:`pipecat.evals.script`).
 - A function call, for an ``eval:`` on a ``function_call``. The state holds
   the call's name and arguments and the conversation as context. The
   answer is yes or no.
@@ -96,7 +99,8 @@ the probabilities the classifier gave (for example ``P(yes)=0.97``):
   the probability of ``meets`` and ``not_applicable`` together.
 
 Each question's verdict is cached by its criterion and state, so asking the
-same question about the same conversation twice costs one call.
+same question about the same conversation twice costs one call. A failed
+question isn't cached: it decided nothing, so asking it again asks again.
 
 The explainer:
 
@@ -129,10 +133,9 @@ probabilities.
 When a call fails:
 
 A question that times out, can't connect, or comes back unusable is asked
-once more. A second failure fails the question: a reply or a function call
-gets a ``no`` with the reason "judge call failed", and each verdict of a
-failed simulation question is a ``none`` (the verdict the harness reports as
-not given).
+once more. A second failure fails the question: its verdict is a ``none``
+(the verdict the harness reports as not given), with the reason "judge call
+failed: " and the error, such as the provider refusing the call.
 
 Lifecycle:
 
@@ -178,6 +181,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.deprecation import warn_deprecated
+from pipecat.utils.security.redaction import redact_secrets
 
 _R = TypeVar("_R")
 
@@ -235,8 +239,8 @@ class JudgeVerdict:
 
     Parameters:
         verdict: ``"yes"`` (satisfies), ``"no"`` (substantive answer that fails),
-            or ``"continue"`` (interim/filler/incomplete — re-judge once more text
-            arrives).
+            ``"continue"`` (interim/filler/incomplete — re-judge once more text
+            arrives), or ``"none"`` (the judge call failed, so nothing was decided).
         reason: The explainer's one-sentence reason for the verdict, or the
             classifier's probabilities when nothing explained it.
         raw_response: The judge's raw answer, for diagnostics.
@@ -307,6 +311,14 @@ _REPLY_OUTCOMES: dict[str, Any] = {
         "fragment."
     ),
 }
+
+
+def _reply_outcomes(allow_continue: bool) -> dict[str, Any]:
+    """The answers a reply can get: the three, or yes and no alone."""
+    if allow_continue:
+        return _REPLY_OUTCOMES
+    return {k: v for k, v in _REPLY_OUTCOMES.items() if k != "continue"}
+
 
 # A run's per-turn outcomes. A classifier can't tell by itself whether a
 # criterion only applies in some situation ("when the time is taken,
@@ -391,11 +403,7 @@ class EvalJudge:
             _Explainer(explainer, max_tokens=max_tokens) if explainer is not None else None
         )
         self._explain_below = explain_below
-        self._reply_outcomes = (
-            _REPLY_OUTCOMES
-            if allow_continue
-            else {k: v for k, v in _REPLY_OUTCOMES.items() if k != "continue"}
-        )
+        self._reply_outcomes = _reply_outcomes(allow_continue)
         # The conversation the judge evaluates against, grown by the harness over
         # the scenario: dicts with a ``role`` of ``user``, ``assistant`` (a
         # segment of a reply), or ``tool`` (a call the bot made, one line), and
@@ -404,6 +412,8 @@ class EvalJudge:
         self._cache: dict[str, JudgeVerdict] = {}
         self._run_cache: dict[str, RunVerdicts] = {}
         self._setup_task: asyncio.Task | None = None
+        # The last failed question's error, for the reason of the verdict it fails.
+        self._call_error = ""
 
     @classmethod
     def from_config(cls, judge_config: dict | None) -> "EvalJudge":
@@ -488,31 +498,36 @@ class EvalJudge:
         if text and text.strip():
             self._transcript.append({"role": "tool", "content": text})
 
-    async def evaluate(self, criterion: str) -> JudgeVerdict:
+    async def evaluate(self, criterion: str, *, allow_continue: bool | None = None) -> JudgeVerdict:
         """Judge whether the bot's latest reply satisfies ``criterion``, in the conversation so far.
 
         Args:
             criterion: Natural-language description of what the reply should express.
+            allow_continue: Whether this reply may be judged ``continue``;
+                the judge's own setting when ``None``.
 
         Returns:
             A ``yes``, a ``no``, or, when ``allow_continue`` is on, a
             ``continue`` when the bot is still working toward its answer,
             cached by criterion and conversation. A final verdict that needs a
-            reason is explained, and a failed call is a ``no`` with the failure
+            reason is explained, and a failed call is a ``none`` with the failure
             as its reason.
         """
+        outcomes = (
+            self._reply_outcomes if allow_continue is None else _reply_outcomes(allow_continue)
+        )
         entries = self._numbered_turns(e for e in self._transcript if e["role"] != "tool")
         latest = entries.pop()["content"] if entries and entries[-1]["role"] == "bot" else ""
         state = {"conversation": self._conversation(entries), "latest_bot_reply": latest}
-        key = _cache_key("reply", criterion, state)
+        key = _cache_key("reply", criterion, state, sorted(outcomes))
         if key not in self._cache:
             question = ChoiceQuestion(
                 instructions=self._instructions(_REPLY_QUESTION, "Criterion", criterion),
-                options=self._reply_outcomes,
+                options=outcomes,
             )
             answers = await self._choices(state, {"verdict": question})
             if answers is None:
-                verdict = self._failed("no")
+                return self._failed("none")  # not cached: it decided nothing
             else:
                 verdict = self._reply_verdict(answers["verdict"])
                 if (
@@ -548,7 +563,7 @@ class EvalJudge:
                 state, self._instructions(_CALL_QUESTION, "Criterion", criterion, _CALL_NOTE)
             )
             if answer is None:
-                verdict = self._failed("no")
+                return self._failed("none")  # not cached: it decided nothing
             else:
                 verdict = self._yes_no_verdict(answer)
                 if self._explainer and self._needs_reason(verdict):
@@ -636,6 +651,8 @@ class EvalJudge:
             ),
         )
 
+        # The questions ran at once and share the judge's last error, so a failed
+        # verdict's reason may give another question's: they ask the same provider.
         failed = self._failed("none")
         verdicts = RunVerdicts(
             goal=self._yes_no_verdict(goal_answer) if goal_answer else failed,
@@ -648,7 +665,9 @@ class EvalJudge:
             },
         )
         verdicts = await self._explain_run(verdicts, conversation, criteria, success)
-        self._run_cache[key] = verdicts
+        # A run with a failed question decided nothing for it, so isn't cached.
+        if goal_answer is not None and None not in turn_answers:
+            self._run_cache[key] = verdicts
         return verdicts
 
     async def close(self) -> None:
@@ -737,6 +756,7 @@ class EvalJudge:
                     logger.warning(f"Judge question failed, asking again: {e}")
                 else:
                     logger.error(f"Judge question failed: {e}")
+                    self._call_error = redact_secrets(str(e))
         return None
 
     @staticmethod
@@ -836,10 +856,10 @@ class EvalJudge:
         """The probability of each outcome, as a verdict's reason."""
         return ", ".join(f"P({k})={v:.2f}" for k, v in probabilities.items())
 
-    @staticmethod
-    def _failed(verdict: str) -> JudgeVerdict:
-        """The verdict a failed call gives."""
-        return JudgeVerdict(verdict=verdict, reason="judge call failed", raw_response="")
+    def _failed(self, verdict: str) -> JudgeVerdict:
+        """The verdict a failed call gives, with the call's error as its reason."""
+        reason = f"judge call failed: {self._call_error}"
+        return JudgeVerdict(verdict=verdict, reason=reason, raw_response="")
 
     @staticmethod
     def _with_reason(verdict: JudgeVerdict, reason: str) -> JudgeVerdict:

@@ -89,6 +89,7 @@ class LLMWorker(PipelineWorker):
         active: bool = False,
         bridged: tuple[str, ...] | None = None,
         defer_tool_frames: bool = True,
+        **kwargs: Any,
     ):
         """Initialize the LLMWorker.
 
@@ -109,6 +110,10 @@ class LLMWorker(PipelineWorker):
                 bridged worker.
             defer_tool_frames: Whether to defer frames queued during
                 tool execution until all tools complete. Defaults to True.
+            **kwargs: Additional arguments forwarded to ``PipelineWorker``,
+                such as ``enable_tracing``, ``conversation_id`` or
+                ``observers``. ``params`` defaults to metrics and usage
+                metrics enabled, and ``idle_timeout_secs`` to ``None``.
         """
         # State referenced by tool wrapper closures; must be set before
         # _register_tools wraps any handlers.
@@ -124,16 +129,9 @@ class LLMWorker(PipelineWorker):
 
         pipeline = pipeline if pipeline is not None else Pipeline([self._llm])
 
-        super().__init__(
-            pipeline,
-            name=name,
-            bridged=bridged,
-            idle_timeout_secs=None,
-            params=PipelineParams(
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-        )
+        kwargs.setdefault("idle_timeout_secs", None)
+        kwargs.setdefault("params", PipelineParams(enable_metrics=True, enable_usage_metrics=True))
+        super().__init__(pipeline, name=name, bridged=bridged, **kwargs)
         # PipelineWorker's __init__ doesn't accept active; configure after.
         self._active = active
         self._pending_activation = active

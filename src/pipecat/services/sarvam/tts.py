@@ -286,6 +286,12 @@ class SarvamHttpTTSSettings(TTSSettings):
             **Note:** Supported by bulbul:v3; ignored by bulbul:v4-flash.
     """
 
+    _aliases: ClassVar[dict[str, str]] = {
+        **TTSSettings._aliases,
+        "speaker": "voice",
+        "target_language_code": "language",
+    }
+
     enable_preprocessing: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pace: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pitch: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -305,8 +311,6 @@ class SarvamTTSSettings(SarvamHttpTTSSettings):
         max_chunk_length: Maximum characters processed in a single chunk.
             Controls memory usage and processing efficiency. Defaults to 150.
     """
-
-    _aliases: ClassVar[dict[str, str]] = {"target_language_code": "language"}
 
     min_buffer_size: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     max_chunk_length: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -1183,9 +1187,6 @@ class SarvamTTSService(InterruptibleTTSService):
                 msg = json.loads(message)
                 context_id = self.get_active_audio_context_id()
                 if msg.get("type") == "audio":
-                    request_id = msg.get("data", {}).get("request_id", "N/A")
-                    logger.trace(f"TTS request_id={request_id}, context_id={context_id}")
-
                     # Check for interruption before processing audio
                     await self.stop_ttfb_metrics()
                     audio = base64.b64decode(msg["data"]["audio"])
@@ -1205,14 +1206,15 @@ class SarvamTTSService(InterruptibleTTSService):
                         await self.remove_audio_context(context_id)
                 elif msg.get("type") == "error":
                     error_msg = msg["data"]["message"]
-                    await self.push_error(error_msg=f"TTS Error: {error_msg}")
+                    error = f"TTS Error: {error_msg}"
+                    if request_id := msg["data"].get("request_id"):
+                        error += f" (request ID: {request_id})"
+                    await self.push_error(error_msg=error)
 
                     # If it's a timeout error, the connection might need to be reset
                     if "too long" in error_msg.lower() or "timeout" in error_msg.lower():
                         logger.warning("Connection timeout detected, service may need restart")
-                    await self.append_to_audio_context(
-                        context_id, ErrorFrame(error=f"TTS Error: {error_msg}")
-                    )
+                    await self.append_to_audio_context(context_id, ErrorFrame(error=error))
 
     async def _send_keepalive(self):
         """Send a ping to keep the connection open through silences."""

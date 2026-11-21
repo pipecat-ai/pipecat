@@ -28,6 +28,7 @@ class KeepaliveSTTService(STTService):
         )
         self.keepalives = 0
         self.failures_left = 0
+        self.silences: list[bytes] = []
 
     async def run_stt(self, audio: bytes):
         yield None
@@ -37,6 +38,7 @@ class KeepaliveSTTService(STTService):
             self.failures_left -= 1
             raise ConnectionClosedError(None, None)
         self.keepalives += 1
+        self.silences.append(silence)
 
 
 @pytest.mark.asyncio
@@ -53,5 +55,23 @@ async def test_keepalive_survives_failed_send():
                 await asyncio.sleep(KEEPALIVE_INTERVAL)
         assert service.failures_left == 0
         assert not service._keepalive_task.done()
+    finally:
+        await service._cancel_keepalive_task()
+
+
+@pytest.mark.asyncio
+async def test_keepalive_silence_is_at_the_send_sample_rate(monkeypatch):
+    """The silence goes straight to the provider, so it is built at the send rate."""
+    monkeypatch.setattr(KeepaliveSTTService, "send_sample_rate", property(lambda self: 8000))
+    service = KeepaliveSTTService()
+    service._task_manager = TaskManager()
+    service._sample_rate = 48000
+    service._create_keepalive_task()
+    try:
+        async with asyncio.timeout(1):
+            while not service.silences:
+                await asyncio.sleep(KEEPALIVE_INTERVAL)
+        # 100 ms of 16-bit silence at 8 kHz.
+        assert service.silences[0] == bytes(8000 * 2 // 10)
     finally:
         await service._cancel_keepalive_task()

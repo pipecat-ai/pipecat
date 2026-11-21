@@ -122,7 +122,7 @@ These are the built-in transforms (`src/pipecat/utils/text/transforms/`, bundled
 | `expand_currency` | `It costs $42.50` | `It costs forty-two dollars and fifty cents` |
 | `expand_percentages` | `Up 12.5%` | `Up twelve point five percent` |
 | `expand_units` | `It is 5 km away` | `It is 5 kilometers away` |
-| `normalize_dates` | `on 2024-01-15` | `on January 15th, two thousand and twenty-four` |
+| `normalize_dates` | `on 2024-01-15` | `on January 15th, twenty twenty-four` |
 | `email_to_speech` | `a@b.com` | `a at b dot com` |
 | `expand_phone_numbers` | `call 555-123-4567` | `call 5 5 5 1 2 3 4 5 6 7` |
 | `expand_numbers` | `room 1994` | `room 1 9 9 4` |

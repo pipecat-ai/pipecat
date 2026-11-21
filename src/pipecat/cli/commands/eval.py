@@ -40,6 +40,7 @@ from pipecat.evals.results import (
 )
 from pipecat.evals.scenario import (
     EvalKind,
+    EvalRubric,
     EvalScenarioFile,
     EvalSimulationScenario,
     describe_config,
@@ -267,6 +268,9 @@ def _build_scenario_runs(paths: list[Path], bot_url: str) -> list[EvalRun]:
             runs.append(run)
             continue
         for loaded in file:
+            # A rubric judges a call that already happened; there's nothing to run.
+            if isinstance(loaded, EvalRubric):
+                continue
             kind = (
                 EvalKind.SIMULATION
                 if isinstance(loaded, EvalSimulationScenario)
@@ -323,11 +327,13 @@ async def _execute_scenario(
         Path(logs_dir).mkdir(parents=True, exist_ok=True)
         if run.result.debug_log:
             (Path(logs_dir) / f"{run.stem}.eval.log").write_text(
-                "\n".join(run.result.debug_log) + "\n"
+                "\n".join(run.result.debug_log) + "\n",
+                encoding="utf-8",
             )
         if isinstance(run.result, EvalSimulationResult):
             (Path(logs_dir) / f"{run.stem}.conversation.json").write_text(
-                json.dumps(run.result.conversation, indent=2) + "\n"
+                json.dumps(run.result.conversation, indent=2) + "\n",
+                encoding="utf-8",
             )
     except Exception as e:  # noqa: BLE001
         # Errors raised inside the session's run() are caught there and returned
@@ -337,7 +343,9 @@ async def _execute_scenario(
         run.error = f"error: {type(e).__name__}: {e}"
         with contextlib.suppress(OSError):
             Path(logs_dir).mkdir(parents=True, exist_ok=True)
-            (Path(logs_dir) / f"{run.stem}.eval.log").write_text(traceback.format_exc())
+            (Path(logs_dir) / f"{run.stem}.eval.log").write_text(
+                traceback.format_exc(), encoding="utf-8"
+            )
     finally:
         if run.started_at is not None:
             run.duration_ms = int((time.monotonic() - run.started_at) * 1000)
@@ -479,6 +487,12 @@ def run(
     logger.remove()
 
     runs = _build_scenario_runs(_expand_scenario_paths(scenarios), bot_url)
+    if not runs:
+        print(
+            "Nothing to run: the given paths hold no scripted scenario or simulation "
+            "(a rubric is judged with `pipecat eval judge`)."
+        )
+        raise typer.Exit(code=1)
     _print_scenario_configs(runs)
     # Printed only under -a, to say which of the runs will actually record.
     if audio:
@@ -523,35 +537,39 @@ def run(
 
 
 #
-# `pipecat eval judge` — judge saved conversations against a simulation.
+# `pipecat eval judge` — judge saved conversations against a simulation or a rubric.
 #
 
 
-def _judged_simulation(path: Path, name: str | None) -> EvalSimulationScenario:
-    """The simulation in ``path`` to judge with: the one called ``name``, or the file's only one."""
+def _judged_scenario(path: Path, name: str | None) -> EvalSimulationScenario | EvalRubric:
+    """The simulation or rubric in ``path`` to judge with: the one called ``name``, or the file's only one."""
     try:
         file = EvalScenarioFile.load(path)
     except (ValueError, FileNotFoundError) as e:
         raise typer.BadParameter(str(e), param_hint="SCENARIO_PATH")
-    simulations = [s for s in file if isinstance(s, EvalSimulationScenario)]
-    names = ", ".join(s.name for s in simulations) or "none"
-    if name is None and len(simulations) != 1:
-        raise typer.BadParameter(f"pick one of the file's simulations: {names}", param_hint="-s")
-    matches = [s for s in simulations if name is None or s.name in (name, f"{file.name}/{name}")]
+    judging = [s for s in file if isinstance(s, (EvalSimulationScenario, EvalRubric))]
+    names = ", ".join(s.name for s in judging) or "none"
+    if name is None and len(judging) != 1:
+        raise typer.BadParameter(
+            f"pick one of the file's simulations and rubrics: {names}", param_hint="-s"
+        )
+    matches = [s for s in judging if name is None or s.name in (name, f"{file.name}/{name}")]
     if not matches:
-        raise typer.BadParameter(f"no simulation {name!r}; the file has: {names}", param_hint="-s")
+        raise typer.BadParameter(
+            f"no simulation or rubric {name!r}; the file has: {names}", param_hint="-s"
+        )
     return matches[0]
 
 
 async def _judge_conversation(
-    simulation: EvalSimulationScenario, path: Path
+    simulation: EvalSimulationScenario | EvalRubric, path: Path
 ) -> EvalSimulationResult:
     """Judge one conversation file, with a judge of its own that explains every verdict.
 
     A file that can't be read or judged is the result's error.
     """
     try:
-        messages = json.loads(path.read_text())
+        messages = json.loads(path.read_text(encoding="utf-8"))
         judgement = await EvalSimulationJudge(simulation, explain_below=math.inf).judge(messages)
     except Exception as e:  # noqa: BLE001
         return EvalSimulationResult(
@@ -633,7 +651,7 @@ def _print_judgement(path: Path, result: EvalSimulationResult, verbose: bool) ->
 
 
 async def _judge_all(
-    simulation: EvalSimulationScenario,
+    simulation: EvalSimulationScenario | EvalRubric,
     paths: list[Path],
     output: Path,
     concurrency: int,
@@ -642,7 +660,7 @@ async def _judge_all(
     """Judge every conversation, ``concurrency`` at a time, writing each line as it is judged."""
     semaphore = asyncio.Semaphore(concurrency)
     results: list[EvalSimulationResult] = []
-    with output.open("w") as f:
+    with output.open("w", encoding="utf-8") as f:
 
         async def judge_one(path: Path) -> None:
             async with semaphore:
@@ -658,7 +676,9 @@ async def _judge_all(
 
 @eval_app.command("judge")
 def judge(
-    scenario_path: Path = typer.Argument(..., help="Scenario YAML file holding the simulation."),
+    scenario_path: Path = typer.Argument(
+        ..., help="Scenario YAML file holding the simulation or rubric."
+    ),
     conversations: list[Path] = typer.Argument(
         ...,
         help="Conversation files to judge: a run's <stem>.conversation.json, or the same "
@@ -668,8 +688,8 @@ def judge(
         None,
         "-s",
         "--scenario",
-        help="The simulation to judge with when the file holds several, with or without "
-        "the file's name (book_table/available or available).",
+        help="The simulation or rubric to judge with when the file holds several, with or "
+        "without the file's name (book_table/available or available).",
     ),
     output: Path = typer.Option(
         Path("judged.jsonl"), "-o", "--output", help="JSONL file to write, one line per file."
@@ -681,14 +701,15 @@ def judge(
         False, "-v", "--verbose", help="Print the judge's reason and each metric's score."
     ),
 ) -> None:
-    """Judge saved conversations against a simulation's success and its criterion metrics.
+    """Judge saved conversations against a simulation's or a rubric's success and criterion metrics.
 
-    Each conversation gets the verdicts the simulation's own run would, with a
-    reason for every one, passes included. Measured metrics are left out, since
+    Each conversation gets the verdicts a simulation's own run would, with a
+    reason for every one, passes included. A rubric judges a recorded call the
+    same way, with no simulation behind it. Measured metrics are left out, since
     they come from a live run. Exits non-zero when a conversation did not pass.
     """
     logger.remove()
-    simulation = _judged_simulation(scenario_path, scenario)
+    simulation = _judged_scenario(scenario_path, scenario)
     results = asyncio.run(_judge_all(simulation, conversations, output, concurrency, verbose))
     passed = sum(1 for r in results if r.passed)
     print()

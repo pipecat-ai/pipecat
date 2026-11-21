@@ -11,11 +11,15 @@ but video tracks are subscribed. The fix ensures video stream processing
 only starts when there is a consumer for the frames.
 """
 
+from __future__ import annotations
+
 import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
+
+from pipecat.audio.utils import create_stream_resampler
 
 try:
     from livekit import rtc
@@ -160,8 +164,10 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
     unsubscribe). Symmetric for video.
     """
 
-    def _create_client(self, video_in_enabled: bool = False) -> LiveKitTransportClient:
-        params = LiveKitParams(video_in_enabled=video_in_enabled)
+    def _create_client(
+        self, video_in_enabled: bool = False, audio_in_enabled: bool = True
+    ) -> LiveKitTransportClient:
+        params = LiveKitParams(audio_in_enabled=audio_in_enabled, video_in_enabled=video_in_enabled)
         callbacks = LiveKitCallbacks(
             on_connected=AsyncMock(),
             on_disconnected=AsyncMock(),
@@ -234,6 +240,16 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
         stream, task = client._audio_streams[participant.identity]
         self.assertIs(stream, mock_stream)
         self.assertIsNotNone(task)
+
+    async def test_disabled_audio_input_does_not_start_queue_producer(self):
+        client = self._create_client(audio_in_enabled=False)
+        track, pub, participant = self._audio_track()
+
+        with patch.object(rtc, "AudioStream") as audio_stream:
+            await client._async_on_track_subscribed(track, pub, participant)
+
+        audio_stream.assert_not_called()
+        client._callbacks.on_audio_track_subscribed.assert_called_once()
 
     async def test_audio_stream_closed_and_task_cancelled_on_unsubscribe(self):
         """Unsubscribing closes the stream, cancels the task, clears the registry."""
@@ -311,7 +327,7 @@ class TestLiveKitInputResamplesEachParticipantSeparately(unittest.IsolatedAsynci
 
     RATE_IN, RATE_OUT, TONES = 48000, 16000, {"alice": 440.0, "bob": 1000.0}
 
-    def _frame(self, hz: float, index: int) -> "rtc.AudioFrameEvent":
+    def _frame(self, hz: float, index: int) -> rtc.AudioFrameEvent:
         n = self.RATE_IN // 100  # 10 ms
         t = (np.arange(n) + index * n) / self.RATE_IN
         pcm = (8000 * np.sin(2 * np.pi * hz * t)).astype(np.int16).tobytes()
@@ -926,7 +942,7 @@ class TestLiveKitVideoOutputPublish(unittest.IsolatedAsyncioTestCase):
         self.assertIn(rtc.TrackSource.SOURCE_CAMERA, published_sources)
         self.assertIn(rtc.TrackSource.SOURCE_MICROPHONE, published_sources)
 
-    def _video_publish_options(self, **params) -> "rtc.TrackPublishOptions":
+    def _video_publish_options(self, **params) -> rtc.TrackPublishOptions:
         client = self._create_client(video_out_enabled=True)
         client._params = LiveKitParams(video_out_enabled=True, **params)
         return client._video_publish_options()
@@ -1239,7 +1255,7 @@ class TestLiveKitParticipantsAlreadyInRoom(unittest.IsolatedAsyncioTestCase):
         client._callbacks.on_participant_connected.assert_awaited_with("bob")
 
 
-def _video_publication(source: "rtc.TrackSource.ValueType") -> MagicMock:
+def _video_publication(source: rtc.TrackSource.ValueType) -> MagicMock:
     publication = MagicMock()
     publication.sid = f"video-{source}"
     publication.source = source
@@ -1635,6 +1651,9 @@ class TestLiveKitAudioInUserTracks(unittest.IsolatedAsyncioTestCase):
         )
         input_transport = transport.input()
         input_transport._sample_rate = 16000
+        # A pause in the test run, such as a garbage collection, must not clear
+        # the resampler in the middle of the stream.
+        input_transport._mixed_resampler = create_stream_resampler(clear_after_secs=None)
         input_transport.push_audio_frame = AsyncMock()
 
         async def frames():

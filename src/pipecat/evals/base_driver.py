@@ -88,6 +88,10 @@ class BaseEvalDriver(ABC, Generic[R]):
             skipped: Why the run was not driven at all, or ``None``.
         """
 
+    def bot_metrics(self) -> list[dict]:
+        """The metrics reports the bot sent during the run, for the result: each one's time and data."""
+        return [{"at": m["at"], "data": m["data"]} for m in self._stream.metrics]
+
     def record_failure(self, failure: EvalAssertionFailure) -> None:
         """Note a run-level failure the session raised while the driver was running.
 

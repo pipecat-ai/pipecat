@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.volume import AudioVolumeTracker
+from pipecat.expressive.perception import PerceptionSignal
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
@@ -48,8 +49,10 @@ from pipecat.frames.frames import (
     LLMMarkerResponseFrame,
     LLMTextFrame,
     MetricsFrame,
+    PerceptionMetadataFrame,
     TextType,
     TranscriptionFrame,
+    TranscriptionSpeaker,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -169,7 +172,9 @@ class RTVIObserverParams:
             and ``remove_ignored_source()``.
         skip_text_types: List of text types to skip sending as tts/output messages.
             Text of type ``backchannel`` is only sent to clients of protocol 2.2.0 or
-            later; add ``"backchannel"`` here to keep it from every client.
+            later, and expression sounds and pauses (``expression_sound``,
+            ``expression_pause``) to clients of 2.3.0 or later; add a type here to
+            keep it from every client.
             Note: if using this to avoid sending secure information, be sure to also disable
             bot_llm_enabled, and leave llm_raw_text_enabled off, to avoid leaking through
             LLM messages.
@@ -317,6 +322,11 @@ class RTVIObserver(BaseObserver):
         self._skipped_segment_ids: set[int] = set()
         # Whether an interruption cut off the skipped segments still remembered
         self._skipped_segments_interrupted = False
+        # Processors that read how the user spoke, from their
+        # PerceptionMetadataFrame, and the transcriptions pushed to one that
+        # haven't been read yet (see _handle_transcription_push)
+        self._perceivers: set[FrameProcessor] = set()
+        self._unread_transcription_ids: set[int] = set()
 
         self._system_logger_id: int | None = None
         if self._params.system_logs_enabled:
@@ -359,6 +369,11 @@ class RTVIObserver(BaseObserver):
     def _client_supports_backchannels(self) -> bool:
         """Return True when the connected client supports the backchannel text type (2.2.0+)."""
         return self._client_is_at_least([2, 2, 0])
+
+    @property
+    def _client_supports_expression(self) -> bool:
+        """Return True when the connected client supports expression sounds and pauses (2.3.0+)."""
+        return self._client_is_at_least([2, 3, 0])
 
     @property
     def _client_supports_raw_text(self) -> bool:
@@ -627,7 +642,7 @@ class RTVIObserver(BaseObserver):
                     tool_call_id=tool_call_id,
                     cancelled=cancelled,
                     function_name=function_name if named else None,
-                    result=(result if result else None) if full and not cancelled else None,
+                    result=result if full and not cancelled else None,
                 )
             )
         await self.send_rtvi_message(message)
@@ -658,9 +673,15 @@ class RTVIObserver(BaseObserver):
         ):
             return
 
+        if isinstance(frame, PerceptionMetadataFrame) and data.first_push:
+            self._perceivers.add(src)
+        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
+            await self._handle_transcription_push(frame, data)
+            return
+
         # A frame is handled the first time it is pushed, except aggregated
         # text, which is handled once it has gone through the output
-        # transport and has the right timing.
+        # transport and has the right timing, and transcriptions (above).
         if not data.first_push and not isinstance(
             frame, (AggregatedTextFrame, AggregatedTextProgressFrame)
         ):
@@ -685,8 +706,6 @@ class RTVIObserver(BaseObserver):
             await self._handle_bot_speaking(frame)
         elif isinstance(frame, InterruptionFrame):
             await self._handle_bot_interrupted()
-        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
-            await self._handle_user_transcriptions(frame)
         elif isinstance(frame, UserBackchannelFrame) and self._params.user_input_enabled:
             await self._send_user_input(
                 frame.text,
@@ -898,9 +917,11 @@ class RTVIObserver(BaseObserver):
                 if is_progress_aware:
                     result = await transform(text, text_type, accumulated, remaining)
                     if isinstance(result, BotOutputTransformResult):
-                        accumulated = result.accumulated_text or accumulated
-                        remaining = result.remaining_text or remaining
-                        text = result.text or text
+                        if result.accumulated_text is not None:
+                            accumulated = result.accumulated_text
+                        if result.remaining_text is not None:
+                            remaining = result.remaining_text
+                        text = result.text
                 else:
                     # The deprecated 2-parameter signature returns the text itself.
                     accumulated = cast(str, await transform(accumulated, text_type))
@@ -908,7 +929,10 @@ class RTVIObserver(BaseObserver):
                     text = cast(str, await transform(text, text_type))
 
         if self._params.bot_output_enabled:
-            spoken_status: RTVI.SpokenStatus = "completed" if remaining == "" else "in-progress"
+            # Whether speech is done comes from the frame: a transform may empty the text.
+            spoken_status: RTVI.SpokenStatus = (
+                "completed" if frame.remaining_text == "" else "in-progress"
+            )
             message = RTVI.BotOutputMessage(
                 data=RTVI.BotOutputMessageData(
                     text=text,
@@ -920,6 +944,7 @@ class RTVIObserver(BaseObserver):
                         accumulated_text=accumulated,
                         remaining_text=remaining,
                     ),
+                    delivery=frame.delivery,
                 )
             )
             await self.send_rtvi_message(message)
@@ -937,6 +962,13 @@ class RTVIObserver(BaseObserver):
         # A client that doesn't support backchannels would show one as part of the
         # bot's response.
         if text_type == TextType.BACKCHANNEL and not self._client_supports_backchannels:
+            return True
+        # Expression sounds and pauses are part of protocol 2.3.0; an earlier client
+        # would take one for part of the bot's response.
+        if (
+            text_type in (TextType.EXPRESSION_SOUND, TextType.EXPRESSION_PAUSE)
+            and not self._client_supports_expression
+        ):
             return True
         skip_types = self._params.skip_text_types
         return bool(skip_types and text_type in skip_types)
@@ -958,6 +990,9 @@ class RTVIObserver(BaseObserver):
     async def _send_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Send aggregated LLM text messages."""
         if self._is_skipped(frame):
+            return
+        # A unit that is only tags reaches the context, with no words to show.
+        if not frame.text.strip():
             return
 
         text_type = frame.text_type
@@ -1011,16 +1046,24 @@ class RTVIObserver(BaseObserver):
                 segment_id=segment_id,
                 spoken_status=spoken_status,
                 spoken_progress=progress,
+                delivery=frame.delivery if isinstance(frame, TTSTextFrame) else None,
             )
             message = RTVI.BotOutputMessage(data=data)
             await self.send_rtvi_message(message)
 
-        if isTTS and self._params.tts_raw_text_enabled and self._client_supports_raw_text:
+        # A sound or pause isn't a word the bot spoke: bot-output alone carries
+        # it, with its text type.
+        spoken_words = isTTS and text_type not in (
+            TextType.EXPRESSION_SOUND,
+            TextType.EXPRESSION_PAUSE,
+        )
+
+        if spoken_words and self._params.tts_raw_text_enabled and self._client_supports_raw_text:
             await self.send_rtvi_message(
                 RTVI.TTSRawTextMessage(data=RTVI.TextMessageData(text=text))
             )
 
-        if isTTS and self._params.bot_tts_enabled:
+        if spoken_words and self._params.bot_tts_enabled:
             tts_message = RTVI.BotTTSTextMessage(data=RTVI.TextMessageData(text=text))
             await self.send_rtvi_message(tts_message)
 
@@ -1048,6 +1091,27 @@ class RTVIObserver(BaseObserver):
             )
             self._bot_transcription = ""
 
+    async def _handle_transcription_push(
+        self, frame: TranscriptionFrame | InterimTranscriptionFrame, data: FramePushed
+    ):
+        """Handle a transcription once every perceiver it's pushed to has read it.
+
+        A processor after the STT, such as ``PipecatToneReader``, sets the
+        reading on the transcription it passes along. Handled on the STT's
+        push, the user-input message would go out before the reader had read
+        it, without its perception. So a transcription pushed to a perceiver
+        waits until it's pushed on to a processor that isn't one.
+        """
+        if data.destination in self._perceivers:
+            if data.first_push:
+                self._unread_transcription_ids.add(frame.id)
+            return
+        if frame.id in self._unread_transcription_ids:
+            self._unread_transcription_ids.discard(frame.id)
+        elif not data.first_push:
+            return
+        await self._handle_user_transcriptions(frame)
+
     async def _handle_user_transcriptions(
         self, frame: TranscriptionFrame | InterimTranscriptionFrame
     ):
@@ -1060,6 +1124,8 @@ class RTVIObserver(BaseObserver):
                 timestamp=frame.timestamp,
                 final=final,
                 user_id=frame.user_id,
+                perception=frame.perception,
+                speaker=frame.speaker,
             )
         if self._params.stt_raw_text_enabled and self._client_supports_raw_text:
             await self.send_rtvi_message(
@@ -1069,6 +1135,7 @@ class RTVIObserver(BaseObserver):
                         user_id=frame.user_id,
                         timestamp=frame.timestamp,
                         final=final,
+                        speaker=frame.speaker,
                     )
                 )
             )
@@ -1089,8 +1156,21 @@ class RTVIObserver(BaseObserver):
         final: bool,
         user_id: str | None = None,
         msg_id: str | None = None,
+        perception: list[PerceptionSignal] | None = None,
+        speaker: TranscriptionSpeaker | None = None,
     ):
         """Send a user input message."""
+        signals = None
+        if perception:
+            signals = []
+            for signal in perception:
+                labels = [
+                    RTVI.UserPerceptionLabel(label=label, confidence=confidence)
+                    for label, confidence in signal.labels
+                ]
+                signals.append(
+                    RTVI.UserPerceptionSignal(name=signal.name, labels=labels, value=signal.value)
+                )
         message = RTVI.UserInputMessage(
             data=RTVI.UserInputMessageData(
                 text=text,
@@ -1099,6 +1179,8 @@ class RTVIObserver(BaseObserver):
                 final=final,
                 user_id=user_id,
                 msg_id=msg_id,
+                perception=signals,
+                speaker=speaker,
             )
         )
         await self.send_rtvi_message(message)

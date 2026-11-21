@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import re
 import unittest
 
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
@@ -2848,7 +2849,8 @@ class TestWordCompletionTrackerResyncWithTags(unittest.TestCase):
     """Resyncing in a frame that also carries synthesis and LLM markup.
 
     The tags are their own segment, so a resync in the text after them has to keep
-    the LLM cursor -- still sitting before the closing ``</card>`` -- in step.
+    the LLM cursor -- already past the ``</card>`` written against ``4111`` -- in
+    step.
     """
 
     TTS = "Call <spell>4111</spell> when it is ready"
@@ -2872,10 +2874,18 @@ class TestWordCompletionTrackerResyncWithTags(unittest.TestCase):
         tracker.add_word_and_check_complete("ís")
         self.assertEqual(tracker.get_word_for_frame(), "when it is")
 
-    def test_resync_after_the_tag_carries_the_closing_tag_into_context(self):
+    def test_the_closing_tag_goes_into_context_with_the_word_it_touches(self):
+        tracker = WordCompletionTracker(
+            self.TTS, llm_text=self.LLM, user_facing_text=self.USER_FACING
+        )
+        tracker.add_word_and_check_complete("Call")
+        tracker.add_word_and_check_complete("4111")
+        self.assertEqual(tracker.get_llm_consumed(), "<card>4111</card>")
+
+    def test_resync_after_the_tag_carries_the_skipped_words_into_context(self):
         tracker = self._tracker()
         tracker.add_word_and_check_complete("ís")
-        self.assertEqual(tracker.get_llm_consumed(), "</card> when it is")
+        self.assertEqual(tracker.get_llm_consumed(), "when it is")
 
     def test_progress_skips_the_tag_it_never_shows(self):
         tracker = self._tracker()
@@ -3197,3 +3207,41 @@ class TestWordCompletionTrackerUnmatchedSymbolStaysPut(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTagsOnlyTheLLMTextCarries(unittest.TestCase):
+    """Tags such as expressive conversation's are in the LLM's text alone: the
+    cursor into it passes over them, so a word is never attributed half a tag.
+    """
+
+    LLM_TEXT = "<<calm>> It's [[laugh]] fine now."
+    TTS_TEXT = "It's [laughter] fine now."
+    USER_FACING = "It's fine now."
+
+    def _llm_consumed(self, llm_markup):
+        tracker = WordCompletionTracker(
+            self.TTS_TEXT,
+            llm_text=self.LLM_TEXT,
+            user_facing_text=self.USER_FACING,
+            llm_markup=llm_markup,
+        )
+        consumed = []
+        for word in ["It's", "[laughter]", "fine", "now."]:
+            tracker.add_word_and_check_complete(word)
+            consumed.append(tracker.get_llm_consumed())
+        return consumed
+
+    def test_a_word_is_attributed_whole_tags(self):
+        consumed = self._llm_consumed(re.compile(r"<<[^<>]*>>|\[\[[^\[\]]*\]\]"))
+        self.assertEqual(consumed, ["<<calm>> It's", None, "[[laugh]] fine", "now."])
+
+    def test_what_is_left_starts_after_the_words_spoken(self):
+        # The service's markup takes the space after it, as the tag does.
+        tracker = WordCompletionTracker(
+            '<emotion value="calm"/> I\'m so sorry.',
+            llm_text="<<calm>> I'm so sorry.",
+            user_facing_text="I'm so sorry.",
+            llm_markup=re.compile(r"<<[^<>]*>>|\[\[[^\[\]]*\]\]"),
+        )
+        tracker.add_word_and_check_complete("I'm")
+        self.assertEqual(tracker.get_remaining_llm_text(), "so sorry.")

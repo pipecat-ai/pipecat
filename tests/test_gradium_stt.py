@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from pipecat.frames.frames import (
+    InputAudioRawFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
@@ -96,6 +97,66 @@ async def test_gradium_a_vad_stop_flushes_only_without_turn_detection():
         await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
         assert service._send_flush.await_count == flushes
+
+
+@pytest.mark.asyncio
+async def test_gradium_a_vad_stop_transcript_is_finalized_by_its_flush_ack(monkeypatch):
+    monkeypatch.setattr(gradium_stt, "TRANSCRIPT_AGGREGATION_DELAY", 0)
+    service = _service(enable_turn_detection=False)
+    service.emit_stt_usage_metrics = AsyncMock()
+    service._trace_transcription = AsyncMock()
+    service._handle_flushed = service._transcript_aggregation_handler
+    service._websocket = MagicMock(state=gradium_stt.State.OPEN, send=AsyncMock())
+
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    assert json.loads(service._websocket.send.await_args.args[0]) == {
+        "type": "flush",
+        "flush_id": "1",
+    }
+
+    async def messages():
+        yield json.dumps({"type": "text", "text": "hello"})
+        # The server returns the id as a number.
+        yield json.dumps({"type": "flushed", "flush_id": 1})
+
+    service._get_websocket = messages
+    await service._receive_messages()
+
+    assert service._finalize_pending
+    assert isinstance(service.push_frame.await_args.args[0], TranscriptionFrame)
+
+
+@pytest.mark.asyncio
+async def test_gradium_the_ack_of_an_earlier_flush_does_not_finalize_the_transcript():
+    service = _service(enable_turn_detection=False)
+    service._handle_flushed = AsyncMock()
+    service._websocket = MagicMock(state=gradium_stt.State.OPEN, send=AsyncMock())
+    # Two VAD stops in a row: the first flush's ack arrives after the second flush.
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    async def first_ack():
+        yield json.dumps({"type": "flushed", "flush_id": 1})
+
+    service._get_websocket = first_ack
+    await service._receive_messages()
+    assert not service._finalize_pending
+
+    async def second_ack():
+        yield json.dumps({"type": "flushed", "flush_id": 2})
+
+    service._get_websocket = second_ack
+    await service._receive_messages()
+    assert service._finalize_pending
+
+
+@pytest.mark.asyncio
+async def test_gradium_a_vad_stop_with_no_connection_requests_no_finalization():
+    service = _service(enable_turn_detection=False)
+
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert not service._finalize_requested
 
 
 @pytest.mark.asyncio
@@ -394,15 +455,14 @@ def test_gradium_pcm_input_is_sent_at_a_rate_gradium_accepts(pipeline_rate, sent
 async def test_gradium_audio_at_an_unsupported_rate_is_resampled_before_chunking():
     service = _service(enable_turn_detection=False)
     service._sample_rate = 48000
-    service._send_sample_rate = 24000
     service._chunk_size_bytes = int(80 * 24000 * 2 / 1000)
     websocket = MagicMock()
     websocket.state = gradium_stt.State.OPEN
     websocket.send = AsyncMock()
     service._websocket = websocket
+    frame = InputAudioRawFrame(audio=b"\x00\x00" * 48000, sample_rate=48000, num_channels=1)
 
     # One second at 48 kHz is one second at 24 kHz: about 12 chunks of 80 ms.
-    async for _ in service.run_stt(b"\x00\x00" * 48000):
-        pass
+    await service.process_audio_frame(frame, FrameDirection.DOWNSTREAM)
 
     assert 11 <= websocket.send.await_count <= 12

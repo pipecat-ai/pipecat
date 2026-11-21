@@ -25,7 +25,10 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
-from pipecat.services.google.utils import update_google_client_http_options
+from pipecat.services.google.utils import (
+    gemini_api_http_options,
+    update_google_client_http_options,
+)
 from pipecat.services.image_service import ImageGenService
 from pipecat.services.settings import ImageGenSettings
 from pipecat.utils.deprecation import deprecated, warn_deprecated
@@ -158,7 +161,9 @@ class GoogleImageGenService(ImageGenService):
         # Add client header
         http_options = update_google_client_http_options(http_options)
 
-        self._client: genai.Client | None = genai.Client(api_key=api_key, http_options=http_options)
+        self._client: genai.Client | None = genai.Client(
+            api_key=api_key, http_options=gemini_api_http_options(http_options)
+        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
