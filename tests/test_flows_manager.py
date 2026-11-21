@@ -35,11 +35,10 @@ from pipecat.flows.types import (
 from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
-    LLMRunFrame,
     LLMSetToolsFrame,
     LLMUpdateSettingsFrame,
 )
-from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
+from pipecat.processors.frameworks.rtvi.frames import RTVIFlowNodeEnteredFrame
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from tests.flows_test_helpers import (
@@ -1596,11 +1595,11 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def rtvi_messages(worker) -> list[dict]:
-        """The data of every RTVI server message queued on the worker, in order."""
+        """The data of every flow-node-entered message queued on the worker, as sent."""
         return [
-            call.args[0].data
+            call.args[0].data.model_dump(exclude_none=True)
             for call in worker.queue_frame.call_args_list
-            if isinstance(call.args[0], RTVIServerMessageFrame)
+            if isinstance(call.args[0], RTVIFlowNodeEnteredFrame)
         ]
 
     async def test_rtvi_client_is_told_about_each_node(self):
@@ -1613,15 +1612,13 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
         await flow_manager.initialize(start)
         self.assertEqual(
             self.rtvi_messages(self.mock_worker),
-            [{"type": "flows", "event": "node", "node": "start"}],
+            [{"node": "start"}],
         )
 
         await self.invoke("begin")
         self.assertEqual(
             self.rtvi_messages(self.mock_worker)[1],
             {
-                "type": "flows",
-                "event": "node",
                 "node": "booking",
                 "previous_node": "start",
                 "function": "begin",
@@ -1640,10 +1637,8 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.rtvi_messages(self.mock_worker),
             [
-                {"type": "flows", "event": "node", "node": "start"},
+                {"node": "start"},
                 {
-                    "type": "flows",
-                    "event": "node",
                     "node": "verify.ask",
                     "previous_node": "start",
                     "parent": "verify",
@@ -1668,7 +1663,7 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
         await flow_manager.initialize(self.node("start"))
 
         order = [c[0] if c[0] == "handler" else c.args[0] for c in calls.mock_calls]
-        self.assertEqual(order[-3:], ["handler", "RTVIServerMessageFrame", "LLMRunFrame"])
+        self.assertEqual(order[-3:], ["handler", "RTVIFlowNodeEnteredFrame", "LLMRunFrame"])
 
     async def test_initialize_enters_the_first_node(self):
         flow_manager, entered = self.make_manager()

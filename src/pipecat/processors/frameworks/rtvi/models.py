@@ -1098,6 +1098,40 @@ class ServerMessage(BaseModel):
     data: Any
 
 
+class FlowNodeEnteredMessageData(BaseModel):
+    """Data format for a conversation flow entering a node.
+
+    Parameters:
+        node: The name of the node the flow entered. A node of a subflow is named
+            ``<parent>.<node>``.
+        previous_node: The name of the node the flow left. Absent for the flow's
+            first node.
+        function: The name of the function whose call moved the flow to this
+            node. Absent when the bot set the node itself.
+        metadata: The entered node's metadata, a JSON object of the application's
+            own. Absent when the node has none.
+        function_metadata: The metadata of ``function``, a JSON object of the
+            application's own. Absent when the function has none.
+        parent: When the node belongs to a subflow, the name of the node that runs
+            the subflow. Absent otherwise.
+    """
+
+    node: str
+    previous_node: str | None = None
+    function: str | None = None
+    metadata: dict[str, Any] | None = None
+    function_metadata: dict[str, Any] | None = None
+    parent: str | None = None
+
+
+class FlowNodeEnteredMessage(BaseModel):
+    """Message indicating that the bot's conversation flow entered a node."""
+
+    label: MessageLiteral = MESSAGE_LABEL
+    type: Literal["flow-node-entered"] = "flow-node-entered"
+    data: FlowNodeEnteredMessageData
+
+
 class AudioLevelMessageData(BaseModel):
     """Data format for sending audio levels.
 

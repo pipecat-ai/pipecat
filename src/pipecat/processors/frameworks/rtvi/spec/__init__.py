@@ -663,6 +663,24 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         {"function_name": "get_weather", "tool_call_id": "call_123", "args": {"city": "Lisbon"}},
         deprecated="Use llm-function-call-in-progress instead.",
     ),
+    # -- Server to client: conversation flows --
+    _server(
+        RTVI.FlowNodeEnteredMessage,
+        "The bot's conversation flow entered a node, so a client can follow the "
+        "conversation through the flow.",
+        {
+            "node": "verify.check_birthday",
+            "previous_node": "greet",
+            "function": "wants_to_book",
+            "metadata": {"step": 2},
+            "parent": "verify",
+        },
+        details=(
+            "Sent each time a Pipecat Flows conversation enters a node, including its first "
+            "node and a node it enters again, before the bot responds in that node."
+        ),
+        min_client_version="2.4.0",
+    ),
     # -- Server to client: UI worker --
     _server(
         RTVI.UICommandMessage,
@@ -781,6 +799,11 @@ GROUPS: tuple[RTVIMessageGroup, ...] = (
         "Metrics and Monitoring",
         "How the bot's services perform.",
         ("metrics",),
+    ),
+    RTVIMessageGroup(
+        "Conversation Flows",
+        "Where the bot is in a conversation flow.",
+        ("flow-node-entered",),
     ),
     RTVIMessageGroup(
         "User Interface",

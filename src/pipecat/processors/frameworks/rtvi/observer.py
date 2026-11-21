@@ -78,6 +78,7 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIConfigureObserverFrame,
+    RTVIFlowNodeEnteredFrame,
     RTVISendTextFrame,
     RTVIServerMessageFrame,
     RTVIServerResponseFrame,
@@ -778,6 +779,9 @@ class RTVIObserver(BaseObserver):
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVI.ServerMessage(data=frame.data)
             await self.send_rtvi_message(message)
+        elif isinstance(frame, RTVIFlowNodeEnteredFrame):
+            if self._client_is_at_least([2, 4, 0]):
+                await self.send_rtvi_message(RTVI.FlowNodeEnteredMessage(data=frame.data))
         elif isinstance(frame, RTVIUICommandFrame):
             message = RTVI.UICommandMessage(
                 data=RTVI.UICommandData(command=frame.command, payload=frame.payload)

@@ -30,6 +30,10 @@
         "description": "How the bot's services perform."
       },
       {
+        "name": "Conversation Flows",
+        "description": "Where the bot is in a conversation flow."
+      },
+      {
         "name": "User Interface",
         "description": "The bot observing and driving the client's UI."
       }
@@ -186,6 +190,9 @@
         },
         "llm_function_call": {
           "$ref": "#/components/messages/llm_function_call"
+        },
+        "flow_node_entered": {
+          "$ref": "#/components/messages/flow_node_entered"
         },
         "ui_command": {
           "$ref": "#/components/messages/ui_command"
@@ -359,6 +366,9 @@
         },
         {
           "$ref": "#/channels/rtvi/messages/llm_function_call"
+        },
+        {
+          "$ref": "#/channels/rtvi/messages/flow_node_entered"
         },
         {
           "$ref": "#/channels/rtvi/messages/ui_command"
@@ -2463,6 +2473,54 @@
         ],
         "x-rtvi-deprecated": "Use llm-function-call-in-progress instead."
       },
+      "flow_node_entered": {
+        "name": "flow-node-entered",
+        "title": "flow-node-entered",
+        "summary": "The bot's conversation flow entered a node, so a client can follow the conversation through the flow. Sent only to clients of protocol 2.4.0 or later.",
+        "tags": [
+          {
+            "name": "Conversation Flows"
+          }
+        ],
+        "payload": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "const": "rtvi-ai"
+            },
+            "type": {
+              "const": "flow-node-entered"
+            },
+            "data": {
+              "$ref": "#/components/schemas/FlowNodeEnteredMessageData"
+            }
+          },
+          "required": [
+            "label",
+            "type",
+            "data"
+          ]
+        },
+        "examples": [
+          {
+            "payload": {
+              "label": "rtvi-ai",
+              "type": "flow-node-entered",
+              "data": {
+                "node": "verify.check_birthday",
+                "previous_node": "greet",
+                "function": "wants_to_book",
+                "metadata": {
+                  "step": 2
+                },
+                "parent": "verify"
+              }
+            }
+          }
+        ],
+        "description": "Sent each time a Pipecat Flows conversation enters a node, including its first node and a node it enters again, before the bot responds in that node.",
+        "x-rtvi-min-client-version": "2.4.0"
+      },
       "ui_command": {
         "name": "ui-command",
         "title": "ui-command",
@@ -3232,6 +3290,42 @@
           "url"
         ],
         "title": "FileUrl",
+        "type": "object"
+      },
+      "FlowNodeEnteredMessageData": {
+        "description": "Data format for a conversation flow entering a node.",
+        "properties": {
+          "node": {
+            "description": "The name of the node the flow entered. A node of a subflow is named `<parent>.<node>`.",
+            "type": "string"
+          },
+          "previous_node": {
+            "description": "The name of the node the flow left. Absent for the flow's first node.",
+            "type": "string"
+          },
+          "function": {
+            "description": "The name of the function whose call moved the flow to this node. Absent when the bot set the node itself.",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "The entered node's metadata, a JSON object of the application's own. Absent when the node has none.",
+            "type": "object"
+          },
+          "function_metadata": {
+            "additionalProperties": true,
+            "description": "The metadata of `function`, a JSON object of the application's own. Absent when the function has none.",
+            "type": "object"
+          },
+          "parent": {
+            "description": "When the node belongs to a subflow, the name of the node that runs the subflow. Absent otherwise.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node"
+        ],
+        "title": "FlowNodeEnteredMessageData",
         "type": "object"
       },
       "Focus": {
