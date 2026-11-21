@@ -799,6 +799,9 @@ class LLMUserAggregator(LLMContextAggregator):
             self._disable_empty_user_turn_recovery()
 
         self._user_is_muted = False
+        # What each mute strategy last decided, so a turn boundary can change one
+        # strategy's decision and the others' stand
+        self._user_mute_decisions: dict[BaseUserMuteStrategy, bool] = {}
         self._user_turn_start_timestamp = ""
         # One-shot guard: whether the first realtime LLM service metadata frame
         # has been handled this session — see _handle_llm_service_metadata.
@@ -1417,23 +1420,40 @@ class LLMUserAggregator(LLMContextAggregator):
         if should_mute_frame:
             logger.trace(f"{frame.name} suppressed - user currently muted")
 
-        should_mute_next_time = False
         for s in self._params.user_mute_strategies:
-            should_mute_next_time |= await s.process_frame(frame)
-
-        if should_mute_next_time != self._user_is_muted:
-            logger.debug(f"{self}: user is now {'muted' if should_mute_next_time else 'unmuted'}")
-            self._user_is_muted = should_mute_next_time
-
-            # Emit mute state change events
-            if self._user_is_muted:
-                await self._call_event_handler("on_user_mute_started")
-                await self.broadcast_frame(UserMuteStartedFrame)
-            else:
-                await self._call_event_handler("on_user_mute_stopped")
-                await self.broadcast_frame(UserMuteStoppedFrame)
+            self._user_mute_decisions[s] = await s.process_frame(frame)
+        await self._apply_user_mute()
 
         return should_mute_frame
+
+    async def _update_user_mute_at_turn_boundary(self, *, started: bool):
+        """Let the mute strategies react to a turn boundary, before the next frame."""
+        for s in self._params.user_mute_strategies:
+            muted = await (
+                s.handle_user_turn_started() if started else s.handle_user_turn_stopped()
+            )
+            if muted is not None:
+                self._user_mute_decisions[s] = muted
+        await self._apply_user_mute()
+
+    async def _apply_user_mute(self):
+        """Mute the user when any strategy says so, and tell the application on a change."""
+        should_mute = any(
+            self._user_mute_decisions.get(s) for s in self._params.user_mute_strategies
+        )
+        if should_mute == self._user_is_muted:
+            return
+
+        logger.debug(f"{self}: user is now {'muted' if should_mute else 'unmuted'}")
+        self._user_is_muted = should_mute
+
+        # Emit mute state change events
+        if self._user_is_muted:
+            await self._call_event_handler("on_user_mute_started")
+            await self.broadcast_frame(UserMuteStartedFrame)
+        else:
+            await self._call_event_handler("on_user_mute_stopped")
+            await self.broadcast_frame(UserMuteStoppedFrame)
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame()
@@ -1575,6 +1595,8 @@ class LLMUserAggregator(LLMContextAggregator):
         if params.enable_interruptions:
             await self.broadcast_interruption()
 
+        await self._update_user_mute_at_turn_boundary(started=True)
+
         await self._call_event_handler("on_user_turn_started", strategy)
 
     async def _on_user_turn_inference_triggered(
@@ -1684,6 +1706,8 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.broadcast_frame(UserStoppedSpeakingFrame)
 
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
+
+        await self._update_user_mute_at_turn_boundary(started=False)
 
         if self._realtime_service_mode:
             # Realtime mode: the user message isn't finalized at
