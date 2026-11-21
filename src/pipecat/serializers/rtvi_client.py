@@ -18,10 +18,10 @@ It is the inverse of
 pipeline frames into server messages on the bot side.
 
 The bot's reports about its own output (``bot-started-speaking``,
-``bot-stopped-speaking`` and ``bot-interrupted``) stay raw messages, as
-:class:`~pipecat.frames.frames.InputTransportMessageFrame`. In this pipeline a
-``BotStartedSpeakingFrame`` or an ``InterruptionFrame`` would be about this
-pipeline's own output, not the bot's.
+``bot-stopped-speaking``, ``bot-interrupted`` and ``bot-tts-text``) stay raw
+messages, as :class:`~pipecat.frames.frames.InputTransportMessageFrame`. In
+this pipeline a ``BotStartedSpeakingFrame``, an ``InterruptionFrame`` or a
+``TTSTextFrame`` would be about this pipeline's own output, not the bot's.
 
 .. note::
     This covers the messages a conversation needs (the LLM response lifecycle,
@@ -51,10 +51,8 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
-    TTSTextFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
-from pipecat.utils.text.base_text_aggregator import TextType
 
 
 class RTVIClientSerializer(FrameSerializer):
@@ -143,13 +141,12 @@ class RTVIClientSerializer(FrameSerializer):
                 )
             case "bot-llm-stopped":
                 return LLMFullResponseEndFrame()
-            case "bot-tts-text":
-                # The message carries only the text; its type (sentence, word)
-                # isn't on the wire.
-                return TTSTextFrame(text=payload.get("text", ""), text_type=TextType.SENTENCE)
-            case "bot-started-speaking" | "bot-stopped-speaking" | "bot-interrupted":
+            case (
+                "bot-started-speaking" | "bot-stopped-speaking" | "bot-interrupted" | "bot-tts-text"
+            ):
                 # Reports about the bot's own output, which this pipeline has no
-                # frame for: its speaking frames and interruptions are its own.
+                # frame for: its speaking, interruption and TTS text frames are
+                # its own.
                 return InputTransportMessageFrame(message=message)
             case "llm-function-call-in-progress":
                 # function_name/arguments may be absent at the bot's default

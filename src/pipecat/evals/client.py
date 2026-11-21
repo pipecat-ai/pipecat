@@ -103,7 +103,6 @@ _BOT_FRAMES = (
     LLMTextFrame,
     LLMMarkerResponseFrame,
     LLMFullResponseEndFrame,
-    TTSTextFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     EvalFunctionCallCancelFrame,

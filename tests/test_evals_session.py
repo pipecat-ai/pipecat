@@ -112,9 +112,12 @@ def _stream(bot_audio: bool = False) -> EvalEventStream:
     return EvalEventStream(bot_audio=bot_audio, trace=EvalTrace())
 
 
-def _bot_report(msg_type: str) -> InputTransportMessageFrame:
+def _bot_report(msg_type: str, data: dict | None = None) -> InputTransportMessageFrame:
     """One of the bot's reports about its own output, as the raw message the serializer keeps it as."""
-    return InputTransportMessageFrame(message={"label": RTVI.MESSAGE_LABEL, "type": msg_type})
+    message = {"label": RTVI.MESSAGE_LABEL, "type": msg_type}
+    if data is not None:
+        message["data"] = data
+    return InputTransportMessageFrame(message=message)
 
 
 def _matcher(judge=None, bot_audio: bool = False) -> ExpectationMatcher:
@@ -421,7 +424,7 @@ class TestFramesToEvents(unittest.TestCase):
 
     def test_tts_text_only_in_audio_mode(self):
         def tts(text):
-            return TTSTextFrame(text=text, text_type=TextType.SENTENCE)
+            return _bot_report("bot-tts-text", {"text": text})
 
         self.assertIsNone(_stream(bot_audio=False).frame_to_event(tts("x")))
         self.assertEqual(
@@ -1818,7 +1821,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         await self._push(
             sink,
             *_bot_response("Hello"),
-            TTSTextFrame(text="Hello", text_type=TextType.SENTENCE),
+            _bot_report("bot-tts-text", {"text": "Hello"}),
             _bot_report("bot-started-speaking"),
             FunctionCallInProgressFrame(function_name="f", tool_call_id="c", arguments={}),
             InputTransportMessageFrame(message={"label": RTVI.MESSAGE_LABEL, "type": "x"}),
