@@ -62,7 +62,6 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMarkerResponseFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     OutputTransportMessageUrgentFrame,
@@ -99,10 +98,6 @@ BOT_READY_TIMEOUT_S = DEFAULT_BOT_READY_TIMEOUT_S
 # TTS, the output) and must never see the bot's text or reports as its own
 # input. The aggregator's context frame and lifecycle frames pass.
 _BOT_FRAMES = (
-    LLMFullResponseStartFrame,
-    LLMTextFrame,
-    LLMMarkerResponseFrame,
-    LLMFullResponseEndFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     EvalFunctionCallCancelFrame,

@@ -84,10 +84,6 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InputTransportMessageFrame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
-    LLMMarkerResponseFrame,
-    LLMTextFrame,
 )
 
 # The bot's reports that end its current turn: what it produced so far is not
@@ -492,37 +488,6 @@ class EvalEventStream:
             elif event["type"] == "bot_stopped_speaking":
                 self._bot_quiet.set()
             return event
-        elif isinstance(frame, LLMFullResponseStartFrame):
-            self._awaiting_reply = False
-            self._text_buffer = []
-            self._llm_text_at = None
-            self._expression_delivery = []
-            return {"type": "llm_started"}
-        elif isinstance(frame, LLMTextFrame):
-            if self._awaiting_reply:
-                return None
-            if not self._text_buffer:
-                self._llm_text_at = self.elapsed()
-            self._text_buffer.append(frame.text)
-            return None
-        elif isinstance(frame, LLMMarkerResponseFrame):
-            if self._awaiting_reply:
-                return None
-            return {
-                "type": "llm_marker",
-                "text": frame.marker or "",
-                "kind": frame.kind,
-                "raw": frame.raw,
-                "markers": list(frame.markers),
-            }
-        elif isinstance(frame, LLMFullResponseEndFrame):
-            if self._awaiting_reply:
-                self._text_buffer = []
-                return None
-            event = self._segment_event("llm_response", "".join(self._text_buffer))
-            if self._llm_text_at is not None:
-                event["started_at"] = self._llm_text_at
-            return event
         elif isinstance(frame, (FunctionCallInProgressFrame, ExternalFunctionCallInProgressFrame)):
             return {
                 "type": "function_call",
@@ -643,6 +608,8 @@ class EvalEventStream:
             if self._bot_audio:
                 return self._segment_event("tts_response", data.get("text", ""))
             return None
+        elif msg_type in ("bot-llm-started", "bot-llm-text", "bot-llm-marker", "bot-llm-stopped"):
+            return self._llm_report_to_event(msg_type, data)
         elif msg_type == "user-started-speaking":
             return {"type": "user_started_speaking"}
         elif msg_type == "bot-interrupted":
@@ -673,6 +640,37 @@ class EvalEventStream:
                 "format": data.get("format"),
             }
         return None
+
+    def _llm_report_to_event(self, msg_type: str, data: dict) -> dict | None:
+        """The event for one of the bot's ``bot-llm-*`` reports, buffering its text until the response ends."""
+        if msg_type == "bot-llm-started":
+            self._awaiting_reply = False
+            self._text_buffer = []
+            self._llm_text_at = None
+            self._expression_delivery = []
+            return {"type": "llm_started"}
+        if self._awaiting_reply:
+            # A straggler of a response from before the turn's reply.
+            if msg_type == "bot-llm-stopped":
+                self._text_buffer = []
+            return None
+        if msg_type == "bot-llm-text":
+            if not self._text_buffer:
+                self._llm_text_at = self.elapsed()
+            self._text_buffer.append(data.get("text", ""))
+            return None
+        if msg_type == "bot-llm-marker":
+            return {
+                "type": "llm_marker",
+                "text": data.get("text") or "",
+                "kind": data.get("kind"),
+                "raw": data.get("raw", ""),
+                "markers": list(data.get("markers") or []),
+            }
+        event = self._segment_event("llm_response", "".join(self._text_buffer))
+        if self._llm_text_at is not None:
+            event["started_at"] = self._llm_text_at
+        return event
 
     def _user_input_event(self, data: dict) -> dict | None:
         """The user's final transcription or backchannel, from a ``user-input``."""

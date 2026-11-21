@@ -15,10 +15,6 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
-    LLMMarkerResponseFrame,
-    LLMTextFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
     TranscriptionFrame,
@@ -34,30 +30,19 @@ class TestRTVIClientDeserialize(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.s = RTVIClientSerializer()
 
-    async def test_llm_lifecycle(self):
-        self.assertIsInstance(
-            await self.s.deserialize(_server("bot-llm-started")), LLMFullResponseStartFrame
-        )
-        frame = await self.s.deserialize(_server("bot-llm-text", {"text": "Paris"}))
-        self.assertIsInstance(frame, LLMTextFrame)
-        self.assertEqual(frame.text, "Paris")
-        self.assertIsInstance(
-            await self.s.deserialize(_server("bot-llm-stopped")), LLMFullResponseEndFrame
-        )
-
-    async def test_llm_marker(self):
-        frame = await self.s.deserialize(
-            _server(
-                "bot-llm-marker",
-                {"text": "◐", "kind": "short", "raw": "◐ wait", "markers": ["●", "◐", "○"]},
-            )
-        )
-        self.assertIsInstance(frame, LLMMarkerResponseFrame)
-        self.assertEqual((frame.marker, frame.kind, frame.raw), ("◐", "short", "◐ wait"))
-        self.assertEqual(frame.markers, ["●", "◐", "○"])
-        # A response that carried no marker reports an empty text.
-        frame = await self.s.deserialize(_server("bot-llm-marker", {"text": "", "raw": "Hi"}))
-        self.assertEqual((frame.marker, frame.kind, frame.raw), (None, None, "Hi"))
+    async def test_llm_reports_stay_raw_messages(self):
+        # Reports about the bot's own LLM: this pipeline's LLM frames would be
+        # about its own.
+        for msg_type, data in (
+            ("bot-llm-started", None),
+            ("bot-llm-text", {"text": "Paris"}),
+            ("bot-llm-marker", {"text": "◐", "kind": "short", "raw": "◐ wait"}),
+            ("bot-llm-stopped", None),
+        ):
+            frame = await self.s.deserialize(_server(msg_type, data))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["type"], msg_type)
+            self.assertEqual(frame.message["data"], data)
 
     async def test_tts_text_stays_a_raw_message(self):
         frame = await self.s.deserialize(_server("bot-tts-text", {"text": "Hello there!"}))

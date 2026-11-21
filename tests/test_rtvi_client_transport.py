@@ -25,9 +25,7 @@ import websockets
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
-    LLMTextFrame,
+    InputTransportMessageFrame,
     OutputAudioRawFrame,
     TranscriptionFrame,
 )
@@ -182,26 +180,14 @@ class TestRTVIClientTransportIntegration(unittest.IsolatedAsyncioTestCase):
                 start_timeout=5.0,  # the input transport connects before the pipeline starts
             )
 
-        # The bot's server messages arrived as the expected pipeline frames, in order.
-        kinds = [
-            type(f)
-            for f in down
-            if isinstance(
-                f,
-                (
-                    LLMFullResponseStartFrame,
-                    LLMTextFrame,
-                    LLMFullResponseEndFrame,
-                    TranscriptionFrame,
-                ),
-            )
-        ]
+        # The bot's reports about its own LLM arrived as raw messages, in order,
+        # and its transcription as a frame.
+        reports = [f.message for f in down if isinstance(f, InputTransportMessageFrame)]
         self.assertEqual(
-            kinds,
-            [LLMFullResponseStartFrame, LLMTextFrame, LLMFullResponseEndFrame, TranscriptionFrame],
+            [m["type"] for m in reports], ["bot-llm-started", "bot-llm-text", "bot-llm-stopped"]
         )
-        text = next(f for f in down if isinstance(f, LLMTextFrame))
-        self.assertEqual(text.text, "Paris")
+        self.assertEqual(reports[1]["data"]["text"], "Paris")
+        self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], ["hello"])
 
         # The transport completed the handshake (the server saw client-ready).
         self.assertTrue(any(m.get("type") == "client-ready" for m in server.received))

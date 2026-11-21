@@ -74,7 +74,6 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMarkerResponseFrame,
     LLMTextFrame,
     OutputTransportMessageUrgentFrame,
     TextType,
@@ -155,25 +154,26 @@ class TestFramesToEvents(unittest.TestCase):
 
     def test_a_reply_carries_the_time_of_its_first_token(self):
         s = _stream(bot_audio=False)
-        s.frame_to_event(LLMFullResponseStartFrame())
-        s.frame_to_event(LLMTextFrame(text="Hello "))
-        s.frame_to_event(LLMTextFrame(text="world"))
-        event = s.frame_to_event(LLMFullResponseEndFrame())
+        s.frame_to_event(_bot_report("bot-llm-started"))
+        s.frame_to_event(_bot_report("bot-llm-text", {"text": "Hello "}))
+        s.frame_to_event(_bot_report("bot-llm-text", {"text": "world"}))
+        event = s.frame_to_event(_bot_report("bot-llm-stopped"))
         self.assertIn("started_at", event)
         self.assertLessEqual(event["started_at"], s.elapsed())
         # A response with no text carries no time.
-        s.frame_to_event(LLMFullResponseStartFrame())
-        event = s.frame_to_event(LLMFullResponseEndFrame())
+        s.frame_to_event(_bot_report("bot-llm-started"))
+        event = s.frame_to_event(_bot_report("bot-llm-stopped"))
         self.assertNotIn("started_at", event)
 
     def test_llm_marker_is_its_own_event(self):
         s = _stream(bot_audio=False)
-        s.frame_to_event(LLMFullResponseStartFrame())
-        s.frame_to_event(LLMTextFrame(text="Hello"))
+        s.frame_to_event(_bot_report("bot-llm-started"))
+        s.frame_to_event(_bot_report("bot-llm-text", {"text": "Hello"}))
         self.assertEqual(
             s.frame_to_event(
-                LLMMarkerResponseFrame(
-                    raw="● Hello", marker="●", kind="complete", markers=["●", "◐", "○"]
+                _bot_report(
+                    "bot-llm-marker",
+                    {"raw": "● Hello", "text": "●", "kind": "complete", "markers": ["●", "◐", "○"]},
                 )
             ),
             {
@@ -186,27 +186,31 @@ class TestFramesToEvents(unittest.TestCase):
         )
         # The marker is not part of the reply's text.
         self.assertEqual(
-            self._bare(s.frame_to_event(LLMFullResponseEndFrame())),
+            self._bare(s.frame_to_event(_bot_report("bot-llm-stopped"))),
             {"type": "llm_response", "text": "Hello"},
         )
 
     def test_llm_marker_before_the_reply_starts_is_dropped(self):
         s = _stream(bot_audio=False)
         s.input_sent()
-        self.assertIsNone(s.frame_to_event(LLMMarkerResponseFrame(raw="◐", marker="◐")))
-        s.frame_to_event(LLMFullResponseStartFrame())
+        self.assertIsNone(
+            s.frame_to_event(_bot_report("bot-llm-marker", {"raw": "◐", "text": "◐"}))
+        )
+        s.frame_to_event(_bot_report("bot-llm-started"))
         self.assertEqual(
-            s.frame_to_event(LLMMarkerResponseFrame(raw="◐", marker="◐", kind="short")),
+            s.frame_to_event(
+                _bot_report("bot-llm-marker", {"raw": "◐", "text": "◐", "kind": "short"})
+            ),
             {"type": "llm_marker", "text": "◐", "kind": "short", "raw": "◐", "markers": []},
         )
 
     def test_llm_lifecycle_aggregates_text(self):
         s = _stream(bot_audio=False)
-        self.assertEqual(s.frame_to_event(LLMFullResponseStartFrame()), {"type": "llm_started"})
-        self.assertIsNone(s.frame_to_event(LLMTextFrame(text="Hello ")))
-        self.assertIsNone(s.frame_to_event(LLMTextFrame(text="world")))
+        self.assertEqual(s.frame_to_event(_bot_report("bot-llm-started")), {"type": "llm_started"})
+        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": "Hello "})))
+        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": "world"})))
         self.assertEqual(
-            self._bare(s.frame_to_event(LLMFullResponseEndFrame())),
+            self._bare(s.frame_to_event(_bot_report("bot-llm-stopped"))),
             {"type": "llm_response", "text": "Hello world"},
         )
 
@@ -215,17 +219,17 @@ class TestFramesToEvents(unittest.TestCase):
         interrupt = InputTransportMessageFrame(
             message={"label": RTVI.MESSAGE_LABEL, "type": "bot-interrupted"}
         )
-        s.frame_to_event(LLMFullResponseStartFrame())
-        s.frame_to_event(LLMTextFrame(text="Tell me about Paris"))
+        s.frame_to_event(_bot_report("bot-llm-started"))
+        s.frame_to_event(_bot_report("bot-llm-text", {"text": "Tell me about Paris"}))
         self.assertEqual(s.frame_to_event(interrupt), {"type": "bot_interrupted"})
         # Straggler from the interrupted response is dropped.
-        self.assertIsNone(s.frame_to_event(LLMTextFrame(text=" what would")))
-        self.assertIsNone(s.frame_to_event(LLMFullResponseEndFrame()))
+        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": " what would"})))
+        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-stopped")))
         # The genuinely new response.
-        s.frame_to_event(LLMFullResponseStartFrame())
-        s.frame_to_event(LLMTextFrame(text="Tokyo"))
+        s.frame_to_event(_bot_report("bot-llm-started"))
+        s.frame_to_event(_bot_report("bot-llm-text", {"text": "Tokyo"}))
         self.assertEqual(
-            self._bare(s.frame_to_event(LLMFullResponseEndFrame())),
+            self._bare(s.frame_to_event(_bot_report("bot-llm-stopped"))),
             {"type": "llm_response", "text": "Tokyo"},
         )
 
@@ -311,7 +315,7 @@ class TestFramesToEvents(unittest.TestCase):
             event = s.frame_to_event(frame)
             return event and event["text"]
 
-        s.frame_to_event(LLMFullResponseStartFrame())
+        s.frame_to_event(_bot_report("bot-llm-started"))
         # Spoken text counts as it is spoken, not when it is announced.
         self.assertIsNone(expression(bot_output(1, delivery=["excited"], status="new")))
         self.assertEqual(expression(bot_output(1, delivery=["excited"])), "<<excited>>")
@@ -340,7 +344,7 @@ class TestFramesToEvents(unittest.TestCase):
         # Without expressive conversation, spoken text carries no delivery.
         self.assertIsNone(expression(bot_output(8)))
         # Each response starts from the baseline.
-        s.frame_to_event(LLMFullResponseStartFrame())
+        s.frame_to_event(_bot_report("bot-llm-started"))
         self.assertIsNone(expression(bot_output(9, delivery=[])))
 
     def test_transcription_frame_is_ignored_by_the_sink(self):
@@ -404,8 +408,8 @@ class TestFramesToEvents(unittest.TestCase):
         )
         self.assertEqual(s.frame_to_event(msg), {"type": "user_started_speaking"})
         self.assertEqual(s._text_buffer, [])
-        self.assertIsNone(s.frame_to_event(LLMTextFrame(text=" and welcome")))
-        self.assertIsNone(s.frame_to_event(LLMFullResponseEndFrame()))
+        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": " and welcome"})))
+        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-stopped")))
         self.assertEqual(s._queue.get_nowait(), {"type": "user_transcription", "transcript": "hi"})
         self.assertTrue(s._queue.empty())
 
@@ -436,9 +440,9 @@ class TestFramesToEvents(unittest.TestCase):
         # An interrupted response (no text) emits an empty llm_response; the
         # matcher's aggregation decides whether that should pass or fail.
         s = _stream(bot_audio=False)
-        self.assertEqual(s.frame_to_event(LLMFullResponseStartFrame()), {"type": "llm_started"})
+        self.assertEqual(s.frame_to_event(_bot_report("bot-llm-started")), {"type": "llm_started"})
         self.assertEqual(
-            self._bare(s.frame_to_event(LLMFullResponseEndFrame())),
+            self._bare(s.frame_to_event(_bot_report("bot-llm-stopped"))),
             {"type": "llm_response", "text": ""},
         )
 
@@ -697,7 +701,7 @@ class TestBotTurn(unittest.IsolatedAsyncioTestCase):
     async def test_turn_after_input_and_llm_restart_is_the_reply(self):
         s = _stream(bot_audio=True)
         s.input_sent()
-        s.frame_to_event(LLMFullResponseStartFrame())  # the bot's new response
+        s.frame_to_event(_bot_report("bot-llm-started"))  # the bot's new response
         await s.bot_turn_stopped("Tokyo.")
         self.assertEqual(await self._responses(s), ["Tokyo."])
 
@@ -1777,8 +1781,17 @@ class _Collector(FrameProcessor):
         self.frames.append(frame)
 
 
-def _bot_response(*texts: str, skip_tts: bool = False) -> list:
-    """The frames of one LLM response, as the bot's (or the persona's) LLM emits them."""
+def _bot_response(*texts: str) -> list:
+    """One of the bot's LLM responses, as the raw reports the serializer keeps them as."""
+    return [
+        _bot_report("bot-llm-started"),
+        *[_bot_report("bot-llm-text", {"text": t}) for t in texts],
+        _bot_report("bot-llm-stopped"),
+    ]
+
+
+def _persona_response(*texts: str, skip_tts: bool = False) -> list:
+    """The frames of one LLM response, as the persona's LLM emits them."""
     frames = [LLMFullResponseStartFrame(), *[LLMTextFrame(text=t) for t in texts]]
     frames.append(LLMFullResponseEndFrame())
     for frame in frames:
@@ -1867,10 +1880,10 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
         sink, nxt = await self._sink(persona=persona, persona_hears=True)
         await self._push(
             sink,
-            LLMFullResponseStartFrame(),
-            LLMTextFrame(text="Let me check."),
+            _bot_report("bot-llm-started"),
+            _bot_report("bot-llm-text", {"text": "Let me check."}),
             FunctionCallInProgressFrame(function_name="f", tool_call_id="c", arguments={}),
-            LLMFullResponseEndFrame(),
+            _bot_report("bot-llm-stopped"),
         )
         self.assertEqual(context.get_messages(), [])  # held: the call is still running
         await self._push(
@@ -1923,7 +1936,7 @@ class TestPersonaTurnRelay(unittest.IsolatedAsyncioTestCase):
 
     async def test_skip_tts_response_is_sent_as_one_text_turn(self):
         relay, nxt, trace = await self._relay()
-        frames = _bot_response("Hi ", "there.", skip_tts=True)
+        frames = _persona_response("Hi ", "there.", skip_tts=True)
         for frame in frames:
             await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
         messages = [f for f in nxt.frames if isinstance(f, OutputTransportMessageUrgentFrame)]

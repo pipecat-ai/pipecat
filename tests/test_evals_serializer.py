@@ -31,7 +31,6 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
-    LLMFullResponseStartFrame,
     LLMMessagesUpdateFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
@@ -332,10 +331,9 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
 
     async def test_generic_messages_delegate_to_base(self):
         # Non-eval RTVI messages keep the base RTVIClientSerializer mapping.
-        self.assertIsInstance(
-            await self.serializer.deserialize(self._server("bot-llm-started")),
-            LLMFullResponseStartFrame,
-        )
+        frame = await self.serializer.deserialize(self._server("bot-llm-started"))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], "bot-llm-started")
         self.assertIsNone(await self.serializer.deserialize(self._server("bot-ready")))
         self.assertIsNone(await self.serializer.deserialize("not json"))
 

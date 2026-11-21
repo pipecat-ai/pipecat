@@ -7,9 +7,8 @@
 """Frame serializer for a Pipecat pipeline acting as an RTVI *client*.
 
 This is the client-side mirror of how a bot emits RTVI. It deserializes the RTVI
-*server* messages a bot sends (``bot-llm-text``, ``user-transcription``, ...) into
-pipeline frames, and serializes a client's outgoing frames (audio, and RTVI client
-messages the caller builds) onto the wire. Pair it with a WebSocket client
+*server* messages a bot sends, and serializes a client's outgoing frames (audio,
+and RTVI client messages the caller builds) onto the wire. Pair it with a WebSocket client
 transport to let a Pipecat pipeline talk to a bot that runs an RTVI *server*
 transport (e.g. the eval transport).
 
@@ -17,11 +16,11 @@ It is the inverse of
 :class:`~pipecat.processors.frameworks.rtvi.observer.RTVIObserver`, which turns
 pipeline frames into server messages on the bot side.
 
-The bot's reports about its own output (``bot-started-speaking``,
-``bot-stopped-speaking``, ``bot-interrupted`` and ``bot-tts-text``) stay raw
-messages, as :class:`~pipecat.frames.frames.InputTransportMessageFrame`. In
-this pipeline a ``BotStartedSpeakingFrame``, an ``InterruptionFrame`` or a
-``TTSTextFrame`` would be about this pipeline's own output, not the bot's.
+The bot's reports about its own output (its speaking and interruptions, its
+LLM's ``bot-llm-*`` reports and its TTS's ``bot-tts-text``) stay raw messages,
+as :class:`~pipecat.frames.frames.InputTransportMessageFrame`. In this pipeline
+a ``BotStartedSpeakingFrame``, an ``InterruptionFrame``, an ``LLMTextFrame`` or
+a ``TTSTextFrame`` would be about this pipeline's own output, not the bot's.
 
 .. note::
     This covers the messages a conversation needs (the LLM response lifecycle,
@@ -43,16 +42,26 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
-    LLMMarkerResponseFrame,
-    LLMTextFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
+
+# The bot's reports about its own output, which stay raw messages (see above).
+_BOT_OUTPUT_REPORTS = frozenset(
+    {
+        "bot-llm-started",
+        "bot-llm-text",
+        "bot-llm-marker",
+        "bot-llm-stopped",
+        "bot-tts-text",
+        "bot-started-speaking",
+        "bot-stopped-speaking",
+        "bot-interrupted",
+    }
+)
 
 
 class RTVIClientSerializer(FrameSerializer):
@@ -127,27 +136,11 @@ class RTVIClientSerializer(FrameSerializer):
         msg_type = message.get("type")
         payload = message.get("data") or {}
 
+        if msg_type in _BOT_OUTPUT_REPORTS:
+            # This pipeline's own output frames are about its own output.
+            return InputTransportMessageFrame(message=message)
+
         match msg_type:
-            case "bot-llm-started":
-                return LLMFullResponseStartFrame()
-            case "bot-llm-text":
-                return LLMTextFrame(text=payload.get("text", ""))
-            case "bot-llm-marker":
-                return LLMMarkerResponseFrame(
-                    raw=payload.get("raw", ""),
-                    marker=payload.get("text") or None,
-                    kind=payload.get("kind"),
-                    markers=list(payload.get("markers") or []),
-                )
-            case "bot-llm-stopped":
-                return LLMFullResponseEndFrame()
-            case (
-                "bot-started-speaking" | "bot-stopped-speaking" | "bot-interrupted" | "bot-tts-text"
-            ):
-                # Reports about the bot's own output, which this pipeline has no
-                # frame for: its speaking, interruption and TTS text frames are
-                # its own.
-                return InputTransportMessageFrame(message=message)
             case "llm-function-call-in-progress":
                 # function_name/arguments may be absent at the bot's default
                 # report level; "" maps back to "no name reported" downstream.
