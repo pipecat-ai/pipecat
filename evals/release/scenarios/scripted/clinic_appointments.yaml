@@ -1,0 +1,82 @@
+name: clinic_appointments
+
+# Text modality, against flows/yaml/clinic_appointments/bot.py: a scripted
+# caller books or cancels an appointment. Both paths run the verification
+# subflow first, each from its own node, so each returns to a different place.
+# The record on file has a date of birth of 1990-04-12 and an appointment on
+# Thursday. The last turn of each scenario asserts the function call only:
+# end_conversation tears the pipeline down before the farewell llm_response
+# reaches the harness.
+
+judge: !include ../judge_text.yaml
+
+scenarios:
+  # The subflow returns to the booking node.
+  - name: book
+    turns:
+      - expect:
+          - event: response
+            eval: "the bot greets the caller and asks whether they want to book or cancel an appointment"
+
+      - user: "I'd like to book an appointment."
+        expect:
+          - event: function_call
+            calls:
+              - name: wants_to_book
+          - event: response
+            eval: "the bot asks for the caller's date of birth"
+
+      - user: "April twelfth, nineteen ninety."
+        expect:
+          - event: function_call
+            calls:
+              - name: verify_birth_date
+                args: { birth_date: "1990-04-12" }
+          - event: response
+            eval: "the bot asks which day the caller would like to come in"
+
+      - user: "Tuesday, please."
+        expect:
+          - event: function_call
+            calls:
+              - name: book_appointment
+
+  # A wrong date of birth stays in the subflow; the right one returns to the
+  # cancelling node.
+  - name: cancel
+    turns:
+      - expect:
+          - event: response
+            eval: "the bot greets the caller and asks whether they want to book or cancel an appointment"
+
+      - user: "I need to cancel my appointment."
+        expect:
+          - event: function_call
+            calls:
+              - name: wants_to_cancel
+          - event: response
+            eval: "the bot asks for the caller's date of birth"
+
+      - user: "March third, nineteen eighty-five."
+        expect:
+          - event: function_call
+            calls:
+              - name: verify_birth_date
+                args: { birth_date: "1985-03-03" }
+          - event: response
+            eval: "the bot says the date of birth does not match and asks for it again"
+
+      - user: "Sorry, it's April twelfth, nineteen ninety."
+        expect:
+          - event: function_call
+            calls:
+              - name: verify_birth_date
+                args: { birth_date: "1990-04-12" }
+          - event: response
+            eval: "the bot says the appointment on file is on Thursday and asks the caller to confirm cancelling it"
+
+      - user: "Yes, please cancel it."
+        expect:
+          - event: function_call
+            calls:
+              - name: cancel_appointment

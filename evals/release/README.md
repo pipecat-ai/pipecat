@@ -311,7 +311,8 @@ When writing one:
   pipeline down before the goodbye reaches the harness.
 
 The bots pick their LLM from `$LLM_PROVIDER` (default `openai_responses`;
-`hello_world` always uses Google): `LLM_PROVIDER=anthropic ./run.sh -p flows`,
+`hello_world` and `clinic_appointments` always use Google):
+`LLM_PROVIDER=anthropic ./run.sh -p flows`,
 also `google` and `aws`. `llm_switching` needs OpenAI, Google and Anthropic
 keys. `warm_transfer.py` needs Daily and a live human agent, so it isn't
 covered.
