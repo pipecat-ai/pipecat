@@ -488,6 +488,8 @@ class SonioxSTTService(WebsocketSTTService):
         # Set when the turn is interrupted. A word decides whether it is still
         # wanted when its turn to be sent comes round.
         self._agent_text_turn = asyncio.Event()
+        self._agent_text_connection_retired = asyncio.Event()
+        self._agent_text_configuring = False
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -730,6 +732,8 @@ class SonioxSTTService(WebsocketSTTService):
 
     def _queue_agent_text(self, frame: TTSTextFrame):
         """Queue a timed word behind the words reported before it."""
+        if self._agent_text_configuring:
+            return
         assert frame.pts
         if frame.pts < self._agent_text_last_pts:
             logger.warning(
@@ -749,10 +753,19 @@ class SonioxSTTService(WebsocketSTTService):
         """Send the queued words one after another, each when its moment comes."""
         while True:
             frame, interrupted = await self._agent_text_words.get()
-            await self._send_bot_word_at(frame, interrupted)
-            self._agent_text_words.task_done()
+            try:
+                await self._send_bot_word_at(
+                    frame, interrupted, self._agent_text_connection_retired
+                )
+            finally:
+                self._agent_text_words.task_done()
 
-    async def _send_bot_word_at(self, frame: TTSTextFrame, interrupted: asyncio.Event):
+    async def _send_bot_word_at(
+        self,
+        frame: TTSTextFrame,
+        interrupted: asyncio.Event,
+        connection_retired: asyncio.Event,
+    ):
         """Send a word ``agent_text_lead_ms`` before it is played.
 
         Soniox places agent text where it sits among the audio frames, and
@@ -765,19 +778,16 @@ class SonioxSTTService(WebsocketSTTService):
         # the queue is time the lead would otherwise have lost.
         delay = nanoseconds_to_seconds(frame.pts - self.get_clock().get_time())
         delay -= assert_given(self._settings.agent_text_lead_ms) / 1000
-        if not frame.interruptible:
-            # Uninterruptible speech plays on through an interruption.
-            if delay > 0:
-                await asyncio.sleep(delay)
-        else:
-            # An interruption ends the wait: the transport drops this word's
-            # audio, so the caller never hears it.
+        # Uninterruptible speech plays through a turn interruption, but the
+        # text still belongs to the connection that carried its audio.
+        stop_waiting = interrupted if frame.interruptible else connection_retired
+        if frame.interruptible or delay > 0:
             try:
-                await asyncio.wait_for(interrupted.wait(), max(delay, 0))
+                await asyncio.wait_for(stop_waiting.wait(), max(delay, 0))
             except TimeoutError:
                 pass
-            if interrupted.is_set():
-                return
+        if connection_retired.is_set() or stop_waiting.is_set():
+            return
         await self._send_bot_text(frame)
 
     async def _send_bot_text(self, frame: TTSTextFrame):
@@ -797,10 +807,10 @@ class SonioxSTTService(WebsocketSTTService):
 
     def _drop_agent_text_words(self):
         """Drop the words waiting on the clock, uninterruptible ones too."""
+        self._agent_text_connection_retired.set()
+        self._agent_text_connection_retired = asyncio.Event()
         self._agent_text_turn.set()
         self._agent_text_turn = asyncio.Event()
-        # The event alone leaves uninterruptible speech, which ignores it, so
-        # the queue itself goes too.
         while not self._agent_text_words.empty():
             self._agent_text_words.get_nowait()
             self._agent_text_words.task_done()
@@ -848,10 +858,14 @@ class SonioxSTTService(WebsocketSTTService):
 
             logger.debug("Connecting to Soniox STT")
 
-            self._websocket = await self._websocket_connect(
+            websocket = await self._websocket_connect(
                 self._url,
                 additional_headers={"Authorization": f"Bearer {self._api_key}"},
             )
+            # Retire text timed against the old session before exposing the
+            # new socket, whose audio has no matching words yet.
+            self._drop_agent_text_words()
+            self._websocket = websocket
 
             if not self._websocket:
                 await self.push_error(error_msg=f"Unable to connect to Soniox API at {self._url}")
@@ -887,11 +901,13 @@ class SonioxSTTService(WebsocketSTTService):
             if self._agent_text_input_enabled():
                 config["enable_agent_text_input"] = True
 
-            # Send the configuration message.
-            await self._websocket.send(json.dumps(config))
-            # The new session has no open segment, and words timed against the
-            # old one's audio would be placed where the bot's voice is not,
-            # where they can cancel the caller's own speech.
+            # Audio has no timeline on the replacement until it is configured.
+            self._agent_text_configuring = True
+            try:
+                await self._websocket.send(json.dumps(config))
+            finally:
+                if self._websocket is websocket:
+                    self._agent_text_configuring = False
             self._agent_text_segment_open = False
             self._drop_agent_text_words()
 
