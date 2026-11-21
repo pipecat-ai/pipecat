@@ -162,6 +162,26 @@ def _normalize_jitter_buffer(mode: str | None, ms: tuple | None) -> tuple[str | 
     return mode or "fixed", (lo, hi)
 
 
+def _validate_sip_listen(address: str | None) -> str | None:
+    """Check a ``sip_listen`` address: ``host:port`` or ``[ipv6]:port``.
+
+    The value lands verbatim in the stack's configuration text, so anything
+    beyond one address token is refused rather than passed through.
+    """
+    if address is None:
+        return None
+    if not isinstance(address, str) or not address or any(c.isspace() for c in address):
+        raise ValueError(f"sip_listen must be 'host:port' without whitespace, got {address!r}")
+    host, sep, port = address.rpartition(":")
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    elif ":" in host:
+        raise ValueError(f"sip_listen needs an IPv6 address in brackets, got {address!r}")
+    if not sep or not host or not port.isdigit() or not 0 < int(port) < 65536:
+        raise ValueError(f"sip_listen must be 'host:port' with a port in 1-65535, got {address!r}")
+    return address
+
+
 @dataclass(frozen=True)
 class _RuntimeSettings:
     """Runtime-wide baresip settings, fixed by the first connection.
@@ -172,6 +192,7 @@ class _RuntimeSettings:
     """
 
     net_interface: str | None = None
+    sip_listen: str | None = None
     expose_headers: tuple = ()
     max_concurrent_calls: int | None = 2
     rtp_timeout: int = 0
@@ -202,8 +223,18 @@ class _RuntimeSettings:
             video_bitrate=self.video_bitrate,
             native_log_level=self.native_log_level,
             sip_trace=self.sip_trace,
-            extra_config_text=self._jitter_buffer_config(),
+            extra_config_text=self._sip_listen_config() + self._jitter_buffer_config(),
         )
+
+    def _sip_listen_config(self) -> str:
+        """The SIP listen address as the stack's own config line.
+
+        ``Config`` has no typed field for ``sip_listen``; unset renders
+        nothing, and the stack binds an ephemeral port per interface.
+        """
+        if self.sip_listen is None:
+            return ""
+        return f"sip_listen {self.sip_listen}\n"
 
     def _jitter_buffer_config(self) -> str:
         """The receive jitter buffer as the stack's own config lines.
@@ -282,7 +313,7 @@ class _SharedRuntime:
                 raise ValueError(
                     "the SIP runtime is already up with different runtime-wide "
                     f"settings ({self._settings!r}); all SIPConnections in a process "
-                    "must agree on net_interface, expose_headers, "
+                    "must agree on net_interface, sip_listen, expose_headers, "
                     "max_concurrent_calls, rtp_timeout, instance_id, "
                     "native_log_level, sip_trace, the jitter buffer, and the "
                     "video parameters"
@@ -397,7 +428,7 @@ class SIPConnection(BaseObject):
     arguments are plain types only — the binding never appears in
     application signatures.
 
-    Runtime-wide arguments (``net_interface``, ``expose_headers``,
+    Runtime-wide arguments (``net_interface``, ``sip_listen``, ``expose_headers``,
     ``max_concurrent_calls``, the jitter buffer, the logging parameters,
     and the video parameters) configure the process-wide SIP stack and are
     fixed by the first connection to connect; every later connection must
@@ -496,6 +527,7 @@ class SIPConnection(BaseObject):
         jitter_buffer_mode: str | None = None,
         jitter_buffer_ms: tuple | None = None,
         net_interface: str | None = None,
+        sip_listen: str | None = None,
         expose_headers: tuple = (),
         max_concurrent_calls: int | None = 2,
         rtp_timeout: int = 0,
@@ -573,6 +605,14 @@ class SIPConnection(BaseObject):
                 host. This is a restriction filter, not a listen address:
                 a value like ``"0.0.0.0"`` matches no real interface and
                 breaks all address selection. Runtime-wide.
+            sip_listen: The local SIP address and port, ``"host:port"``
+                (``"[ipv6]:port"``), e.g. ``"0.0.0.0:5060"``. None (the
+                default) lets the stack bind an ephemeral port, which is
+                all a registering connection needs. Set it when peers send
+                INVITEs to a fixed address without a registration — trunk
+                mode with ``reg_interval=0`` behind a carrier that routes
+                to ``host:port``. One process holds the port, so bots that
+                share a host need distinct ports. Runtime-wide.
             expose_headers: SIP header names whose values ride on call
                 events. Runtime-wide.
             max_concurrent_calls: Stack-wide simultaneous-call cap;
@@ -644,6 +684,7 @@ class SIPConnection(BaseObject):
         )
         self._settings = _RuntimeSettings(
             net_interface=net_interface,
+            sip_listen=_validate_sip_listen(sip_listen),
             rtp_timeout=rtp_timeout,
             instance_id=instance_id,
             expose_headers=tuple(expose_headers),
