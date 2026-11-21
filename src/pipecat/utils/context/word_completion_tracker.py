@@ -194,7 +194,7 @@ class WordCompletionTracker:
         self._llm_spoken_pos = self._segment_map.llm_spoken_pos
 
         if self._llm_text is not None:
-            self._record_llm_span(word, llm_pos_before, spoken_before)
+            self._record_llm_span(word, llm_pos_before, spoken_before, raw_pos_before)
 
         complete = self.is_complete
         if complete:
@@ -240,7 +240,9 @@ class WordCompletionTracker:
             self._llm_pos = len(self._llm_text)
             self._llm_spoken_pos = len(self._llm_text)
 
-    def _record_llm_span(self, word: str, llm_pos_before: int, spoken_before: int) -> None:
+    def _record_llm_span(
+        self, word: str, llm_pos_before: int, spoken_before: int, raw_pos_before: int
+    ) -> None:
         """Record which part of ``llm_text`` the word just added stands for.
 
         Usually that is simply the span the attributed cursor moved over. Two
@@ -250,10 +252,13 @@ class WordCompletionTracker:
           ``llm_text``. The map stops at the last spoken character, so a closing
           tag -- which never arrives as its own event -- is still outstanding and
           belongs to this word.
-        - **Neither cursor moved**: the map accepted the word without matching it
+        - **No cursor moved**: the map accepted the word without matching it
           to anything, as it does for a symbol the source text spells differently
           (a provider reporting ``->`` for ``→``). Nothing else will ever report
-          that character, so the word's own length is spent on it instead.
+          that character, so the word's own length is spent on it instead. A
+          word that moved only the cursor into ``tts_text`` is not one of these:
+          it crossed marks only the TTS side has (``"..."`` sent for ``"."``),
+          which stand for nothing in ``llm_text``.
 
         A word inside a transformed segment records nothing, and is checked
         before that second case: the cursors are held there on purpose, so "did
@@ -276,9 +281,10 @@ class WordCompletionTracker:
         elif (
             self._llm_spoken_pos == spoken_before
             and self._llm_pos == llm_pos_before
+            and self._segment_map.raw_pos == raw_pos_before
             and self._segment_map.last_completed_segment is None
         ):
-            # Neither cursor moved, so the map accepted the word without matching
+            # No cursor moved, so the map accepted the word without matching
             # it to anything -- a symbol the source text spells differently, which
             # no other event will report. Spend the word's own length so the
             # character it stands for still reaches the context.

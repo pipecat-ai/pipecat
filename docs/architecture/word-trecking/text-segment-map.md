@@ -211,6 +211,14 @@ There is exactly one real cursor — `raw_pos`, the position reached in the TTS 
   cents`. That is why `TextSegment` carries both `tts_alnum_count` and
   `original_alnum_count` — the two sides of a rewritten segment need different counts.
 
+A segment that is not transformed can still differ in its marks: a transform that sends
+`Okay.` as `Okay...`, or `Sure,` as `Sure`, keeps the letters and the words.
+`_original_chars` counts the characters a step crossed on the **original** side, so
+`llm_spoken_pos` never runs ahead of the LLM text by the marks the TTS side added.
+Running ahead, it would drag `llm_pos` with it and cut every later word in the context.
+Once the segment's TTS side is spoken in full, the marks it dropped count as spoken too,
+so a frame that ends early does not owe them again.
+
 ### Counting is what attaches tags to words
 
 `advance_by_alnums` does the counting, and two of its rules are the whole reason the tag
@@ -558,7 +566,7 @@ its own token. The exception is punctuation set off by a space, as French writes
 
 ## 7. Tests
 
-`tests/test_text_segment_map.py` — 54 tests.
+`tests/test_text_segment_map.py` — 58 tests.
 
 | Class | Covers |
 | --- | --- |
@@ -578,6 +586,7 @@ its own token. The exception is punctuation set off by a space, as French writes
 | `TestProviderTokenShapes` | Tokens carrying their own spacing |
 | `TestWordCarriesItsOwnPunctuation` | Provider-added terminal punctuation |
 | `TestLeadingDuplicatePunctuation` | A mark reported with the following word |
+| `TestPunctuationOnlyRewrite` | A transform that only changes the marks between words |
 
 `tests/test_markup_utils.py` — 20 tests, covering the shared helpers this file leans on.
 
