@@ -40,7 +40,8 @@ Areas covered:
    query string included, and host/port still compose a URL.
 
 7. **Client-mode reconnect** — the session loop redials a dropped
-   session within ``connection_timeout``, never retries a refused dial,
+   session within ``connection_timeout``, redials one whose peer
+   subscription errored beneath it, never retries a refused dial,
    reports the peer gone exactly once, and pushes errors with the
    category and permanence the pipeline acts on.
 """
@@ -1040,6 +1041,98 @@ class TestTranscriptRecords(unittest.TestCase):
         client, _stream = _client_with_fake_moq()
         record = {"type": "a", "seq": True}
         self.assertIs(client._accept_peer_record(record), record)
+
+    def test_the_marker_record_carries_seq_and_epoch(self):
+        """The session-ending marker rides the same transcript stream as
+        every other record, so it carries the dedupe fields a redialed
+        peer needs to place it."""
+        client, stream = _client_with_fake_moq()
+        client._publish_session_ending()
+        (record,) = [call.args[0] for call in stream.append.call_args_list]
+        self.assertEqual(
+            {k: record[k] for k in ("label", "type")},
+            {"label": "moq-transport", "type": "session-ending"},
+        )
+        self.assertIn(TRANSCRIPT_SEQ_FIELD, record)
+        self.assertIn(TRANSCRIPT_EPOCH_FIELD, record)
+
+
+# ----------------------------------------------------------------------
+# Session-ending marker
+# ----------------------------------------------------------------------
+
+
+class TestSessionEndingMarker(unittest.IsolatedAsyncioTestCase):
+    """The session-ending marker must go out BEFORE teardown, not after it.
+
+    Why: an EndFrame is a ControlFrame — it queues strictly in order
+    behind every frame of an in-flight LLM/TTS turn — and once it does
+    reach the transports, the graceful path drained up to
+    ``audio_out_max_buffer_ms`` (25s default) of paced audio before
+    ``disconnect`` published the marker. The browser saw a live call that
+    had in fact been over the whole time (observed as 60+s hangs; if the
+    turn wedges, the marker never came). The first holder release now
+    publishes it before any drain; the drain afterwards only paces the
+    final audio out.
+    """
+
+    async def asyncSetUp(self):
+        p = patch.object(moq_transport, "_SESSION_ENDING_SETTLE_S", 0.001)
+        p.start()
+        self.addCleanup(p.stop)
+
+    @staticmethod
+    def _markers_on(stream):
+        return [
+            call.args[0]
+            for call in stream.append.call_args_list
+            if call.args[0].get("label") == "moq-transport"
+            and call.args[0].get("type") == "session-ending"
+        ]
+
+    async def test_stop_publishes_the_marker_before_the_drain(self):
+        """The marker is on the stream by the time ``wait_for_audio_drain``
+        starts — the drain can no longer delay it."""
+        client, stream = _client_with_fake_moq()
+        client._holders = 2  # both transports are holding the session
+        real_drain = client.wait_for_audio_drain
+        markers_when_drain_began: list[int] = []
+
+        async def drain_and_record(**kw):
+            markers_when_drain_began.append(len(TestSessionEndingMarker._markers_on(stream)))
+            await real_drain(**kw)
+
+        client.wait_for_audio_drain = drain_and_record  # type: ignore[method-assign]
+
+        await client.stop()
+
+        self.assertEqual(markers_when_drain_began, [1])
+        self.assertEqual(len(self._markers_on(stream)), 1)
+
+    async def test_the_marker_is_published_once_across_the_whole_teardown(self):
+        """Two holder releases (input then output) plus the disconnect they
+        trigger still publish exactly one marker."""
+        client, stream = _client_with_fake_moq()
+        client._holders = 2
+        await client.stop()
+        await client.stop()
+        self.assertEqual(len(self._markers_on(stream)), 1)
+
+    async def test_the_cancel_path_publishes_the_marker_too(self):
+        """Cancellation is immediate — no drain — but the browser still
+        needs the marker before the WebTransport vanishes."""
+        client, stream = _client_with_fake_moq()
+        client._holders = 2
+        await client.cancel()
+        await client.cancel()
+        self.assertEqual(len(self._markers_on(stream)), 1)
+
+    async def test_cleanup_publishes_the_marker_when_no_holder_released(self):
+        """The last-resort FrameProcessor cleanup hook (e.g. a wedged
+        pipeline torn down without stop/cancel) still gets the marker out."""
+        client, stream = _client_with_fake_moq()
+        await client.cleanup()
+        self.assertEqual(len(self._markers_on(stream)), 1)
 
 
 # ----------------------------------------------------------------------
@@ -2622,9 +2715,10 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         cb.on_error.assert_not_awaited()
         self.assertEqual(cb.on_disconnected.await_count, 2)
 
-    async def test_a_consumer_failure_on_a_live_session_ends_the_transport(self):
-        """The relay is reachable, so a redial would not help; the failure
-        is reported instead of being taken for the peer's tracks ending."""
+    async def test_a_pump_fault_on_a_live_session_ends_the_transport(self):
+        """A fault that is not a subscribe stream error (a decode fault, say)
+        would be met again on every dial, so it is reported instead of being
+        taken for the peer's tracks ending or being redialed away."""
         self.script[:] = [_FakeSession(), _FakeSession()]
         client = self._make_client()
         boom = RuntimeError("decode failed")
@@ -2644,6 +2738,62 @@ class TestClientReconnect(unittest.IsolatedAsyncioTestCase):
         _message, exc, _category, permanent = cb.on_error.await_args.args
         self.assertIs(exc, boom)
         self.assertFalse(permanent)
+
+    async def test_a_subscribe_failure_on_a_live_session_is_redialed(self):
+        """A peer that dropped uncleanly leaves a group range the relay
+        cannot serve, so the subscription a redial resumes at errors
+        (``Error.Audio("moq: internal error")``) while the session itself is
+        fine. That failure is the peer's path through the relay, not the
+        session, and only a fresh session clears it."""
+        first, second = _FakeSession(), _FakeSession()
+        self.script[:] = [first, second]
+        client = self._make_client()
+        seen = 0
+
+        async def consume(_origin):
+            nonlocal seen
+            seen += 1
+            await client._on_peer_available()
+            await client._on_peer_data()
+            if seen == 1:
+                raise moq.Error.Audio("moq: internal error")
+            client._peer_goodbye = True
+            return True
+
+        client._consume_peer = consume  # type: ignore[method-assign]
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        cb = client._callbacks
+        self.assertEqual(self.dials, [self.URL, self.URL])
+        cb.on_error.assert_not_awaited()
+        # The peer never left: its tracks were served again on the new session.
+        self.assertEqual(cb.on_connected.await_count, 2)
+        cb.on_client_connected.assert_awaited_once()
+        cb.on_client_disconnected.assert_awaited_once()
+
+    async def test_a_subscribe_failure_that_never_clears_ends_the_window(self):
+        """The redial a subscribe failure earns is bounded by
+        ``connection_timeout`` like every other one: the peer's tracks never
+        come back, so the loop gives up and reports the peer gone."""
+        self.script[:] = [_FakeSession() for _ in range(1000)]
+        client = self._make_client(connection_timeout=0.05)
+
+        async def consume(_origin):
+            await client._on_peer_available()
+            raise moq.Error.Audio("moq: internal error")
+
+        client._consume_peer = consume  # type: ignore[method-assign]
+        await asyncio.wait_for(client._run(), timeout=2)
+
+        cb = client._callbacks
+        self.assertGreater(len(self.dials), 1)
+        self.assertLess(len(self.dials), 1000)
+        cb.on_client_disconnected.assert_awaited_once()
+        _message, exc, category, permanent = cb.on_error.await_args.args
+        self.assertIsInstance(exc, ConnectionError)
+        self.assertIsInstance(exc.__cause__, moq.Error.Audio)
+        self.assertIs(category, ErrorCategory.CONNECTIVITY)
+        self.assertTrue(permanent)
 
     async def test_a_consumer_failure_as_the_session_closes_is_redialed(self):
         """A dropped connection fails the subscriptions a beat before the

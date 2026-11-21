@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -154,6 +155,8 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self._handle_interim_transcription(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+        elif isinstance(frame, TranscriptionFinalizedFrame):
+            await self._handle_transcription_finalized()
 
     async def _handle_user_started_speaking(self, *, announced_elsewhere: bool):
         """Handle the external signal that the user is speaking."""
@@ -185,6 +188,16 @@ class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._transcript_task = self.create_task(
                 self._transcript_timer_handler(), f"{self}::_transcript_timer_handler"
             )
+
+    async def _handle_transcription_finalized(self):
+        """Handle a finalization confirmed after its text had already arrived.
+
+        No more text is coming for this speech, so there is nothing left to
+        wait for. It brings no new text, so a turn already decided stays so.
+        """
+        self._seen_interim_results = False
+        await self._cancel_transcript_timer()
+        await self._maybe_report_user_turn_stopped()
 
     async def _transcript_timer_handler(self):
         """Decide once no more transcriptions arrive for a while."""

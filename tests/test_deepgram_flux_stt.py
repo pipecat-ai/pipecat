@@ -13,7 +13,14 @@ from websockets.datastructures import Headers
 from websockets.exceptions import InvalidStatus
 from websockets.http11 import Response
 
-from pipecat.frames.frames import InterimTranscriptionFrame
+from pipecat.frames.frames import (
+    InterimTranscriptionFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
+    TranscriptionFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.deepgram.flux.stt_base import (
     DeepgramFluxSTTBase,
@@ -21,6 +28,7 @@ from pipecat.services.deepgram.flux.stt_base import (
     FluxConnectionNotConfirmedError,
     FluxFatalError,
 )
+from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import (
     EagerUserTurnStrategies,
@@ -35,33 +43,43 @@ from pipecat.services.deepgram.flux.sagemaker.stt import (  # noqa: E402
 )
 
 
-def _make_fake_flux_service():
-    """Build a minimal concrete Flux service for exercising the Configure logic.
+def _make_fake_flux_service(vad_force_turn_endpoint=False):
+    """Build a minimal concrete Flux service for exercising the protocol logic.
 
     The subclass is defined lazily inside this factory (not at module level) so
     it never registers in ``AIService.__subclasses__()`` during import. That
     keeps it out of the auto-discovery in ``tests/test_service_init.py``, which
     walks every ``AIService`` subclass at collection time.
 
-    The returned instance records every JSON message sent, so we can assert
-    that Configure sends are serialized (never more than one in flight) and
-    that bursts are coalesced rather than replayed one at a time.
+    The returned instance records every JSON message sent, every frame pushed
+    and every frame class broadcast, so tests can assert both what goes out to
+    Flux and what reaches the pipeline.
+
+    Args:
+        vad_force_turn_endpoint: Whether the pipeline, not Flux, decides turns.
     """
 
     class _FakeFluxService(DeepgramFluxSTTBase):
         def __init__(self):
             # Bypass STTService.__init__ (needs a pipeline); wire up only the
-            # state _send_configure / _handle_message touch.
+            # state the methods under test touch.
             self._name = "FakeFlux"
-            self._settings = DeepgramFluxSTTSettings(model="flux-general-en")
+            self._settings = DeepgramFluxSTTSettings(model="flux-general-en", min_confidence=None)
             self._configure_in_flight = False
             self._configure_sent_at = None
             self._configure_pending_fields = None
             self._active = True
+            self._vad_force_turn_endpoint = vad_force_turn_endpoint
+            self._user_is_speaking = False
+            self._user_id = ""
+            self._finalize_requested = False
+            self._finalize_pending = False
             self.sent_messages = []
             self.errors = []
             self.reconnect_requests = 0
             self.connection_events = []
+            self.pushed_frames = []
+            self.broadcast_frames = []
 
         async def _transport_send_audio(self, audio: bytes):
             pass
@@ -90,7 +108,32 @@ def _make_fake_flux_service():
         async def push_error(self, error_msg, exception=None):
             self.errors.append(error_msg)
 
+        async def push_frame(self, frame, direction=FrameDirection.DOWNSTREAM):
+            self.pushed_frames.append(frame)
+
+        async def broadcast_frame(self, frame_cls, **kwargs):
+            self.broadcast_frames.append(frame_cls)
+
+        async def _call_event_handler(self, name, *args, **kwargs):
+            pass
+
+        async def emit_stt_usage_metrics(self):
+            pass
+
+        async def _handle_transcription(self, transcript, is_final, language=None):
+            pass
+
     return _FakeFluxService()
+
+
+async def _noop_process_frame(self, frame, direction):
+    """Stand in for STTService.process_frame, which needs a live pipeline."""
+    pass
+
+
+def _turn_info(event, **extra):
+    """Build a TurnInfo message payload."""
+    return {"type": "TurnInfo", "event": event, "transcript": "hello there", **extra}
 
 
 @pytest.mark.asyncio
@@ -458,6 +501,15 @@ def test_flux_keeps_a_configured_eager_threshold():
     assert service._settings.eager_eot_threshold == 0.8
 
 
+def test_flux_rejects_eager_end_of_turn_with_vad_force_turn_endpoint():
+    with pytest.raises(ValueError, match="enable_eager_end_of_turn"):
+        DeepgramFluxSTTService(
+            api_key="test-key",
+            vad_force_turn_endpoint=True,
+            enable_eager_end_of_turn=True,
+        )
+
+
 @pytest.mark.asyncio
 async def test_update_pushes_interim_transcription():
     service = DeepgramFluxSTTService(api_key="test-key")
@@ -525,6 +577,133 @@ async def test_refused_handshake_reports_deepgram_reason():
     expected = f"Deepgram refused the connection (HTTP 400): {reason}"
     assert errors == [(expected, refusal)]
     assert connection_errors == [expected]
+
+
+# ----------------------------------------------------------------------
+# Turn detection modes
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_vad_force_turn_endpoint_force_ends_turn_on_vad_stop(monkeypatch):
+    """The VAD stop signal asks Flux to finalize the audio sent so far."""
+    monkeypatch.setattr(STTService, "process_frame", _noop_process_frame)
+    service = _make_fake_flux_service(vad_force_turn_endpoint=True)
+    service._user_is_speaking = True
+
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert service.sent_messages == [{"type": "ForceEndTurn"}]
+    assert service._finalize_requested
+
+
+@pytest.mark.asyncio
+async def test_flux_turn_detection_ignores_vad_stop(monkeypatch):
+    """When Flux owns the turn, VAD must not cut it short."""
+    monkeypatch.setattr(STTService, "process_frame", _noop_process_frame)
+    service = _make_fake_flux_service()
+    service._user_is_speaking = True
+
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert service.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_force_end_turn_is_inert_with_no_active_turn():
+    """With no turn in progress there is nothing to finalize."""
+    service = _make_fake_flux_service(vad_force_turn_endpoint=True)
+    service._user_is_speaking = False
+
+    await service.force_end_turn()
+
+    assert service.sent_messages == []
+    assert not service._finalize_requested
+
+
+@pytest.mark.asyncio
+async def test_force_end_turn_is_inert_on_dead_transport():
+    """A closed connection can't carry a ForceEndTurn."""
+    service = _make_fake_flux_service(vad_force_turn_endpoint=True)
+    service._user_is_speaking = True
+    service._active = False
+
+    await service.force_end_turn()
+
+    assert service.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_vad_force_turn_endpoint_suppresses_turn_proposals():
+    """The service transcribes only: the configured strategies own the turn."""
+    service = _make_fake_flux_service(vad_force_turn_endpoint=True)
+
+    await service._handle_message(_turn_info("StartOfTurn"))
+    await service._handle_message(_turn_info("EndOfTurn", trigger="manual"))
+
+    assert service.broadcast_frames == []
+    # The transcript still reaches the pipeline; only the proposals are dropped.
+    assert [type(f) for f in service.pushed_frames] == [TranscriptionFrame]
+    assert service.pushed_frames[0].finalized
+
+
+@pytest.mark.asyncio
+async def test_flux_turn_detection_proposes_both_turn_edges():
+    """Flux's turn edges go to the external turn strategies."""
+    service = _make_fake_flux_service()
+
+    await service._handle_message(_turn_info("StartOfTurn"))
+    await service._handle_message(_turn_info("EndOfTurn", trigger="model"))
+
+    assert service.broadcast_frames == [
+        ProposedUserStartedSpeakingFrame,
+        ProposedUserStoppedSpeakingFrame,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_manual_trigger_confirms_a_requested_finalize():
+    """An EndOfTurn we asked for settles the finalize request; one we didn't doesn't."""
+    service = _make_fake_flux_service(vad_force_turn_endpoint=True)
+    service._user_is_speaking = True
+    await service.force_end_turn()
+
+    await service._handle_message(_turn_info("EndOfTurn", trigger="timeout"))
+    assert service._finalize_requested  # still waiting on our own ForceEndTurn
+
+    service._user_is_speaking = True
+    await service._handle_message(_turn_info("EndOfTurn", trigger="manual"))
+    assert not service._finalize_requested
+    assert service._finalize_pending
+
+
+@pytest.mark.asyncio
+async def test_force_end_turn_losing_the_race_is_not_an_error():
+    """Flux may have ended the turn already; that warning is routine, not a failure."""
+    service = _make_fake_flux_service(vad_force_turn_endpoint=True)
+
+    await service._handle_message(
+        {
+            "type": "Warning",
+            "code": "FORCE_END_TURN_NO_ACTIVE_TURN",
+            "description": "No active turn to end",
+        }
+    )
+
+    assert service.errors == []
+    assert service.pushed_frames == []
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_warning_is_not_an_error():
+    """Warnings never interrupt the stream, so none of them push an error."""
+    service = _make_fake_flux_service()
+
+    await service._handle_message(
+        {"type": "Warning", "code": "SOMETHING_NEW", "description": "unrecognized"}
+    )
+
+    assert service.errors == []
 
 
 if __name__ == "__main__":

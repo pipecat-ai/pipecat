@@ -22,24 +22,20 @@ import copy
 import json
 import re
 import time
-import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
-from urllib.parse import urlparse
 
 from loguru import logger
 from websockets.exceptions import InvalidStatus
 from websockets.protocol import State
 
-from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
-    TranscriptionFrame,
     TranscriptionSpeaker,
     VADUserStoppedSpeakingFrame,
 )
@@ -47,10 +43,10 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import ZOOM_AI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.services.zoom_ai.utils import check_url, new_tracking_id, request_headers
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.errors import ErrorCategory
-from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven
 
@@ -63,7 +59,6 @@ SESSION_CLOSE_TIMEOUT_SECS = 2.0
 # When input stops mid-turn (e.g. the user muted), Scribe's VAD hears no silence and
 # the turn stays open. After this long without input, send enough silence to end it.
 INPUT_GAP_SECS = 1.0
-_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 # Scribe adds speaker or channel tags to transcripts when diarization is on.
 _SPEAKER_TAG = re.compile(r"\[(?:speaker[ _]?\d+|spk_\d+|channel\d+)\]\s*", re.IGNORECASE)
@@ -71,19 +66,6 @@ _SPEAKER_TAG = re.compile(r"\[(?:speaker[ _]?\d+|spk_\d+|channel\d+)\]\s*", re.I
 
 def _clean(text: str | None) -> str:
     return _SPEAKER_TAG.sub("", text or "").strip()
-
-
-def _tracking_id() -> str:
-    """A new ``x-zm-trackingid``, which Zoom support uses to find a session."""
-    return f"zoom_ai_community_pipecat_{uuid.uuid4()}"
-
-
-def _headers(api_key: str, tracking_id: str) -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {api_key}",
-        "User-Agent": f"pipecat/{pipecat_version()}",
-        "x-zm-trackingid": tracking_id,
-    }
 
 
 def _describe_refusal(exception: Exception) -> str | None:
@@ -101,16 +83,6 @@ def _describe_refusal(exception: Exception) -> str | None:
         if reason:
             return f"Zoom refused the connection (HTTP {response.status_code}): {reason}"
     return None
-
-
-def _check_url(url: str) -> str:
-    """Return ``url``, warning if it sends the API key and audio unencrypted to a remote host."""
-    parsed = urlparse(url)
-    if parsed.scheme.lower() == "ws" and parsed.hostname not in _LOOPBACK_HOSTS:
-        logger.warning(
-            "Zoom Scribe url is not encrypted (ws://); the API key and audio are sent in plaintext"
-        )
-    return url
 
 
 def _merge(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
@@ -438,7 +410,7 @@ class ZoomAISTTService(WebsocketSTTService):
         )
         self._api_key = api_key
         self._vad_force_turn_endpoint = vad_force_turn_endpoint
-        self._url = _check_url(url)
+        self._url = check_url(url, service="Zoom Scribe", data="audio")
         self._should_interrupt = should_interrupt
         self._user_turn_open = False
         self._receive_task = None
@@ -686,12 +658,12 @@ class ZoomAISTTService(WebsocketSTTService):
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
-            self._tracking_id = _tracking_id()
+            self._tracking_id = new_tracking_id()
             logger.debug(f"Connecting to Zoom Scribe Live (tracking_id={self._tracking_id})")
             websocket = await self._websocket_connect(
                 self._url,
                 subprotocols=["live-asr"],
-                additional_headers=_headers(self._api_key, self._tracking_id),
+                additional_headers=request_headers(self._api_key, self._tracking_id),
             )
             self._websocket = websocket
             self._session_closed.clear()

@@ -814,11 +814,12 @@ class DeepgramSTTService(STTService):
                     await self._push_transcription_runs(runs, language=language, result=message)
                     await self._handle_transcription(transcript, is_final, language)
                 elif from_finalize:
-                    # Deepgram already sent the transcript via a regular is_final
-                    # before the finalize response arrived (empty). Report STT TTFB
-                    # immediately instead of falling to the timeout.
-                    await self.stop_ttfb_metrics()
-                    await self._cancel_ttfb_timeout()
+                    # Deepgram's own endpointing already sent the transcript in
+                    # a regular is_final, before it was asked to finalize, so
+                    # the confirmation has no text to mark as finalized. Push it
+                    # on its own: that finalizes those transcripts for the
+                    # pipeline and reports the STT TTFB.
+                    await self._push_transcription_finalized()
             elif len(transcript) > 0:
                 # For interim transcriptions, just push the frame without tracing
                 await self.push_frame(
@@ -1020,6 +1021,14 @@ class DeepgramSegmentedSTTService(SegmentedSTTService):
     async def _transcribe(self, audio: bytes) -> dict:
         """POST an audio segment to the pre-recorded API and return the result.
 
+        A request that fails on a dropped connection is sent once more.
+        Deepgram closes an idle connection after about 5 s, so a request sent
+        on a pooled connection as it closes can fail. aiohttp retries such a
+        request itself only for idempotent methods (RFC 9112, section 9.3.1),
+        which excludes POST; repeating this POST only transcribes the segment
+        again, so it is retried here the same way. A failure to connect at all
+        is not retried.
+
         Args:
             audio: Audio bytes in WAV format.
 
@@ -1029,6 +1038,16 @@ class DeepgramSegmentedSTTService(SegmentedSTTService):
         Raises:
             aiohttp.ClientResponseError: If the API returns a non-200 status.
         """
+        try:
+            return await self._post_segment(audio)
+        except aiohttp.ClientConnectorError:
+            raise
+        except (aiohttp.ServerDisconnectedError, aiohttp.ClientOSError) as e:
+            logger.debug(f"{self}: connection dropped ({e}), retrying the segment")
+            return await self._post_segment(audio)
+
+    async def _post_segment(self, audio: bytes) -> dict:
+        """Send one request for an audio segment and return the decoded result."""
         headers = {"Authorization": f"Token {self._api_key}", "Content-Type": "audio/wav"}
         async with self._session.post(
             f"{self._base_url}/v1/listen",
@@ -1145,5 +1164,9 @@ class DeepgramSegmentedSTTService(SegmentedSTTService):
             yield ErrorFrame(
                 error=f"{self} transcription error: {e.status} {e.message}", exception=e
             )
+        except TimeoutError as e:
+            # A connection timeout's str() is the request URL, query included,
+            # and the total timeout's is empty; the type says which one it was.
+            yield ErrorFrame(error=f"{self} transcription error: {type(e).__name__}", exception=e)
         except Exception as e:
             yield ErrorFrame(error=f"{self} transcription error: {e}", exception=e)

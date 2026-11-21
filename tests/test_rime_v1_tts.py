@@ -149,6 +149,14 @@ def test_coda_uses_binary_and_public_endpoint() -> None:
     assert service._text_aggregation_mode is TextAggregationMode.SENTENCE
 
 
+def test_spell_tag_aggregator_keeps_the_settings_language() -> None:
+    service = RimeV1TTSService(
+        api_key="key", settings=RimeV1TTSService.Settings(model="coda", language=Language.FR)
+    )
+
+    assert service._text_aggregator.language == "fr"
+
+
 @pytest.mark.parametrize(
     "model, url",
     [

@@ -58,6 +58,10 @@ class TavusVideoService(AIService):
     When audio is sent, Tavus responds with both audio and video streams, which
     are routed through Pipecat's media pipeline.
 
+    The replica speaks the bot's voice: ``TTSAudioRawFrame`` from a TTS service,
+    or ``SpeechOutputAudioRawFrame`` from a speech-to-speech service that
+    streams its voice in real time, such as ``OpenAILiveLLMService``.
+
     In use cases with DailyTransport, this creates two distinct virtual rooms:
 
     - Tavus room: Contains the Tavus Avatar and the Pipecat Bot
@@ -267,7 +271,7 @@ class TavusVideoService(AIService):
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions()
             await self.push_frame(frame, direction)
-        elif isinstance(frame, TTSAudioRawFrame):
+        elif isinstance(frame, (TTSAudioRawFrame, SpeechOutputAudioRawFrame)):
             if self._client:
                 await self._client.queue_tts_frame(frame)
         elif isinstance(frame, TTSStoppedFrame):

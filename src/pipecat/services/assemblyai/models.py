@@ -164,7 +164,7 @@ class AssemblyAIConnectionParams(BaseModel):
         max_turn_silence: Maximum silence duration before forcing end-of-turn.
         keyterms_prompt: List of key terms to guide transcription. Will be JSON serialized before sending.
         prompt: Optional text prompt to guide the transcription. Only used with a Universal-3 Pro model ("universal-3-5-pro", "universal-3-6-pro", or "assemblyai-stt-3-7-realtime-agent").
-        speech_model: Select between English, multilingual, and Universal-3 Pro ("universal-3-5-pro", "universal-3-6-pro", "assemblyai-stt-3-7-realtime-agent") models. Defaults to "universal-3-6-pro".
+        speech_model: Select between English, multilingual, and Universal-3 Pro ("universal-3-5-pro", "universal-3-6-pro", "assemblyai-stt-3-7-realtime-agent") models. Defaults to "assemblyai-stt-3-7-realtime-agent".
         language_detection: Enable automatic language detection. Only applicable to
             universal-streaming-multilingual. When enabled, Turn messages include
             language_code and language_confidence fields. Defaults to None (not sent).
@@ -200,7 +200,7 @@ class AssemblyAIConnectionParams(BaseModel):
         "universal-3-5-pro",
         "universal-3-6-pro",
         "assemblyai-stt-3-7-realtime-agent",
-    ] = "universal-3-6-pro"
+    ] = "assemblyai-stt-3-7-realtime-agent"
     language_detection: bool | None = None
     format_turns: bool = True
     speaker_labels: bool | None = None

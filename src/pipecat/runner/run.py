@@ -760,6 +760,7 @@ def _setup_unified_start_route(
     async def status():
         """Return the transports supported by this runner instance."""
         transports = [args.transport] if args.transport is not None else ALL_TRANSPORTS
+        transports = [t for t in transports if _transport_routes_enabled(t)]
         return {"status": "ready", "transports": transports}
 
     class IceServer(TypedDict, total=False):

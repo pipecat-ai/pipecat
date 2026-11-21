@@ -1485,5 +1485,39 @@ class TestStartFileUploadUrl(unittest.TestCase):
         self.assertNotIn("fileUploadUrl", result)
 
 
+class TestStatusTransports(unittest.TestCase):
+    """GET /status reports only the transports /start would accept."""
+
+    def _status_transports(self, transport=None):
+        app = FastAPI()
+        _setup_unified_start_route(app, argparse.Namespace(transport=transport, ice_servers=[]), {})
+        response = TestClient(app).get("/status")
+        self.assertEqual(response.status_code, 200)
+        return response.json()["transports"]
+
+    def test_status_filters_out_disabled_transports(self):
+        with patch(
+            "pipecat.runner.run._transport_routes_enabled",
+            side_effect=lambda transport: transport in ("webrtc", "daily"),
+        ):
+            self.assertEqual(self._status_transports(), ["webrtc", "daily"])
+
+    def test_status_lists_all_transports_when_enabled(self):
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            transports = self._status_transports()
+
+        self.assertIn("webrtc", transports)
+        self.assertIn("twilio", transports)
+        self.assertIn("sip", transports)
+
+    def test_status_with_t_reports_only_that_transport(self):
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            self.assertEqual(self._status_transports("daily"), ["daily"])
+
+    def test_status_with_t_reports_nothing_when_its_routes_are_disabled(self):
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=False):
+            self.assertEqual(self._status_transports("daily"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

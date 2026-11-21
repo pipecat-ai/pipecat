@@ -20,6 +20,7 @@ Two layers:
 
 import asyncio
 import base64
+import dataclasses
 import json
 import socket
 import tempfile
@@ -60,6 +61,7 @@ from pipecat.evals.scenario import (
 from pipecat.evals.script_driver import EvalScriptDriver
 from pipecat.evals.script_session import EvalScriptSession
 from pipecat.evals.tts import CachingTTSService
+from pipecat.expressive.perception import PerceptionSignal
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -79,6 +81,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     TextType,
     TranscriptionFrame,
+    TranscriptionSpeaker,
     TTSSpeakFrame,
     TTSTextFrame,
     UserStartedSpeakingFrame,
@@ -88,8 +91,11 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.ai_service import AIService
+from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
+from pipecat.transcriptions.language import Language
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -381,18 +387,19 @@ class TestFramesToEvents(unittest.TestCase):
         ):
             self.assertIsNone(s.frame_to_event(frame))
 
-    def test_user_started_speaking_message_discards_interrupted_output(self):
-        # A new user turn drops the bot's leftover output (but keeps a queued
-        # user_transcription, which is the turn's input).
+    def test_user_started_speaking_message_discards_the_unfinished_response(self):
+        # A new user turn drops the bot's response in progress, and what the
+        # bot still says of it is not its reply. The queue is left as it is.
         s = _stream(bot_audio=True)
         s._text_buffer = ["greeting"]
-        s._queue.put_nowait({"type": "response", "text": "greeting"})
         s._queue.put_nowait({"type": "user_transcription", "transcript": "hi"})
         msg = InputTransportMessageFrame(
             message={"label": RTVI.MESSAGE_LABEL, "type": "user-started-speaking"}
         )
         self.assertEqual(s.frame_to_event(msg), {"type": "user_started_speaking"})
         self.assertEqual(s._text_buffer, [])
+        self.assertIsNone(s.frame_to_event(LLMTextFrame(text=" and welcome")))
+        self.assertIsNone(s.frame_to_event(LLMFullResponseEndFrame()))
         self.assertEqual(s._queue.get_nowait(), {"type": "user_transcription", "transcript": "hi"})
         self.assertTrue(s._queue.empty())
 
@@ -431,7 +438,7 @@ class TestFramesToEvents(unittest.TestCase):
 
     def test_unmapped_message_ignored(self):
         msg = InputTransportMessageFrame(
-            message={"label": RTVI.MESSAGE_LABEL, "type": "metrics", "data": {}}
+            message={"label": RTVI.MESSAGE_LABEL, "type": "bot-ready", "data": {}}
         )
         self.assertIsNone(_stream().frame_to_event(msg))
 
@@ -456,7 +463,7 @@ class _FakeJudge:
     def add_assistant_message(self, text):
         self.segments.append(text)
 
-    async def evaluate(self, criterion: str):
+    async def evaluate(self, criterion: str, *, allow_continue: bool | None = None):
         self.calls.append(criterion)
         return self._next_verdict()
 
@@ -703,6 +710,50 @@ class TestBotTurn(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._responses(s), [])
 
 
+class TestInterruptionKeepsTheUsersTurn(unittest.IsolatedAsyncioTestCase):
+    """The bot's reports of the user's turn starting survive the interruption sent right behind them."""
+
+    async def _expect(self, messages: list[str], event: str) -> dict:
+        """Feed the bot's messages as the sink does, back to back, to a turn waiting for ``event``."""
+        s = _stream(bot_audio=True)
+        s.input_sent()
+        waiting = asyncio.create_task(s.next_event(event, time.monotonic() + 1))
+        await asyncio.sleep(0)
+        for msg_type in messages:
+            message = {"label": RTVI.MESSAGE_LABEL, "type": msg_type}
+            reported = s.frame_to_event(InputTransportMessageFrame(message=message))
+            if reported is not None:
+                await s.append(reported)
+        return await waiting
+
+    async def test_user_started_speaking_survives_the_interruption_behind_it(self):
+        matched = await self._expect(
+            ["user-started-speaking", "bot-interrupted"], "user_started_speaking"
+        )
+        self.assertEqual(matched["type"], "user_started_speaking")
+
+    async def test_vad_user_started_speaking_survives_both_reports_behind_it(self):
+        matched = await self._expect(
+            ["vad-user-started-speaking", "user-started-speaking", "bot-interrupted"],
+            "vad_user_started_speaking",
+        )
+        self.assertEqual(matched["type"], "vad_user_started_speaking")
+
+    async def test_bot_interrupted_still_matches(self):
+        matched = await self._expect(
+            ["user-started-speaking", "bot-interrupted"], "bot_interrupted"
+        )
+        self.assertEqual(matched["type"], "bot_interrupted")
+
+    async def test_a_send_still_drops_the_turn_befores_reports(self):
+        # Left queued, they would match the next turn's expectation.
+        s = _stream(bot_audio=True)
+        for kind in ("vad_user_started_speaking", "user_started_speaking", "bot_interrupted"):
+            s._queue.put_nowait({"type": kind})
+        s.drop_pending_bot_output("before send")
+        self.assertTrue(s._queue.empty())
+
+
 class TestInterruptingSendDropsOpenBotTurn(unittest.IsolatedAsyncioTestCase):
     """A send over a speaking bot drops what its open turn holds of the bot's earlier speech."""
 
@@ -828,17 +879,6 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         down, _ = await self._run(gate, [plain])
         self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], ["untagged"])
 
-    async def test_with_an_unsegmented_stt_the_gate_keeps_no_account_of_segments(self):
-        stream = _stream(bot_audio=True)
-        gate = _BotSpeechGate(stream, EvalTrace(), None)
-        await self._run(
-            gate,
-            [VADUserStartedSpeakingFrame(), VADUserStoppedSpeakingFrame()],
-            direction=FrameDirection.UPSTREAM,
-        )
-        # Nothing awaits a transcription that will never be paired with a segment.
-        self.assertTrue(await stream.wait_bot_transcribed(0.01))
-
     async def test_the_gate_records_when_each_segment_began_as_it_ends(self):
         starts: deque[float] = deque()
         stream = _stream(bot_audio=True)
@@ -890,6 +930,102 @@ class TestTagBotSegments(unittest.IsolatedAsyncioTestCase):
         down, _ = await run_test(sink, frames_to_send=[_BotSegmentTranscribedFrame()])
         self.assertTrue(await stream.wait_bot_transcribed(0.01))
         self.assertFalse(any(isinstance(f, _BotSegmentTranscribedFrame) for f in down))
+
+
+class _StreamingSTT(STTService):
+    async def run_stt(self, audio: bytes):
+        yield None
+
+
+def _streaming_stt_factory(config: dict) -> STTService:
+    """A ``judge.transcription`` factory that returns a streaming STT."""
+    return _StreamingSTT()
+
+
+class _TwoSpeakerSTT(SegmentedSTTService):
+    """A segmented STT whose every segment holds two diarized speaker runs."""
+
+    async def run_stt(self, audio: bytes):
+        yield TranscriptionFrame("Hi there.", "", "", speaker=TranscriptionSpeaker("0", 1))
+        yield TranscriptionFrame("Hello.", "", "", speaker=TranscriptionSpeaker("1", 2))
+
+
+class TestBotSTTMustBeSegmented(unittest.TestCase):
+    """The bot's speech is transcribed by a segmented STT or not at all."""
+
+    def _client(self, bot_stt):
+        return EvalClient("ws://localhost:0", stream=_stream(), trace=EvalTrace(), bot_stt=bot_stt)
+
+    def test_a_streaming_stt_is_refused_by_name(self):
+        with self.assertRaisesRegex(ValueError, "_StreamingSTT is not one"):
+            self._client(_StreamingSTT())
+
+    def test_a_segmented_stt_or_none_is_accepted(self):
+        self._client(_TwoSpeakerSTT())
+        self._client(None)
+
+    def test_a_transcription_factory_returning_a_streaming_stt_is_refused(self):
+        scenario = EvalScriptScenario(
+            name="t",
+            turns=[EvalScriptTurn(user="hi", expect=[EvalExpectation(event="response")])],
+            bot_audio=True,
+            transcriber={"factory": f"{__name__}._streaming_stt_factory"},
+        )
+        with self.assertRaisesRegex(ValueError, "_StreamingSTT is not one"):
+            EvalSession.from_scenario(scenario, "ws://localhost:0")
+
+    def test_a_session_given_a_streaming_stt_is_refused_before_it_runs(self):
+        scenario = EvalScriptScenario(name="t", turns=[], bot_audio=True)
+        with self.assertRaises(ValueError):
+            EvalSession.from_scenario(scenario, "ws://localhost:0", bot_stt=_StreamingSTT())
+
+
+class TestTagBotSegmentsKeepsSpeakers(unittest.IsolatedAsyncioTestCase):
+    """A tagged segment's speaker runs keep their speakers, so only the last is finalized."""
+
+    async def test_two_speaker_runs_keep_their_speakers_and_only_the_last_is_finalized(self):
+        stt = _TwoSpeakerSTT()
+        _tag_bot_segments(stt, deque([1.0]))
+        pushed: list = []
+
+        async def record(_self, frame, direction=None):
+            pushed.append(frame)
+
+        with patch.object(AIService, "push_frame", record):
+            await stt._push_segment_frames(b"audio")
+
+        runs = [f for f in pushed if isinstance(f, TranscriptionFrame)]
+        self.assertEqual(
+            [(f.text, f.speaker.label if f.speaker else None, f.finalized) for f in runs],
+            [("Hi there.", "0", False), ("Hello.", "1", True)],
+        )
+
+    async def test_a_tagged_transcript_keeps_every_field_it_was_built_with(self):
+        original = TranscriptionFrame(
+            "Hi there.",
+            "bot",
+            "2026-11-14T00:00:00Z",
+            Language.EN,
+            result={"raw": True},
+            finalized=True,
+            speaker=TranscriptionSpeaker("0", 1),
+            perception=[PerceptionSignal("tone", labels=[("calm", 0.9)])],
+        )
+
+        class _OneFrameSTT(SegmentedSTTService):
+            async def run_stt(self, audio: bytes):
+                yield original
+
+        stt = _OneFrameSTT()
+        _tag_bot_segments(stt, deque([1.0]))
+        tagged = [f async for f in stt.run_stt(b"audio")][0]
+
+        self.assertIsInstance(tagged, _BotSegmentTranscriptionFrame)
+        self.assertEqual(tagged.segment_started_at, 1.0)
+        for f in dataclasses.fields(TranscriptionFrame):
+            if f.init:
+                with self.subTest(field=f.name):
+                    self.assertEqual(getattr(tagged, f.name), getattr(original, f.name))
 
 
 class TestBotTranscribed(unittest.IsolatedAsyncioTestCase):
@@ -2829,7 +2965,7 @@ class TestEvalsHarnessIntegration(unittest.IsolatedAsyncioTestCase):
             def add_assistant_message(self, text):
                 pass
 
-            async def evaluate(self, criterion):
+            async def evaluate(self, criterion, *, allow_continue=None):
                 raise AssertionError("unreachable")
 
         scenario = EvalScriptScenario(
@@ -3647,6 +3783,131 @@ class TestSessionFromScenario(unittest.TestCase):
     def test_other_objects_are_rejected(self):
         with self.assertRaises(TypeError):
             EvalSession.from_scenario({"name": "x"}, "ws://localhost:0")  # type: ignore[arg-type]
+
+
+def _metrics(**kinds) -> dict:
+    return {"type": "metrics", "data": kinds}
+
+
+class TestMetricsEvent(unittest.IsolatedAsyncioTestCase):
+    """The bot's metrics reach the harness as sent, kept apart from its other events."""
+
+    def test_a_metrics_message_becomes_an_event_with_its_data(self):
+        data = {"ttfb": [{"processor": "DeepgramSTTService#0", "value": 0.31}]}
+        frame = InputTransportMessageFrame(
+            message={"label": RTVI.MESSAGE_LABEL, "type": "metrics", "data": data}
+        )
+        self.assertEqual(_stream().frame_to_event(frame), {"type": "metrics", "data": data})
+
+    async def test_metrics_are_recorded_apart_from_the_events_seen(self):
+        s = _stream()
+        await s.append({"type": "llm_started"})
+        await s.append(_metrics(ttfb=[{"processor": "LLM#0", "value": 0.2}]))
+        self.assertEqual([e["type"] for e in s.events_seen], ["llm_started"])
+        self.assertEqual([e["type"] for e in s.metrics], ["metrics"])
+        self.assertIn("at", s.metrics[0])
+
+    async def test_the_result_carries_every_report_with_its_time(self):
+        async def on_progress(_):
+            pass
+
+        stream = _stream()
+        driver = EvalScriptDriver(
+            scenario=EvalScriptScenario(name="t", turns=[]),
+            default_timeout_ms=5000,
+            client=None,  # type: ignore[arg-type]
+            stream=stream,
+            judge=None,
+            trace=EvalTrace(),
+            progress=on_progress,
+        )
+        data = {"ttfb": [{"processor": "STT#0", "value": 0.3}]}
+        await stream.append({"type": "metrics", "data": data, "at": 1.5})
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.bot_metrics, [{"at": 1.5, "data": data}])
+
+    async def test_an_expectation_takes_the_report_holding_its_metric(self):
+        m = _matcher()
+        await m._stream.append(_metrics(processing=[{"processor": "STT#0", "value": 0.01}]))
+        await m._stream.append(_metrics(ttfb=[{"processor": "LLM#0", "value": 0.4}]))
+        await m._stream.append(
+            _metrics(
+                ttfb=[{"processor": "DeepgramSTTService#0", "value": 0.31}],
+                processing=[{"processor": "DeepgramSTTService#0", "value": 0.02}],
+            )
+        )
+        expectation = EvalExpectation(event="metrics", metric="ttfb", processor="STT")
+        failure = await m.match(expectation, time.monotonic(), 1000, 0, 0)
+        self.assertIsNone(failure)
+        self.assertEqual(
+            json.loads(m.last_match_text),
+            {"ttfb": [{"processor": "DeepgramSTTService#0", "value": 0.31}]},
+        )
+
+    async def test_the_zero_reported_at_start_is_not_a_measurement(self):
+        m = _matcher()
+        await m._stream.append(_metrics(ttfb=[{"processor": "STT#0", "value": 0.0}]))
+        expectation = EvalExpectation(event="metrics", metric="ttfb")
+        with self.assertRaises(TimeoutError):
+            await m.match(expectation, time.monotonic(), 50, 0, 0)
+
+    async def test_a_bare_expectation_takes_any_report(self):
+        m = _matcher()
+        await m._stream.append(_metrics(tokens=[{"prompt_tokens": 12, "completion_tokens": 3}]))
+        failure = await m.match(EvalExpectation(event="metrics"), time.monotonic(), 1000, 0, 0)
+        self.assertIsNone(failure)
+
+    async def test_a_report_from_earlier_in_the_turn_is_found_from_turn_start(self):
+        m = _matcher()
+        m.reset_turn()
+        await m._stream.append(_metrics(ttfb=[{"processor": "STT#0", "value": 0.3}]))
+        await m._stream.append({"type": "user_transcription", "transcript": "hello"})
+        first = EvalExpectation(event="user_transcription")
+        self.assertIsNone(await m.match(first, time.monotonic(), 1000, 0, 0))
+        looking_back = EvalExpectation(event="metrics", metric="ttfb", check_from="turn_start")
+        self.assertIsNone(await m.match(looking_back, time.monotonic(), 1000, 0, 1))
+
+
+class TestServerMessageEvent(unittest.IsolatedAsyncioTestCase):
+    """A message of the bot's own making is an event a scenario can read."""
+
+    @staticmethod
+    def _frame(data) -> InputTransportMessageFrame:
+        return InputTransportMessageFrame(
+            message={"label": RTVI.MESSAGE_LABEL, "type": "server-message", "data": data}
+        )
+
+    def test_a_server_message_becomes_an_event_with_its_data_and_its_text(self):
+        data = {"done": True, "transcript": "héllo"}
+        self.assertEqual(
+            _stream().frame_to_event(self._frame(data)),
+            {
+                "type": "server_message",
+                "data": data,
+                "text": '{"done": true, "transcript": "héllo"}',
+            },
+        )
+
+    def test_string_data_is_its_own_text(self):
+        event = _stream().frame_to_event(self._frame("finished"))
+        self.assertEqual((event["data"], event["text"]), ("finished", "finished"))
+
+    async def test_an_expectation_reads_the_data_and_records_it(self):
+        m = _matcher()
+        data = {"kind": "result", "ttfb": 0.31}
+        await m._stream.append(m._stream.frame_to_event(self._frame(data)))
+        expectation = EvalExpectation(event="server_message", text_contains='"kind": "result"')
+        self.assertIsNone(await m.match(expectation, time.monotonic(), 1000, 0, 0))
+        self.assertEqual(json.loads(m.last_match_text), data)
+
+    async def test_a_content_check_judges_the_next_message(self):
+        # As for any event: the next one of the type is the one checked.
+        m = _matcher()
+        await m._stream.append(m._stream.frame_to_event(self._frame({"kind": "progress"})))
+        expectation = EvalExpectation(event="server_message", text_contains='"kind": "result"')
+        failure = await m.match(expectation, time.monotonic(), 1000, 0, 0)
+        self.assertIsNotNone(failure)
+        self.assertEqual(failure.kind, "text_mismatch")
 
 
 class TestBotImageEvent(unittest.TestCase):

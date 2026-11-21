@@ -14,7 +14,7 @@ import pytest
 
 import pipecat.services.heygen.video as heygen_video
 from pipecat.audio.utils import create_stream_resampler
-from pipecat.frames.frames import OutputAudioRawFrame, TTSAudioRawFrame
+from pipecat.frames.frames import OutputAudioRawFrame, SpeechOutputAudioRawFrame, TTSAudioRawFrame
 from pipecat.services.heygen.client import HEY_GEN_SAMPLE_RATE
 from pipecat.services.heygen.video import HeyGenVideoService
 from pipecat.transports.heygen.transport import HeyGenOutputTransport, HeyGenParams
@@ -94,3 +94,26 @@ async def test_the_transport_sends_the_resampler_tail_before_ending_the_speech()
     await transport._send_resampler_tail("event")
 
     assert b"".join(spoken) == await _resampled(clip, 16000)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frame_type", [TTSAudioRawFrame, SpeechOutputAudioRawFrame])
+async def test_the_bot_voice_reaches_the_avatar_instead_of_downstream(frame_type):
+    service, client, spoken = _video_service()
+    service.push_frame = AsyncMock()
+    clip = _tone(HEY_GEN_SAMPLE_RATE, 4800)
+    task = asyncio.create_task(service._send_task_handler())
+
+    await service.process_frame(
+        frame_type(clip, HEY_GEN_SAMPLE_RATE, 1), heygen_video.FrameDirection.DOWNSTREAM
+    )
+
+    async def utterance_ended():
+        while not client.agent_speak_end.await_count:
+            await asyncio.sleep(0.05)
+
+    await asyncio.wait_for(utterance_ended(), timeout=2)
+    task.cancel()
+
+    assert b"".join(spoken) == await _resampled(clip, HEY_GEN_SAMPLE_RATE)
+    service.push_frame.assert_not_awaited()

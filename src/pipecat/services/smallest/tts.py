@@ -248,7 +248,7 @@ class SmallestTTSService(InterruptibleTTSService):
         # are detected by a change in the message ``request_id`` (Smallest emits a
         # single ``complete`` for the whole turn, not one per request). Reset per
         # turn in on_turn_context_created(). This mirrors the cumulative-offset
-        # pattern used by the Rime, Inworld, and Hume TTS services.
+        # pattern used by the Rime and Inworld TTS services.
         self._cumulative_time: float = 0.0  # offset from prior requests in the turn
         self._request_end_time: float = 0.0  # max word end seen in the in-flight request
         self._wt_request_id: str | None = None  # request_id of the in-flight request

@@ -171,6 +171,7 @@ IMPORTS = {
     "speechify_tts": ["from pipecat.services.speechify.tts import SpeechifyHttpTTSService"],
     "xai_tts": ["from pipecat.services.xai.tts import XAITTSService"],
     "xtts_tts": ["from pipecat.services.xtts.tts import XTTSService"],
+    "zoom_ai_tts": ["from pipecat.services.zoom_ai.tts import ZoomAIHttpTTSService"],
     # Realtime Services
     "aws_nova_realtime": ["from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService"],
     "azure_realtime": [

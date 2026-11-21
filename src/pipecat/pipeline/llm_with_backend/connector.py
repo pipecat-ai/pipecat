@@ -18,7 +18,12 @@ from typing import Any
 from loguru import logger
 
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
-from pipecat.frames.frames import FunctionCallResultProperties, LLMMessagesAppendFrame
+from pipecat.frames.frames import (
+    BackgroundWorkFinishedFrame,
+    BackgroundWorkStartedFrame,
+    FunctionCallResultProperties,
+    LLMMessagesAppendFrame,
+)
 from pipecat.pipeline.llm_with_backend.prompts import (
     BACKEND_MESSAGE_PREFIX,
     BACKEND_MESSAGE_RELAY_INSTRUCTION,
@@ -133,6 +138,7 @@ class BackendConnector:
         self._context: ConnectorContext | None = None
         self._tools: list[FunctionSchema] = []
         self._session: _BackendSession | None = None
+        self._backend_working = False
         self._session_open = asyncio.Event()
 
     @property
@@ -244,6 +250,9 @@ class BackendConnector:
         finally:
             self._session = None
             self._session_open.clear()
+        # The session ended on its own, with the frontend still running: work
+        # it was in the middle of is over.
+        await self._finish_work(frontend)
 
     async def _open_session(self) -> _BackendSession:
         """The session, once it is open; waits for it up to the timeout."""
@@ -280,6 +289,7 @@ class BackendConnector:
             {"status": "delegated", "backend": status},
             properties=FunctionCallResultProperties(run_llm=self._respond_on_delegate),
         )
+        await self._start_work(params.llm)
 
     async def deliver(self, frontend: LLMService[Any], event: BackendEvent) -> None:
         """Deliver one thing the backend produced to the frontend.
@@ -334,6 +344,7 @@ class BackendConnector:
         elif isinstance(event, BackendError):
             await self._trace(frontend, event="error", error=event.error)
             logger.warning(f"Backend error: {event.error}")
+            await self._finish_work(frontend)
             await self._append(
                 frontend,
                 LLMMessagesAppendFrame(
@@ -352,6 +363,27 @@ class BackendConnector:
         elif isinstance(event, BackendIdle):
             await self._trace(frontend, event="idle")
             logger.debug("Backend is idle")
+            await self._finish_work(frontend)
+
+    async def _start_work(self, frontend: LLMService[Any]) -> None:
+        """Tell the pipeline the backend's background work has started, once per lull."""
+        assert self._context is not None, "connector not bound"
+        if self._backend_working:
+            return
+        self._backend_working = True
+        await frontend.broadcast_frame(
+            BackgroundWorkStartedFrame, work_id=self._context.backend_name
+        )
+
+    async def _finish_work(self, frontend: LLMService[Any]) -> None:
+        """Tell the pipeline the backend's background work is over, if any was in progress."""
+        assert self._context is not None, "connector not bound"
+        if not self._backend_working:
+            return
+        self._backend_working = False
+        await frontend.broadcast_frame(
+            BackgroundWorkFinishedFrame, work_id=self._context.backend_name
+        )
 
     async def _trace(self, frontend: LLMService[Any], **data: Any) -> None:
         """Send one exchange with the backend to the client, when tracing is on."""

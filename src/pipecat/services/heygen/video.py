@@ -66,6 +66,10 @@ class HeyGenVideoService(AIService):
     audio/video streaming, avatar animations, and user interactions. It processes various frame types
     to coordinate the avatar's behavior and maintains synchronization between audio and video streams.
 
+    The avatar speaks the bot's voice: ``TTSAudioRawFrame`` from a TTS service,
+    or ``SpeechOutputAudioRawFrame`` from a speech-to-speech service that
+    streams its voice in real time, such as ``OpenAILiveLLMService``.
+
     The service supports:
 
     - Real-time avatar animation based on audio input
@@ -254,7 +258,7 @@ class HeyGenVideoService(AIService):
         Handles different types of frames to manage avatar interactions:
         - UserStartedSpeakingFrame: Activates avatar's listening animation
         - UserStoppedSpeakingFrame: Deactivates avatar's listening state
-        - TTSAudioRawFrame: Processes audio for avatar speech
+        - TTSAudioRawFrame, SpeechOutputAudioRawFrame: Processes audio for avatar speech
         - Other frames: Forwards them through the pipeline
 
         Args:
@@ -274,7 +278,7 @@ class HeyGenVideoService(AIService):
             if self._client:
                 self._client.transport_ready()
             await self.push_frame(frame, direction)
-        elif isinstance(frame, TTSAudioRawFrame):
+        elif isinstance(frame, (TTSAudioRawFrame, SpeechOutputAudioRawFrame)):
             await self._handle_audio_frame(frame)
         elif isinstance(frame, TTSStartedFrame):
             await self.start_ttfb_metrics()
@@ -378,7 +382,7 @@ class HeyGenVideoService(AIService):
                 frame = await asyncio.wait_for(self._queue.get(), timeout=AVATAR_VAD_STOP_SECS)
                 if self._is_interrupting:
                     break
-                if isinstance(frame, TTSAudioRawFrame):
+                if isinstance(frame, (TTSAudioRawFrame, SpeechOutputAudioRawFrame)):
                     # starting the new inference
                     if self._event_id is None:
                         self._event_id = str(frame.id)

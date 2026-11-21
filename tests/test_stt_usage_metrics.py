@@ -11,10 +11,18 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from pipecat.frames.frames import Frame, InputAudioRawFrame, MetricsFrame, STTMetadataFrame
+from pipecat.frames.frames import (
+    Frame,
+    InputAudioRawFrame,
+    MetricsFrame,
+    STTMetadataFrame,
+    TranscriptionFinalizedFrame,
+    TranscriptionFrame,
+)
 from pipecat.metrics.metrics import STTUsage, STTUsageMetricsData
 from pipecat.pipeline.worker import PipelineParams
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
+from pipecat.services.ai_service import AIService
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import STTService, WebsocketSTTService
 from pipecat.tests.utils import run_test
@@ -174,9 +182,13 @@ except ImportError:
 class _FakeSpan:
     def __init__(self):
         self.attributes = {}
+        self.ended = False
 
     def set_attribute(self, key, value):
         self.attributes[key] = value
+
+    def end(self, end_time=None):
+        self.ended = True
 
 
 @pytest.mark.skipif(not HAS_OPENTELEMETRY, reason="opentelemetry not installed")
@@ -204,3 +216,33 @@ async def test_traced_stt_accumulates_pending_usage_for_span():
 
     pending = service._stt_span_state["pending_usage"]
     assert pending.audio_seconds == pytest.approx(1.5)
+
+
+@pytest.mark.skipif(not HAS_OPENTELEMETRY, reason="opentelemetry not installed")
+@pytest.mark.asyncio
+async def test_traced_stt_closes_the_span_on_a_finalization_without_text(monkeypatch):
+    """The text opened the span; its finalization arrives later, as a frame of its own."""
+    from pipecat.services.deepgram.stt import DeepgramSTTService
+
+    async def fake_push_frame(self, frame, direction=None):
+        pass
+
+    monkeypatch.setattr(AIService, "push_frame", fake_push_frame)
+
+    service = DeepgramSTTService(api_key="test-key")
+    service._tracing_enabled = True
+    await service.start_stt_usage_metrics(STTUsage(audio_seconds=1.0))
+    span = _FakeSpan()
+    state = service._stt_span_state
+    state["span"] = span
+
+    await service.push_frame(TranscriptionFrame(text="Hi.", user_id="", timestamp="now"))
+    assert not span.ended
+
+    await service.push_frame(TranscriptionFinalizedFrame())
+
+    assert span.ended
+    assert span.attributes["is_final"] is True
+    assert span.attributes["transcript"] == "Hi."
+    assert span.attributes["metrics.audio_seconds"] == 1.0
+    assert state["span"] is None

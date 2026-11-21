@@ -178,7 +178,7 @@ class TestSipRunnerArguments(unittest.TestCase):
         self.assertEqual(
             args.extra_params, ("medianat=stun", "stunserver=stun:stun.l.google.com:19302")
         )
-        self.assertEqual(args.reg_interval, 600)
+        self.assertEqual(args.reg_interval, 240)
         self.assertEqual(args.rtp_timeout, 0)
         self.assertIsNone(args.instance_id)
         self.assertEqual(args.native_log_level, "warning")

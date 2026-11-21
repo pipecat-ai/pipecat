@@ -810,7 +810,7 @@ class GoogleSTTService(STTService):
         logger.debug(f"Switching STT languages to: {languages}")
         await self._update_settings(self.Settings(languages=list(languages)))
 
-    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
         """Apply settings delta and reconnect if anything changed.
 
         Handles ``language`` from base ``set_language`` by converting it to
@@ -824,8 +824,11 @@ class GoogleSTTService(STTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
+        if not isinstance(delta, self.Settings):
+            delta = self.Settings.from_mapping(delta.given_fields())
+
         # If base set_language sent a Language value, convert to languages list
-        if is_given(delta.language):
+        if is_given(delta.language) and delta.language is not None:
             delta.languages = [cast(Language, delta.language)]
             # Clear language so the base class doesn't try to store it
             delta.language = NOT_GIVEN

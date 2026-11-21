@@ -32,7 +32,8 @@ def add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path)
     file loads with a subclass of the loading class whose own includes resolve
     against that file's directory, so a fragment's includes work wherever the
     fragment is included from, and scalars and constructors get the same
-    treatment as in the top-level document.
+    treatment as in the top-level document. A file that includes itself,
+    directly or through the files it includes, is an error.
 
     This mutates ``loader_class``. Register on a private subclass rather than
     on ``yaml.SafeLoader`` itself so the constructor has no global side
@@ -49,8 +50,19 @@ def add_include_constructor(loader_class: type[yaml.SafeLoader], base_dir: Path)
                 None, None, "!include expects a file path", node.start_mark
             )
         include_path = base_dir / str(loader.construct_scalar(node))
+        # The files being loaded on the way to this one. A file among them
+        # that is included again would include itself without end.
+        including: tuple[Path, ...] = getattr(loader, "_including", ())
+        resolved = include_path.resolve()
+        if resolved in including:
+            chain = " -> ".join(str(p) for p in (*including, resolved))
+            raise yaml.constructor.ConstructorError(
+                None, None, f"!include cycle: {chain}", node.start_mark
+            )
+        included_loader = include_loader(include_path.parent, base=type(loader))
+        included_loader._including = (*including, resolved)  # type: ignore[attr-defined]
         with include_path.open(encoding="utf-8") as f:
-            return yaml.load(f, include_loader(include_path.parent, base=type(loader)))
+            return yaml.load(f, included_loader)
 
     loader_class.add_constructor("!include", _include)
 

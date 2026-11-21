@@ -132,6 +132,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             events_seen=events_seen,
             debug_log=debug_log,
             skipped=skipped,
+            bot_metrics=self.bot_metrics(),
         )
 
     def record_failure(self, failure: EvalAssertionFailure) -> None:

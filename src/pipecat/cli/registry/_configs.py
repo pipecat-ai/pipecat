@@ -655,6 +655,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "zoom_ai_tts": (
+        "ZoomAIHttpTTSService(\n"
+        '        api_key=os.getenv("ZOOM_AI_API_KEY"),\n'
+        "        aiohttp_session=session,\n"
+        "        settings=ZoomAIHttpTTSService.Settings(\n"
+        '            voice=os.getenv("ZOOM_AI_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     # Realtime Services
     "aws_nova_realtime": (
         "llm = AWSNovaSonicLLMService(\n"

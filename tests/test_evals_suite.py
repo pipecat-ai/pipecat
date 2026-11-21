@@ -819,6 +819,9 @@ class TestScenarioRecords(unittest.TestCase):
                 )
             ],
             duration_ms=60,
+            bot_metrics=[
+                {"at": 1.2, "data": {"ttfb": [{"processor": "STT#0", "value": 0.31}]}},
+            ],
         )
 
     def test_result_roundtrips_through_the_worker_json(self):
@@ -860,6 +863,24 @@ class TestScenarioRecords(unittest.TestCase):
             )
             self.assertNotIn("events_seen", record)
 
+    def test_results_jsonl_record_keeps_the_bot_metrics_of_a_passed_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="voice/x.py",
+                scenario="greet",
+                scenario_path=base / "greet.yaml",
+                status="done",
+                result=self._result(),
+            )
+            _append_result(base / "results.jsonl", run, "voice_x.py__greet", base, None)
+            record = json.loads((base / "results.jsonl").read_text())
+            self.assertTrue(record["passed"])
+            self.assertEqual(
+                record["bot_metrics"],
+                [{"at": 1.2, "data": {"ttfb": [{"processor": "STT#0", "value": 0.31}]}}],
+            )
+
 
 class TestSimulationRecords(unittest.TestCase):
     def test_result_roundtrips_through_the_worker_json(self):
@@ -895,6 +916,7 @@ class TestSimulationRecords(unittest.TestCase):
             confidence=0.8,
             probabilities={"yes": 0.8, "no": 0.2},
             success="the bot booked a table",
+            bot_metrics=[{"at": 0.5, "data": {"tokens": [{"prompt_tokens": 12}]}}],
         )
         rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
         self.assertEqual(rebuilt, result)
@@ -945,6 +967,7 @@ class TestSimulationRecords(unittest.TestCase):
                     turns=3,
                     ended_by="bot",
                     events_seen=[{"type": "llm_started"}],
+                    bot_metrics=[{"at": 0.5, "data": {"tokens": [{"prompt_tokens": 12}]}}],
                     success="the bot booked a table",
                     metrics=[
                         EvalSimulationMetricScore(
@@ -965,6 +988,9 @@ class TestSimulationRecords(unittest.TestCase):
             self.assertEqual(record["reason"], "no table")
             self.assertEqual(record["success"], "the bot booked a table")
             self.assertEqual(record["metrics"][0]["criterion"], "stays polite")
+            self.assertEqual(
+                record["bot_metrics"], [{"at": 0.5, "data": {"tokens": [{"prompt_tokens": 12}]}}]
+            )
             self.assertEqual(record["events_seen"], [{"type": "llm_started"}])
 
 

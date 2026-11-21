@@ -579,7 +579,8 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         # The slowest reply took 1.4 s, over the 1 s bound; the greeting had no send before it.
         self.assertEqual((by_name["latency"].value, by_name["latency"].passed), (1.4, False))
         self.assertEqual(
-            by_name["latency"].reason, "slowest reply 1.40 s to the first token, at most 1"
+            by_name["latency"].reason,
+            "slowest reply 1.40 s from the persona's send to the first token, at most 1",
         )
         self.assertEqual((by_name["words"].value, by_name["words"].passed), (5.0, False))
         self.assertEqual((by_name["turns"].value, by_name["turns"].passed), (2.0, True))
@@ -587,7 +588,8 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.succeeded)
         self.assertFalse(result.passed)
         self.assertEqual(
-            result.failure, "latency: slowest reply 1.40 s to the first token, at most 1"
+            result.failure,
+            "latency: slowest reply 1.40 s from the persona's send to the first token, at most 1",
         )
 
     async def test_a_required_measurement_without_a_value_fails_a_successful_goal(self):
@@ -944,6 +946,144 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.passed)
         self.assertEqual(result.ended_by, "error")
         self.assertEqual(result.reason, "refused")
+
+
+class TestReplyLatency(unittest.IsolatedAsyncioTestCase):
+    """Latency is timed from the caller's side by its modality, to the bot's side by its own."""
+
+    # (user_audio, bot_audio, events after the greeting, expected value, expected reason).
+    # Times are seconds on the stream's clock. In the first three cases the reply
+    # follows an LLM response that only calls a function, which has no text and
+    # isn't the reply.
+    CASES = [
+        (
+            False,
+            False,
+            [
+                {"type": PERSONA_TURN_EVENT, "text": "A table for two.", "at": 1.0},
+                {"type": "llm_response", "text": "", "at": 1.5},
+                {"type": "llm_response", "text": "Done.", "at": 3.0, "started_at": 2.4},
+            ],
+            1.4,
+            "slowest reply 1.40 s from the persona's send to the first token",
+        ),
+        (
+            True,
+            False,
+            [
+                # The persona's line is sent before its audio has been heard.
+                {"type": PERSONA_TURN_EVENT, "text": "A table for two.", "at": 1.0},
+                {"type": "user_started_speaking", "at": 1.2},
+                {"type": "user_stopped_speaking", "at": 3.0},
+                {"type": "llm_response", "text": "", "at": 3.4},
+                {"type": "llm_response", "text": "Done.", "at": 4.5, "started_at": 3.9},
+            ],
+            0.9,
+            "slowest reply 0.90 s from the persona stopping to the first token",
+        ),
+        (
+            False,
+            True,
+            [
+                # Text input never makes the bot report the persona stopping.
+                {"type": PERSONA_TURN_EVENT, "text": "A table for two.", "at": 1.0},
+                {"type": "llm_response", "text": "", "at": 1.5},
+                {"type": "bot_started_speaking", "at": 2.2},
+                {"type": "tts_response", "text": "Done.", "at": 2.3},
+            ],
+            1.2,
+            "slowest reply 1.20 s from the persona's send to the bot starting to speak",
+        ),
+        (
+            True,
+            True,
+            [
+                {"type": PERSONA_TURN_EVENT, "text": "A table for two.", "at": 1.0},
+                {"type": "user_stopped_speaking", "at": 3.0},
+                # The bot's report of its first spoken word lags its audio.
+                {"type": "bot_started_speaking", "at": 3.8},
+                {"type": "tts_response", "text": "Done.", "at": 3.9},
+            ],
+            0.8,
+            "slowest reply 0.80 s from the persona stopping to the bot starting to speak",
+        ),
+    ]
+
+    async def test_each_end_is_timed_by_its_own_sides_modality(self):
+        for user_audio, bot_audio, events, value, reason in self.CASES:
+            with self.subTest(user_audio=user_audio, bot_audio=bot_audio):
+                simulation = _simulation(user_audio=user_audio, bot_audio=bot_audio)
+                driver, stream, _, _ = _driver(simulation, _FakeConversationJudge(["yes"]))
+                await stream.append({"type": "llm_response", "text": "Hi.", "at": 0.5})
+                for event in events:
+                    await stream.append(event)
+                self.assertEqual(driver._measurement("latency"), (value, reason))
+
+    async def test_a_spoken_turn_the_bot_ends_twice_is_timed_from_the_later_end(self):
+        # A pause mid-line makes the bot end the persona's turn once too early.
+        simulation = _simulation(user_audio=True)
+        driver, stream, _, _ = _driver(simulation, _FakeConversationJudge(["yes"]))
+        for event in [
+            {"type": PERSONA_TURN_EVENT, "text": "A table for two, at seven.", "at": 1.0},
+            {"type": "user_stopped_speaking", "at": 2.0},
+            {"type": "user_started_speaking", "at": 2.2},
+            {"type": "user_stopped_speaking", "at": 3.0},
+            {"type": "llm_response", "text": "Done.", "at": 4.0, "started_at": 3.5},
+        ]:
+            await stream.append(event)
+        self.assertEqual(
+            driver._measurement("latency"),
+            (0.5, "slowest reply 0.50 s from the persona stopping to the first token"),
+        )
+
+    async def _run_ending_with_an_unanswered_turn(self, bot_audio: bool, *, hang_up: bool):
+        """A reply in 0.05 s, then a turn the bot answers only with a function call."""
+        metric = EvalSimulationMetric("latency", measure="latency", max_value=0.3)
+        simulation = _simulation(bot_audio=bot_audio, max_silence_s=0.4, metrics=[metric])
+        driver, stream, llm, _ = _driver(simulation, _FakeConversationJudge(["yes"]))
+        reply = (
+            {"type": "bot_started_speaking"}
+            if bot_audio
+            else {"type": "llm_response", "text": "Sure."}
+        )
+
+        async def conversation():
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "A table for two?"})
+            await asyncio.sleep(0.05)
+            await stream.append(reply)
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "At seven."})
+            await stream.append({"type": "llm_response", "text": ""})
+            if hang_up:
+                await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(
+            failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
+        )
+        return result, {m.name: m for m in result.metrics}["latency"]
+
+    async def test_a_turn_unanswered_when_the_run_falls_silent_counts_its_wait(self):
+        for bot_audio in (False, True):
+            with self.subTest(bot_audio=bot_audio):
+                result, latency = await self._run_ending_with_an_unanswered_turn(
+                    bot_audio, hang_up=False
+                )
+                self.assertEqual(result.ended_by, "silence")
+                # The caller waited out the silence window, well over the bound.
+                self.assertGreaterEqual(latency.value, 0.4)
+                self.assertFalse(latency.passed)
+                self.assertIn(
+                    "the last turn unanswered when the run ended by silence", latency.reason
+                )
+                self.assertFalse(result.passed)
+
+    async def test_a_turn_left_when_the_persona_hangs_up_is_not_counted(self):
+        result, latency = await self._run_ending_with_an_unanswered_turn(False, hang_up=True)
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertLess(latency.value, 0.3)
+        self.assertTrue(latency.passed)
 
 
 class TestClosingTurn(unittest.IsolatedAsyncioTestCase):

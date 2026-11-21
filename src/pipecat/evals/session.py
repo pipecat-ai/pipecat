@@ -364,7 +364,9 @@ class EvalSession(BaseObject, Generic[R]):
         Raises:
             ValueError: If ``persona_llm`` is given for a scripted scenario,
                 which has no persona, or ``on_progress`` for a simulation,
-                which reports its progress through the event handler alone.
+                which reports its progress through the event handler alone,
+                or if the bot's STT, ``bot_stt`` or the one built from
+                ``judge.transcription``, is not a ``SegmentedSTTService``.
             TypeError: If ``scenario`` is neither kind.
         """
         # Imported here rather than at module level: both subclasses import this module.

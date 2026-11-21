@@ -25,7 +25,8 @@ scenario ``event:``             RTVI server message(s)
 ``llm_started``                 ``bot-llm-started``
 ``llm_response``                the LLM text: ``bot-llm-text`` joined at ``bot-llm-stopped``
 ``llm_marker``                  ``bot-llm-marker``: the sideband marker the LLM emitted in a
-                                response, such as a turn-completion marker, with its
+                                response, such as a turn-completion marker or the
+                                silent mark of a reply dropped unspoken, with its
                                 ``kind`` and the response's raw text; sent when the
                                 response ends, only on request
 ``tts_response``                the TTS's spoken text: one segment per ``bot-tts-text``
@@ -50,6 +51,13 @@ scenario ``event:``             RTVI server message(s)
                                 acknowledgment the user said while the bot
                                 talked, which neither interrupted it nor reached
                                 the LLM
+``metrics``                     ``metrics``: what the bot's processors measured (TTFB,
+                                processing time, usage), as sent, under ``data``.
+                                Kept in :attr:`EvalEventStream.metrics` and out of
+                                ``events_seen``
+``server_message``              ``server-message``: a message of the bot's own making
+                                (an ``RTVIServerMessageFrame``), with its ``data``
+                                and, as ``text``, the data as JSON
 ``expression``                  ``bot-output`` in expressive conversation (alpha):
                                 expression the bot's TTS performed, in the tags
                                 the LLM writes: ``<<excited>>`` where the delivery of
@@ -61,6 +69,7 @@ scenario ``event:``             RTVI server message(s)
 """
 
 import asyncio
+import json
 import math
 import time
 from collections.abc import Callable
@@ -128,6 +137,10 @@ class EvalEventStream:
         self._claimed: set[int] = set()
         # Every event in arrival order, for the result's diagnostics.
         self.events_seen: list[dict] = []
+        # Every metrics message the bot sent, in arrival order. Kept apart from
+        # events_seen: a bot reports several per turn, and they are measurements
+        # to read rather than the behavior a failed run is diagnosed from.
+        self.metrics: list[dict] = []
         # When each event type last arrived, for send_after anchoring.
         self.latest_event_times: dict[str, float] = {}
         # Accumulates the bot's LLM text for the current response, emitted as one
@@ -305,16 +318,21 @@ class EvalEventStream:
         """Queue an event for the drivers.
 
         Stamps its arrival time as ``at`` (seconds since the stream began) unless
-        it has one, records it, and logs it.
+        it has one, records it, and logs it. A ``metrics`` event is recorded in
+        :attr:`metrics` rather than :attr:`events_seen`.
 
         Args:
             event: The event dict, with at least a ``type``.
         """
         event.setdefault("at", self.elapsed())
         self.touch()
-        self.events_seen.append(event)
+        if event["type"] == "metrics":
+            self.metrics.append(event)
+            preview = ", ".join(event.get("data") or {})
+        else:
+            self.events_seen.append(event)
+            preview = event.get("text") or event.get("transcript") or event.get("name") or ""
         self.latest_event_times[event["type"]] = time.monotonic()
-        preview = event.get("text") or event.get("transcript") or event.get("name") or ""
         self._trace.log(f"event: {event['type']}" + (f"  {str(preview)!r}" if preview else ""))
         await self._queue.put(event)
 
@@ -601,8 +619,15 @@ class EvalEventStream:
         self._observing = True
 
     def _interrupted(self) -> None:
-        """The bot reported an interruption: drop its pending output and wait for a fresh reply."""
-        self.drop_pending_bot_output("on interruption")
+        """The bot reported an interruption: drop its unfinished response and wait for a fresh reply.
+
+        The queue is left as it is. The bot reports the user's turn starting
+        just ahead of the interruption, and a driver may not have read those
+        reports yet. The interrupted response's text and spoken turn that
+        still arrive are held back until the bot's next response starts (see
+        ``_awaiting_reply``), and a send drops whatever is left before it.
+        """
+        self._text_buffer = []
         self._awaiting_reply = True
         self._bot_quiet.set()
 
@@ -626,6 +651,14 @@ class EvalEventStream:
             return self._bot_backchannel_event(data) or self._expression_event(data)
         elif msg_type == "user-input":
             return self._user_input_event(data)
+        elif msg_type == "metrics":
+            return {"type": "metrics", "data": dict(data)}
+        elif msg_type == "server-message":
+            # The data is the bot's own, in any JSON shape; its text is what a
+            # scenario's content checks read and what a match records.
+            data = message.get("data")
+            text = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+            return {"type": "server_message", "data": data, "text": text}
         elif msg_type == EVAL_BOT_IMAGE_TYPE:
             return {
                 "type": "image",

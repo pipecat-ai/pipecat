@@ -6,6 +6,7 @@
 
 """Tests for AssemblyAITTSService against a fake Streaming TTS server."""
 
+import asyncio
 import base64
 import json
 import time
@@ -30,6 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.assemblyai import tts as assemblyai_tts
 from pipecat.services.assemblyai.tts import AssemblyAITTSService
+from pipecat.services.tts_service import TextAggregationMode
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transcriptions.language import Language
 
@@ -37,6 +39,79 @@ from pipecat.transcriptions.language import Language
 AUDIO_CHUNK = b"\x01\x02" * 1920
 CHUNK_MS = 80
 WORD_MS = 50
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protected", [False, True])
+@pytest.mark.parametrize("fillers", [1, 2])
+async def test_token_speak_frame_preserves_unflushed_llm_request(protected, fillers):
+    """Filler speech does not steal an LLM turn's unflushed request."""
+    captured = {"messages": []}
+    requests = []
+    frames = [LLMFullResponseStartFrame(), LLMTextFrame(text="Before ")]
+    for number in range(fillers):
+        if number:
+            frames.append(LLMTextFrame(text="Middle "))
+        speech = TTSSpeakFrame(text=f"Filler {number}.", append_to_context=False)
+        speech.interruptible = not protected
+        frames.append(speech)
+    frames.extend(
+        [
+            LLMTextFrame(text="after."),
+            LLMFullResponseEndFrame(),
+            SleepFrame(sleep=0.6),
+            BotStoppedSpeakingFrame(),
+        ]
+    )
+    async with serve(_server(captured), "127.0.0.1", 0) as server:
+        service = _service(
+            server, text_aggregation_mode=TextAggregationMode.TOKEN, stop_frame_timeout_s=0.3
+        )
+
+        @service.event_handler("on_tts_request")
+        async def requested(service, context_id, text):
+            requests.append((context_id, text))
+
+        down, up = await asyncio.wait_for(run_test(service, frames_to_send=frames), timeout=5)
+    groups, buffer = [], ""
+    for msg in captured["messages"]:
+        if msg["type"] == "Generate":
+            buffer += msg["text"]
+        elif msg["type"] == "Flush":
+            groups.append(buffer)
+            buffer = ""
+    audio = [f for f in down if isinstance(f, TTSAudioRawFrame)]
+    llm_id = requests[0][0]
+    by_context = {
+        cid: sum(len(f.audio) for f in audio if f.context_id == cid) for cid, _ in requests
+    }
+    print(
+        "protected=",
+        protected,
+        "fillers=",
+        fillers,
+        "groups=",
+        groups,
+        "llm_audio_chunks=",
+        by_context[llm_id] // len(AUDIO_CHUNK),
+        "words=",
+        [f.text for f in down if isinstance(f, TTSTextFrame)],
+    )
+    expected_groups = ["Before "]
+    for number in range(fillers):
+        if number:
+            expected_groups.append("Middle ")
+        expected_groups.append(f"Filler {number}.")
+    expected_groups.append("after.")
+    assert groups == expected_groups
+    assert by_context[llm_id] == len(AUDIO_CHUNK) * 2 * (fillers + 1)
+    for cid, text in requests:
+        if text.startswith("Filler"):
+            assert by_context[cid] == len(AUDIO_CHUNK) * 2
+            assert all(f.interruptible == (not protected) for f in audio if f.context_id == cid)
+    assert all(f.interruptible for f in audio if f.context_id == llm_id)
+    assert not any(isinstance(f, ErrorFrame) for f in up)
+    assert captured["connections"] == 1
 
 
 def _server(

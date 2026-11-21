@@ -10,6 +10,7 @@ import asyncio
 import time
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
+from enum import StrEnum
 from typing import Any, TypeVar
 
 from loguru import logger
@@ -23,12 +24,14 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
     StartFrame,
     STTMetadataFrame,
     STTMuteFrame,
     STTUpdateSettingsFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     TranscriptionSpeaker,
     UserAudioRawFrame,
@@ -44,11 +47,24 @@ from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.deprecation import deprecated, warn_deprecated
+from pipecat.utils.text.transforms.text_transform import TextTransform
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.types import is_given
 
 # Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
 _KEEPALIVE_SILENCE_DURATION = 0.1
+
+
+class TranscriptionType(StrEnum):
+    """The text type an STT service's text transforms see a transcript as.
+
+    Separate from :class:`~pipecat.utils.text.base_text_aggregator.TextType`, the
+    types of the bot's own text, which the RTVI protocol carries.
+    """
+
+    FINAL = "transcription"
+    INTERIM = "interim_transcription"
+
 
 # A provider's own speaker label type (e.g. ``int`` tags or ``str`` labels).
 _SpeakerT = TypeVar("_SpeakerT")
@@ -87,6 +103,14 @@ class STTService(AIService):
     in their ``Settings``, treated as local (changing it does not reconnect).
     ``user_id`` always remains the transport participant.
 
+    ``text_transforms`` rewrite each transcript before the service pushes it,
+    with the text type ``TranscriptionType.FINAL`` for a final transcript and
+    ``TranscriptionType.INTERIM`` for an interim one. Everything after the
+    service sees only the rewritten text, observers included, so a transform
+    can keep text such as a card number out of the context, the client and the
+    logs. A transcription whose text a transform changed loses its ``result``,
+    the provider's response with the text as heard.
+
     Event handlers:
         on_connected: Called when connected to the STT service.
         on_disconnected: Called when disconnected from the STT service.
@@ -118,6 +142,7 @@ class STTService(AIService):
         ttfs_p99_latency: float | None = None,
         keepalive_timeout: float | None = None,
         keepalive_interval: float = 5.0,
+        text_transforms: list[tuple[TranscriptionType | str, TextTransform]] | None = None,
         settings: STTSettings | None = None,
         **kwargs,
     ):
@@ -144,6 +169,10 @@ class STTService(AIService):
                 connection alive. None disables keepalive. Useful for services that
                 close idle connections (e.g. behind a ServiceSwitcher).
             keepalive_interval: Seconds between idle checks when keepalive is enabled.
+            text_transforms: Transforms to rewrite each transcript with before it is
+                pushed, as ``(text_type, transform)`` pairs: ``TranscriptionType.FINAL``,
+                ``TranscriptionType.INTERIM``, or ``"*"`` for both. They run in
+                order.
             settings: The runtime-updatable settings for the STT service.
             **kwargs: Additional arguments passed to the parent AIService.
         """
@@ -200,6 +229,10 @@ class STTService(AIService):
         self._keepalive_task: asyncio.Task | None = None
         self._last_audio_time: float = 0
 
+        self._text_transforms: list[tuple[TranscriptionType | str, TextTransform]] = (
+            text_transforms or []
+        )
+
         # Client-measured audio seconds submitted to the service since the last
         # usage report (see emit_stt_usage_metrics).
         self._stt_usage_pending_seconds: float = 0.0
@@ -227,6 +260,34 @@ class STTService(AIService):
         """
         return self._muted
 
+    def add_text_transformer(
+        self, transform_function: TextTransform, text_type: TranscriptionType | str = "*"
+    ):
+        """Rewrite transcripts of a type with a transform before they are pushed.
+
+        Args:
+            transform_function: The transform, an async callable taking the text
+                and its type and returning the rewritten text.
+            text_type: ``TranscriptionType.FINAL``, ``TranscriptionType.INTERIM``, or
+                ``"*"`` for both. Defaults to ``"*"``.
+        """
+        self._text_transforms.append((text_type, transform_function))
+
+    def remove_text_transformer(
+        self, transform_function: TextTransform, text_type: TranscriptionType | str = "*"
+    ):
+        """Stop rewriting transcripts of a type with a transform.
+
+        Args:
+            transform_function: The transform to remove.
+            text_type: The text type it was added for.
+        """
+        self._text_transforms = [
+            (transform_type, func)
+            for transform_type, func in self._text_transforms
+            if not (transform_type == text_type and func == transform_function)
+        ]
+
     def request_finalize(self):
         """Mark that a finalize request has been sent, awaiting server confirmation.
 
@@ -244,7 +305,8 @@ class STTService(AIService):
 
         Call this when the server response confirms finalization (e.g., Deepgram's
         from_finalize=True). The next TranscriptionFrame pushed will be marked
-        as finalized.
+        as finalized. When the confirmation comes with no text to push, follow
+        it with :meth:`_push_transcription_finalized`.
 
         Only has effect if request_finalize() was previously called.
         """
@@ -517,6 +579,27 @@ class STTService(AIService):
                 )
             )
 
+    async def _push_transcription_finalized(self) -> None:
+        """Push a confirmed finalization that has no transcript to carry it.
+
+        A service's own endpointing can deliver the last of the text before the
+        service is asked to finalize, so its confirmation arrives empty. Call
+        this after :meth:`confirm_finalize` in that case: the transcripts
+        already pushed are confirmed with a
+        :class:`~pipecat.frames.frames.TranscriptionFinalizedFrame`, which the
+        pipeline treats as it does a finalized transcript.
+
+        Only has effect while a confirmed finalization is waiting for a
+        transcript, so a confirmation that arrives after the user started
+        speaking again finalizes nothing.
+        """
+        if not self._finalize_pending:
+            return
+        self._finalize_pending = False
+        await self.push_frame(
+            TranscriptionFinalizedFrame(user_id=self._user_id, timestamp=time_now_iso8601())
+        )
+
     async def _process_assistant_turn(self, text: str) -> None:
         """Called when the assistant's turn completes with the aggregated reply text.
 
@@ -717,15 +800,24 @@ class STTService(AIService):
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream, tracking TranscriptionFrame timestamps for TTFB.
 
+        A transcription going downstream is rewritten with the text transforms
+        first, so nothing after this service sees the text as heard.
+
         Stores the timestamp of each TranscriptionFrame for TTFB calculation.
         If the frame is marked as finalized (via request_finalize/confirm_finalize),
         reports TTFB immediately and cancels any pending timeout. Otherwise, TTFB is
-        reported after a timeout.
+        reported after a timeout. A TranscriptionFinalizedFrame reports TTFB the
+        same way a finalized transcript does.
 
         Args:
             frame: The frame to push.
             direction: The direction to push the frame.
         """
+        if direction == FrameDirection.DOWNSTREAM and isinstance(
+            frame, (TranscriptionFrame, InterimTranscriptionFrame)
+        ):
+            await self._transform_transcription(frame)
+
         if isinstance(frame, TranscriptionFrame):
             # Store the transcript time for TTFB calculation
             self._last_transcript_time = time.time()
@@ -740,8 +832,29 @@ class STTService(AIService):
                 await self.stop_ttfb_metrics()
                 # Cancel the timeout since we've already reported
                 await self._cancel_ttfb_timeout()
+        elif isinstance(frame, TranscriptionFinalizedFrame):
+            # The service has confirmed nothing more is coming, so the wait
+            # for the final transcript ends here.
+            await self.stop_ttfb_metrics()
+            await self._cancel_ttfb_timeout()
 
         await super().push_frame(frame, direction)
+
+    async def _transform_transcription(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
+        """Rewrite a transcription's text with the text transforms that apply to it."""
+        if not self._text_transforms:
+            return
+        if isinstance(frame, TranscriptionFrame):
+            text_type = TranscriptionType.FINAL
+        else:
+            text_type = TranscriptionType.INTERIM
+        text = frame.text
+        for transform_type, transform in self._text_transforms:
+            if transform_type in (text_type, "*"):
+                text = await transform(text, text_type)
+        if text != frame.text:
+            frame.text = text
+            frame.result = None
 
     @property
     def supports_ttfs(self) -> bool:

@@ -20,7 +20,6 @@ import asyncio
 import base64
 import copy
 import json
-import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -31,12 +30,12 @@ from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.typing import Subprotocol
 
-from pipecat import version as pipecat_version
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import LLMFullResponseEndFrame, TTSStoppedFrame
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.openai.realtime import events as openai_events
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
+from pipecat.services.zoom_ai.utils import new_tracking_id, request_headers
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -125,11 +124,6 @@ def _merge(base: dict[str, Any], extra: Mapping[str, Any]) -> dict[str, Any]:
         else:
             merged[key] = copy.deepcopy(value)
     return merged
-
-
-def _tracking_id() -> str:
-    """A new ``x-zm-trackingid``, which Zoom support uses to find a session."""
-    return f"zoom_ai_community_pipecat_{uuid.uuid4()}"
 
 
 def _describe_refusal(exception: Exception) -> str | None:
@@ -411,16 +405,12 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
         try:
             if self._websocket:
                 return
-            self._tracking_id = _tracking_id()
+            self._tracking_id = new_tracking_id()
             logger.debug(f"Connecting to the Zoom Voice Agent (tracking_id={self._tracking_id})")
             websocket = await websocket_connect(
                 uri=self.base_url,
                 subprotocols=[Subprotocol("voice-agent.zoom.v2")],
-                additional_headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "User-Agent": f"pipecat/{pipecat_version()}",
-                    "x-zm-trackingid": self._tracking_id,
-                },
+                additional_headers=request_headers(self.api_key, self._tracking_id),
                 max_size=None,
             )
             self._listen_configured = False

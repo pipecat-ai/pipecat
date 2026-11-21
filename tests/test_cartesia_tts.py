@@ -167,6 +167,15 @@ def _process_word_timestamps(
     return _service(language)._normalize_word_timestamps(words, starts)
 
 
+def test_word_timestamps_keep_their_ends():
+    """Word ends Cartesia reports go along with their words, tags stripped."""
+    service = _service("en")
+    assert service._normalize_word_timestamps(
+        ["Hello", '<break time="1s"/>', "world"], [0.0, 0.4, 1.4], [0.4, 1.4, 1.8]
+    ) == [("Hello", 0.0, 0.4), ("world", 1.4, 1.8)]
+    assert service._normalize_word_timestamps(["Hello"], [0.0]) == [("Hello", 0.0)]
+
+
 def _concatenate_processed_timestamps(
     timestamp_groups: list[tuple[list[str], list[float]]], language: str
 ) -> str:
@@ -521,3 +530,12 @@ class TestCartesiaCJKPunctuationTokens(unittest.IsolatedAsyncioTestCase):
             ]
         )
         self.assertEqual(context_text, "".join(sentences))
+
+
+def test_spell_tag_aggregator_keeps_the_settings_language():
+    service = CartesiaTTSService(
+        api_key="test-api-key",
+        settings=CartesiaTTSService.Settings(voice="voice", language=Language.FR),
+    )
+
+    assert service._text_aggregator.language == "fr"
