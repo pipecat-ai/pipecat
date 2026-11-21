@@ -58,6 +58,9 @@ scenario ``event:``             RTVI server message(s)
 ``server_message``              ``server-message``: a message of the bot's own making
                                 (an ``RTVIServerMessageFrame``), with its ``data``
                                 and, as ``text``, the data as JSON
+``flow_node``                   ``flow-node-entered``: the bot's conversation flow
+                                entered a node, with the message's ``data`` and,
+                                as ``text``, the node's name
 ``expression``                  ``bot-output`` in expressive conversation (alpha):
                                 expression the bot's TTS performed, in the tags
                                 the LLM writes: ``<<excited>>`` where the delivery of
@@ -659,6 +662,8 @@ class EvalEventStream:
             data = message.get("data")
             text = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
             return {"type": "server_message", "data": data, "text": text}
+        elif msg_type == "flow-node-entered":
+            return {"type": "flow_node", "data": dict(data), "text": data.get("node", "")}
         elif msg_type == EVAL_BOT_IMAGE_TYPE:
             return {
                 "type": "image",

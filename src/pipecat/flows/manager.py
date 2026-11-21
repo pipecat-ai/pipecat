@@ -26,12 +26,14 @@ The flow manager coordinates all aspects of a conversation, including:
 
 import asyncio
 import inspect
+import json
 import re
 from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from loguru import logger
 
+import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
@@ -73,7 +75,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext, NotGiven
-from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
+from pipecat.processors.frameworks.rtvi.frames import RTVIFlowNodeEnteredFrame
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.transports.base_transport import BaseTransport
@@ -86,6 +88,22 @@ from pipecat.utils.deprecation import deprecated, warn_deprecated
 _PLACEHOLDER = re.compile(
     r"(\\?)\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\}"
 )
+
+
+def _as_json_object(value: Mapping[str, Any] | None, field: str, node: str) -> dict | None:
+    """``value`` as a client receives it, or None when it isn't a JSON object."""
+    if value is None:
+        return None
+    try:
+        sent = json.loads(json.dumps(value))
+    except (TypeError, ValueError):
+        sent = None
+    if not isinstance(sent, dict):
+        logger.warning(
+            f"Node '{node}': {field} is not a JSON object, so it is left out of the RTVI message"
+        )
+        return None
+    return sent
 
 
 class FlowManager(BaseObject):
@@ -122,11 +140,9 @@ class FlowManager(BaseObject):
 
     An RTVI client is told about each node too, so it can follow the
     conversation through the flow. On entering a node the manager sends an
-    RTVI ``server-message`` whose data is::
+    RTVI ``flow-node-entered`` message whose data is::
 
         {
-            "type": "flows",
-            "event": "node",
             "node": "booking.find_slot",
             "previous_node": "start",
             "function": "begin",
@@ -135,11 +151,13 @@ class FlowManager(BaseObject):
             "parent": "booking"
         }
 
-    ``type``, ``event`` and ``node`` are always present. The other fields are
-    those of :class:`~pipecat.flows.NodeEntered`, and one with no value is
-    left out. The message is sent whenever the worker has RTVI enabled, so
-    keep anything the end user should not see out of node names, function
-    names and metadata.
+    The fields are those of :class:`~pipecat.flows.NodeEntered`; ``node`` is
+    always present, and a field with no value is left out. The message is sent
+    to RTVI clients of protocol 2.4.0 or later, and to any client before it
+    sends ``client-ready``, so keep anything the end user should not see out of
+    node names, function names and metadata. Metadata that is
+    not a JSON object is left out of the message, with a warning;
+    ``on_node_entered`` handlers still receive it.
     """
 
     def __init__(
@@ -663,14 +681,18 @@ class FlowManager(BaseObject):
         await self._set_node(get_or_generate_node_name(node_config), node_config)
 
     @staticmethod
-    def _node_entered_message(entered: NodeEntered) -> dict[str, Any]:
-        """The RTVI server message data that announces a node; see the class docstring."""
-        message: dict[str, Any] = {"type": "flows", "event": "node", "node": entered.node}
-        for field in ("previous_node", "function", "metadata", "function_metadata", "parent"):
-            value = getattr(entered, field)
-            if value is not None:
-                message[field] = value
-        return message
+    def _node_entered_data(entered: NodeEntered) -> RTVI.FlowNodeEnteredMessageData:
+        """The ``flow-node-entered`` message data that announces a node; see the class docstring."""
+        return RTVI.FlowNodeEnteredMessageData(
+            node=entered.node,
+            previous_node=entered.previous_node,
+            function=entered.function,
+            metadata=_as_json_object(entered.metadata, "metadata", entered.node),
+            function_metadata=_as_json_object(
+                entered.function_metadata, "function_metadata", entered.node
+            ),
+            parent=entered.parent,
+        )
 
     def _render_node(self, node_id: str, node_config: NodeConfig) -> NodeConfig:
         r"""Fill ``{{ key }}`` placeholders in the node's prompts from ``self.state``.
@@ -846,7 +868,7 @@ class FlowManager(BaseObject):
 
             await self._call_event_handler("on_node_entered", entered)
             await self._worker.queue_frame(
-                RTVIServerMessageFrame(data=self._node_entered_message(entered))
+                RTVIFlowNodeEnteredFrame(data=self._node_entered_data(entered))
             )
 
             # Trigger completion with new context
