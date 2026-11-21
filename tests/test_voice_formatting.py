@@ -686,6 +686,22 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(await expand_currency("¥40 thousand", "*"), "forty thousand yen")
 
+    async def test_indian_digit_grouping(self):
+        # Rupee amounts are usually written with lakh/crore grouping (two-digit
+        # groups before the last three digits); the whole amount must be read.
+        self.assertEqual(
+            await expand_currency("The premium is ₹1,00,000 per year", "*"),
+            "The premium is one hundred thousand rupees per year",
+        )
+        self.assertEqual(
+            await expand_currency("₹2,50,000.50", "*"),
+            "two hundred and fifty thousand rupees and fifty paise",
+        )
+        self.assertEqual(
+            await expand_currency("₹1,23,45,678", "*"),
+            "twelve million, three hundred and forty-five thousand, six hundred and seventy-eight rupees",
+        )
+
 
 class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
     async def test_iso_date(self):
