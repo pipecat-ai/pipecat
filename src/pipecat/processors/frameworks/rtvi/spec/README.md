@@ -32,7 +32,7 @@ The document is written from the server's point of view. Its `receiveClientMessa
 - `payload`: the schema of the whole message, as [JSON Schema](https://json-schema.org/): `label`, `type`, `id` when the message carries one, and `data`. Each field of `data` has a description.
 - `examples`: an example message.
 - `x-rtvi-enabled-by`: for a message the server only sends when a setting turns it on, the setting's name. The settings are the fields of Pipecat's `RTVIObserverParams`.
-- `x-rtvi-min-client-version`: the lowest client protocol version the server sends the message to. A client tells the server its version in `client-ready`.
+- `x-rtvi-min-client-version`: the lowest client protocol version the server sends the message to. A client tells the server its version in `client-ready`. From protocol 2.4.0, the server sends messages as it does to a client of its own version until then (the `current-version-before-client-ready` behavior), so before `client-ready` a client can receive messages and output types newer than its version.
 - `x-rtvi-deprecated`: for a deprecated message, what replaces it.
 
 The schema of a client message says what the server accepts, and the schema of a server message what the server sends. The server leaves out each field that has no value, so in a server message a field that can have none is optional and never `null`, and every other field is always there. A deprecated field is marked `deprecated`.

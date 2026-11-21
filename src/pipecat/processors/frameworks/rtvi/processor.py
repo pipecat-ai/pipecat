@@ -114,6 +114,11 @@ class RTVIProcessor(FrameProcessor):
         """
         return self._client_version
 
+    @property
+    def client_ready(self) -> bool:
+        """Whether the client has sent its ``client-ready`` message."""
+        return self._client_ready
+
     def create_rtvi_observer(self, *, params: RTVIObserverParams | None = None, **kwargs):
         """Creates a new RTVI Observer.
 

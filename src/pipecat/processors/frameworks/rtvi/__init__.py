@@ -8,6 +8,7 @@
 
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIClientMessageFrame,
+    RTVIFlowNodeEnteredFrame,
     RTVISendTextFrame,
     RTVIServerMessageFrame,
     RTVIServerResponseFrame,
@@ -29,6 +30,7 @@ __all__ = [
     "BotOutputTransformResult",
     "SpokenProgressData",
     "RTVIClientMessageFrame",
+    "RTVIFlowNodeEnteredFrame",
     "RTVIFunctionCallReportLevel",
     "RTVIObserver",
     "RTVIObserverParams",

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pipecat.frames.frames import SystemFrame
-from pipecat.processors.frameworks.rtvi.models import UIJobGroupData
+from pipecat.processors.frameworks.rtvi.models import FlowNodeEnteredMessageData, UIJobGroupData
 
 if TYPE_CHECKING:
     # Imported for typing only: observer.py imports this module, so a runtime
@@ -47,6 +47,23 @@ class RTVIServerMessageFrame(SystemFrame):
     def __str__(self):
         """String representation of the RTVI server message frame."""
         return f"{self.name}(data: {self.data})"
+
+
+@dataclass
+class RTVIFlowNodeEnteredFrame(SystemFrame):
+    """A frame telling the client that the conversation flow entered a node.
+
+    Pipeline-side counterpart of the ``flow-node-entered`` RTVI message.
+
+    Parameters:
+        data: The node entered, and how the flow got there.
+    """
+
+    data: FlowNodeEnteredMessageData
+
+    def __str__(self):
+        """String representation of the flow node frame."""
+        return f"{self.name}(node: {self.data.node})"
 
 
 @dataclass

@@ -18,7 +18,7 @@ The tests use unittest.IsolatedAsyncioTestCase for async support and
 include mocked dependencies for PipelineTask and LLM services.
 """
 
-import json
+import threading
 import unittest
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
@@ -36,11 +36,10 @@ from pipecat.flows.types import (
 from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
-    LLMRunFrame,
     LLMSetToolsFrame,
     LLMUpdateSettingsFrame,
 )
-from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
+from pipecat.processors.frameworks.rtvi.frames import RTVIFlowNodeEnteredFrame
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from tests.flows_test_helpers import (
@@ -1597,11 +1596,11 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def rtvi_messages(worker) -> list[dict]:
-        """The data of every RTVI server message queued on the worker, in order."""
+        """The data of every flow-node-entered message queued on the worker, as sent."""
         return [
-            call.args[0].data
+            call.args[0].data.model_dump(exclude_none=True)
             for call in worker.queue_frame.call_args_list
-            if isinstance(call.args[0], RTVIServerMessageFrame)
+            if isinstance(call.args[0], RTVIFlowNodeEnteredFrame)
         ]
 
     async def test_rtvi_client_is_told_about_each_node(self):
@@ -1614,15 +1613,13 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
         await flow_manager.initialize(start)
         self.assertEqual(
             self.rtvi_messages(self.mock_worker),
-            [{"type": "flows", "event": "node", "node": "start"}],
+            [{"node": "start"}],
         )
 
         await self.invoke("begin")
         self.assertEqual(
             self.rtvi_messages(self.mock_worker)[1],
             {
-                "type": "flows",
-                "event": "node",
                 "node": "booking",
                 "previous_node": "start",
                 "function": "begin",
@@ -1641,10 +1638,8 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.rtvi_messages(self.mock_worker),
             [
-                {"type": "flows", "event": "node", "node": "start"},
+                {"node": "start"},
                 {
-                    "type": "flows",
-                    "event": "node",
                     "node": "verify.ask",
                     "previous_node": "start",
                     "parent": "verify",
@@ -1652,45 +1647,34 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_rtvi_message_leaves_out_metadata_that_is_not_json(self):
-        handle = object()
-        booking = self.node("booking", metadata={"handle": handle})
-        start = self.node(
-            "start",
-            self.edge("begin", booking, metadata={"callback": print}),
-            metadata={"step": 1},
-        )
+    async def test_metadata_that_is_not_json_is_left_out_of_the_rtvi_message(self):
+        lock = threading.Lock()
+        booking = self.node("booking", metadata={"lock": lock})
+        start = self.node("start", self.edge("begin", booking, metadata={"handle": object()}))
         flow_manager, entered = self.make_manager()
 
         with patch("pipecat.flows.manager.logger") as mock_logger:
             await flow_manager.initialize(start)
             await self.invoke("begin")
 
-        # Handlers get the metadata as the application wrote it.
-        self.assertEqual(entered[1].metadata, {"handle": handle})
-        self.assertEqual(entered[1].function_metadata, {"callback": print})
-
-        messages = self.rtvi_messages(self.mock_worker)
+        # The node is entered, and handlers get the metadata as the application wrote it.
+        self.assertEqual(flow_manager.current_node, "booking")
+        self.assertEqual(self.queued_frame_types(self.mock_worker)[-1], "LLMRunFrame")
+        self.assertIs(entered[1].metadata["lock"], lock)
         self.assertEqual(
-            messages,
-            [
-                {"type": "flows", "event": "node", "node": "start", "metadata": {"step": 1}},
-                {
-                    "type": "flows",
-                    "event": "node",
-                    "node": "booking",
-                    "previous_node": "start",
-                    "function": "begin",
-                },
-            ],
+            self.rtvi_messages(self.mock_worker)[1],
+            {"node": "booking", "previous_node": "start", "function": "begin"},
         )
-        # What a transport's serializer does with the message.
-        json.dumps(messages)
+        self.assertEqual(mock_logger.warning.call_count, 2)
 
-        warnings = [call.args[0] for call in mock_logger.warning.call_args_list]
-        self.assertEqual(len(warnings), 2)
-        self.assertIn("Node 'booking': metadata is not JSON-serializable", warnings[0])
-        self.assertIn("Node 'booking': function_metadata is not JSON-serializable", warnings[1])
+    async def test_metadata_keys_reach_the_client_as_json_strings(self):
+        flow_manager, entered = self.make_manager()
+        await flow_manager.initialize(self.node("start", metadata={1: "one"}))
+
+        self.assertEqual(entered[0].metadata, {1: "one"})
+        self.assertEqual(
+            self.rtvi_messages(self.mock_worker), [{"node": "start", "metadata": {"1": "one"}}]
+        )
 
     async def test_rtvi_message_follows_the_handlers_and_precedes_the_llm_run(self):
         calls = MagicMock()
@@ -1709,7 +1693,7 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
         await flow_manager.initialize(self.node("start"))
 
         order = [c[0] if c[0] == "handler" else c.args[0] for c in calls.mock_calls]
-        self.assertEqual(order[-3:], ["handler", "RTVIServerMessageFrame", "LLMRunFrame"])
+        self.assertEqual(order[-3:], ["handler", "RTVIFlowNodeEnteredFrame", "LLMRunFrame"])
 
     async def test_initialize_enters_the_first_node(self):
         flow_manager, entered = self.make_manager()
