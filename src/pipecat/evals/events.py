@@ -33,10 +33,9 @@ scenario ``event:``             RTVI server message(s)
                                 (audio modality only)
 ``response``                    the harness's own transcription of the bot's audio
                                 (audio modality only); ``llm_response`` in text modality
-``function_call``               ``llm-function-call-in-progress``; a call made
-                                outside the bot's pipeline and reported into it
-                                (``ExternalFunctionCall*Frame``), such as a
-                                backend's, counts the same
+``function_call``               ``llm-function-call-in-progress``, which the bot
+                                also sends for a call made outside its pipeline
+                                and reported into it, such as a backend's
 ``function_call_stopped``       ``llm-function-call-stopped``; its ``args`` carry
                                 ``tool_call_id`` and ``cancelled``, so a scenario
                                 can tell work that was stopped from work that
@@ -80,9 +79,6 @@ from collections.abc import Callable
 from pipecat.evals.results import EvalTrace
 from pipecat.evals.serializer import EVAL_BOT_IMAGE_TYPE
 from pipecat.frames.frames import (
-    ExternalFunctionCallCancelFrame,
-    ExternalFunctionCallInProgressFrame,
-    ExternalFunctionCallResultFrame,
     Frame,
     InputTransportMessageFrame,
 )
@@ -90,25 +86,6 @@ from pipecat.frames.frames import (
 # The bot's reports that end its current turn: what it produced so far is not
 # its reply to what comes next.
 _INTERRUPTION_EVENTS = ("user_started_speaking", "bot_interrupted")
-
-
-def _function_call_event(name: str | None, arguments: dict | None) -> dict:
-    """A ``function_call`` event; a name the bot didn't report is ``None``."""
-    return {"type": "function_call", "name": name or None, "args": dict(arguments or {})}
-
-
-def _function_call_stopped_event(name: str | None, tool_call_id: str, *, cancelled: bool) -> dict:
-    """A ``function_call_stopped`` event.
-
-    How the call ended is the assertable part, so ``cancelled`` sits in ``args``
-    alongside the id: a scenario matches both through the same ``calls:``/``args:``
-    check a ``function_call`` uses.
-    """
-    return {
-        "type": "function_call_stopped",
-        "name": name or None,
-        "args": {"tool_call_id": tool_call_id, "cancelled": cancelled},
-    }
 
 
 class EvalBotEndedError(Exception):
@@ -482,7 +459,9 @@ class EvalEventStream:
     def frame_to_event(self, frame: Frame) -> dict | None:
         """Translate one frame from the bot into the event it maps to, if any.
 
-        The LLM text is buffered and emitted as one ``llm_response`` when the
+        The sink hands this every frame from the bot's side; only the bot's
+        messages, which arrive raw as ``InputTransportMessageFrame``, map to
+        events. The LLM text is buffered and emitted as one ``llm_response`` when the
         response ends; a marker is its own ``llm_marker`` as soon as it
         arrives; ``tts_response`` is emitted only in audio mode; the bot's raw
         reports, about its own speaking and interruptions and about the harness
@@ -497,28 +476,18 @@ class EvalEventStream:
             The event the frame maps to, or ``None``; most frames map to none.
         """
         self.touch()
-        if isinstance(frame, InputTransportMessageFrame):
-            event = self._message_to_event(frame.message)
-            if event is None:
-                return None
-            if event["type"] in _INTERRUPTION_EVENTS:
-                self._interrupted()
-            elif event["type"] == "bot_started_speaking":
-                self._bot_started_speaking()
-            elif event["type"] == "bot_stopped_speaking":
-                self._bot_quiet.set()
-            return event
-        elif isinstance(frame, ExternalFunctionCallInProgressFrame):
-            return _function_call_event(frame.function_name, frame.arguments)
-        elif isinstance(frame, ExternalFunctionCallResultFrame) and not frame.is_final:
+        if not isinstance(frame, InputTransportMessageFrame):
             return None
-        elif isinstance(frame, (ExternalFunctionCallResultFrame, ExternalFunctionCallCancelFrame)):
-            return _function_call_stopped_event(
-                frame.function_name,
-                frame.tool_call_id,
-                cancelled=isinstance(frame, ExternalFunctionCallCancelFrame),
-            )
-        return None
+        event = self._message_to_event(frame.message)
+        if event is None:
+            return None
+        if event["type"] in _INTERRUPTION_EVENTS:
+            self._interrupted()
+        elif event["type"] == "bot_started_speaking":
+            self._bot_started_speaking()
+        elif event["type"] == "bot_stopped_speaking":
+            self._bot_quiet.set()
+        return event
 
     @property
     def input_sent_at(self) -> float:
@@ -612,13 +581,23 @@ class EvalEventStream:
             return self._llm_report_to_event(msg_type, data)
         elif msg_type == "llm-function-call-in-progress":
             # The name and arguments may be absent at the bot's default report level.
-            return _function_call_event(data.get("function_name"), data.get("arguments"))
+            return {
+                "type": "function_call",
+                "name": data.get("function_name") or None,
+                "args": dict(data.get("arguments") or {}),
+            }
         elif msg_type == "llm-function-call-stopped":
-            return _function_call_stopped_event(
-                data.get("function_name"),
-                data.get("tool_call_id", ""),
-                cancelled=bool(data.get("cancelled")),
-            )
+            # How the call ended is the assertable part, so `cancelled` sits in
+            # `args` alongside the id: a scenario matches both through the same
+            # `calls:`/`args:` check a function_call uses.
+            return {
+                "type": "function_call_stopped",
+                "name": data.get("function_name") or None,
+                "args": {
+                    "tool_call_id": data.get("tool_call_id", ""),
+                    "cancelled": bool(data.get("cancelled")),
+                },
+            }
         elif msg_type == "user-started-speaking":
             return {"type": "user_started_speaking"}
         elif msg_type == "bot-interrupted":
