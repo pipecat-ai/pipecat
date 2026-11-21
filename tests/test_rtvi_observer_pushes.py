@@ -481,7 +481,7 @@ class TestRTVIObserverSegments(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.observer._skipped_segment_ids, set())
 
     def _connect_client(self, version):
-        self.observer._rtvi = SimpleNamespace(client_version=version)
+        self.observer._rtvi = SimpleNamespace(client_version=version, _client_ready=True)
 
     async def test_a_backchannel_is_sent_as_output_and_tts_text(self):
         backchannel = self._segment("Mm-hmm, go on.", TextType.BACKCHANNEL)

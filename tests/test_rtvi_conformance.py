@@ -77,6 +77,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIClientMessageFrame,
+    RTVIFlowNodeEnteredFrame,
     RTVIServerMessageFrame,
     RTVIServerResponseFrame,
     RTVIUICommandFrame,
@@ -330,6 +331,18 @@ async def _run_session(client_version: str, params: RTVIObserverParams = _EVERYT
         await session.push(RTVIServerResponseFrame(client_msg=client_message, data={"t": 21}))
         await session.push(RTVIServerResponseFrame(client_msg=client_message, error="No city"))
         await session.push(RTVIServerMessageFrame(data={"event": "order-shipped"}))
+        await session.push(
+            RTVIFlowNodeEnteredFrame(
+                data=RTVI.FlowNodeEnteredMessageData(
+                    node="verify.check_birthday",
+                    previous_node="greet",
+                    function="wants_to_book",
+                    metadata={"step": 2},
+                    function_metadata={"exit": "booking"},
+                    parent="verify",
+                )
+            )
+        )
         # Every kind of metric, so the document's metrics schema is checked whole.
         await session.push(
             MetricsFrame(
@@ -650,6 +663,16 @@ class TestRTVIBehaviors(unittest.IsolatedAsyncioTestCase):
         frame = AggregatedTextFrame(text, TextType.SENTENCE)
         frame.will_be_spoken = True
         return frame
+
+    async def test_current_version_before_client_ready(self):
+        # llm-raw-text is for clients of 2.2.0 and later.
+        session = await self._session(RTVIObserverParams(llm_raw_text_enabled=True))
+        await session.push(LLMTextFrame("Hello."))
+        self.assertIn("llm-raw-text", [m["type"] for m in session.sent])
+        session.sent.clear()
+        await self._ready(session, "2.1.0")
+        await session.push(LLMTextFrame("Hello."))
+        self.assertNotIn("llm-raw-text", [m["type"] for m in session.sent])
 
     async def test_spoken_output_waits_for_speech(self):
         session = await self._session()

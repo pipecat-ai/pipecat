@@ -78,6 +78,7 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIConfigureObserverFrame,
+    RTVIFlowNodeEnteredFrame,
     RTVISendTextFrame,
     RTVIServerMessageFrame,
     RTVIServerResponseFrame,
@@ -359,9 +360,10 @@ class RTVIObserver(BaseObserver):
 
     def _client_is_at_least(self, version: list[int]) -> bool:
         """Return True when the connected client's protocol is ``version`` or later."""
-        if not self._rtvi:
-            # No client has negotiated a version, so assume the current protocol, as
-            # _is_legacy_client does.
+        if not self._rtvi or not self._rtvi._client_ready:
+            # No client has negotiated a version yet, so assume the current
+            # protocol: a bot may speak before client-ready, as when it greets
+            # on connect.
             return True
         return self._rtvi.client_version >= version
 
@@ -777,6 +779,9 @@ class RTVIObserver(BaseObserver):
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVI.ServerMessage(data=frame.data)
             await self.send_rtvi_message(message)
+        elif isinstance(frame, RTVIFlowNodeEnteredFrame):
+            if self._client_is_at_least([2, 4, 0]):
+                await self.send_rtvi_message(RTVI.FlowNodeEnteredMessage(data=frame.data))
         elif isinstance(frame, RTVIUICommandFrame):
             message = RTVI.UICommandMessage(
                 data=RTVI.UICommandData(command=frame.command, payload=frame.payload)

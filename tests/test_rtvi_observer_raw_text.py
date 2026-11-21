@@ -155,7 +155,7 @@ class TestRTVIObserverRawText(unittest.IsolatedAsyncioTestCase):
     async def test_raw_text_is_kept_from_older_clients(self):
         for version in ([2, 1, 0], [1, 4, 0]):
             with self.subTest(version=version):
-                self.observer._rtvi = SimpleNamespace(client_version=version)
+                self.observer._rtvi = SimpleNamespace(client_version=version, _client_ready=True)
                 await self._push_one_of_each()
 
                 self.assertEqual(self._sent_raw_text(), [])
