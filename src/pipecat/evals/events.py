@@ -75,13 +75,10 @@ import json
 import math
 import time
 from collections.abc import Callable
+from typing import Any
 
 from pipecat.evals.results import EvalTrace
 from pipecat.evals.serializer import EVAL_BOT_IMAGE_TYPE
-from pipecat.frames.frames import (
-    Frame,
-    InputTransportMessageFrame,
-)
 
 # The bot's reports that end its current turn: what it produced so far is not
 # its reply to what comes next.
@@ -456,29 +453,25 @@ class EvalEventStream:
         """Note activity that makes no event, so a lull is measured from it."""
         self.last_activity = time.monotonic()
 
-    def frame_to_event(self, frame: Frame) -> dict | None:
-        """Translate one frame from the bot into the event it maps to, if any.
+    def rtvi_message_to_event(self, message: Any) -> dict | None:
+        """Translate one of the bot's RTVI messages into the event it maps to, if any.
 
-        The sink hands this every frame from the bot's side; only the bot's
-        messages, which arrive raw as ``InputTransportMessageFrame``, map to
-        events. The LLM text is buffered and emitted as one ``llm_response`` when the
+        The LLM text is buffered and emitted as one ``llm_response`` when the
         response ends; a marker is its own ``llm_marker`` as soon as it
-        arrives; ``tts_response`` is emitted only in audio mode; the bot's raw
+        arrives; ``tts_response`` is emitted only in audio mode; the bot's
         reports, about its own speaking and interruptions and about the harness
         (its VAD and transcription messages), become their events. The
         audio-mode ``response`` is not made here: the aggregator appends it
         when the bot's spoken turn ends.
 
         Args:
-            frame: A frame the bot-facing transport produced.
+            message: An RTVI message from the bot, as the client received it.
 
         Returns:
-            The event the frame maps to, or ``None``; most frames map to none.
+            The event the message maps to, or ``None``; many map to none.
         """
         self.touch()
-        if not isinstance(frame, InputTransportMessageFrame):
-            return None
-        event = self._message_to_event(frame.message)
+        event = self._event_for_rtvi_message(message)
         if event is None:
             return None
         if event["type"] in _INTERRUPTION_EVENTS:
@@ -563,7 +556,7 @@ class EvalEventStream:
         self._awaiting_reply = True
         self._bot_quiet.set()
 
-    def _message_to_event(self, message) -> dict | None:
+    def _event_for_rtvi_message(self, message: Any) -> dict | None:
         """Map one of the bot's reports, about its own output or about the harness, to its event, if any."""
         if not isinstance(message, dict):
             return None

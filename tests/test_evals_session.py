@@ -107,12 +107,17 @@ def _stream(bot_audio: bool = False) -> EvalEventStream:
     return EvalEventStream(bot_audio=bot_audio, trace=EvalTrace())
 
 
-def _bot_report(msg_type: str, data: dict | None = None) -> InputTransportMessageFrame:
-    """One of the bot's reports about its own output, as the raw message the serializer keeps it as."""
+def _bot_message(msg_type: str, data: dict | None = None) -> dict:
+    """One of the bot's RTVI messages."""
     message = {"label": RTVI.MESSAGE_LABEL, "type": msg_type}
     if data is not None:
         message["data"] = data
-    return InputTransportMessageFrame(message=message)
+    return message
+
+
+def _bot_report(msg_type: str, data: dict | None = None) -> InputTransportMessageFrame:
+    """One of the bot's RTVI messages, as the frame the client receives it in."""
+    return InputTransportMessageFrame(message=_bot_message(msg_type, data))
 
 
 def _matcher(judge=None, bot_audio: bool = False) -> ExpectationMatcher:
@@ -140,8 +145,8 @@ def _capture_injected(client: EvalClient) -> list:
     return injected
 
 
-class TestFramesToEvents(unittest.TestCase):
-    """The bot's frames and reported messages map to the scenario's events."""
+class TestRTVIMessagesToEvents(unittest.TestCase):
+    """The bot's RTVI messages map to the scenario's events."""
 
     def _bare(self, event):
         self.assertIsNotNone(event)
@@ -150,24 +155,24 @@ class TestFramesToEvents(unittest.TestCase):
 
     def test_a_reply_carries_the_time_of_its_first_token(self):
         s = _stream(bot_audio=False)
-        s.frame_to_event(_bot_report("bot-llm-started"))
-        s.frame_to_event(_bot_report("bot-llm-text", {"text": "Hello "}))
-        s.frame_to_event(_bot_report("bot-llm-text", {"text": "world"}))
-        event = s.frame_to_event(_bot_report("bot-llm-stopped"))
+        s.rtvi_message_to_event(_bot_message("bot-llm-started"))
+        s.rtvi_message_to_event(_bot_message("bot-llm-text", {"text": "Hello "}))
+        s.rtvi_message_to_event(_bot_message("bot-llm-text", {"text": "world"}))
+        event = s.rtvi_message_to_event(_bot_message("bot-llm-stopped"))
         self.assertIn("started_at", event)
         self.assertLessEqual(event["started_at"], s.elapsed())
         # A response with no text carries no time.
-        s.frame_to_event(_bot_report("bot-llm-started"))
-        event = s.frame_to_event(_bot_report("bot-llm-stopped"))
+        s.rtvi_message_to_event(_bot_message("bot-llm-started"))
+        event = s.rtvi_message_to_event(_bot_message("bot-llm-stopped"))
         self.assertNotIn("started_at", event)
 
     def test_llm_marker_is_its_own_event(self):
         s = _stream(bot_audio=False)
-        s.frame_to_event(_bot_report("bot-llm-started"))
-        s.frame_to_event(_bot_report("bot-llm-text", {"text": "Hello"}))
+        s.rtvi_message_to_event(_bot_message("bot-llm-started"))
+        s.rtvi_message_to_event(_bot_message("bot-llm-text", {"text": "Hello"}))
         self.assertEqual(
-            s.frame_to_event(
-                _bot_report(
+            s.rtvi_message_to_event(
+                _bot_message(
                     "bot-llm-marker",
                     {"raw": "● Hello", "text": "●", "kind": "complete", "markers": ["●", "◐", "○"]},
                 )
@@ -182,7 +187,7 @@ class TestFramesToEvents(unittest.TestCase):
         )
         # The marker is not part of the reply's text.
         self.assertEqual(
-            self._bare(s.frame_to_event(_bot_report("bot-llm-stopped"))),
+            self._bare(s.rtvi_message_to_event(_bot_message("bot-llm-stopped"))),
             {"type": "llm_response", "text": "Hello"},
         )
 
@@ -190,50 +195,67 @@ class TestFramesToEvents(unittest.TestCase):
         s = _stream(bot_audio=False)
         s.input_sent()
         self.assertIsNone(
-            s.frame_to_event(_bot_report("bot-llm-marker", {"raw": "◐", "text": "◐"}))
+            s.rtvi_message_to_event(_bot_message("bot-llm-marker", {"raw": "◐", "text": "◐"}))
         )
-        s.frame_to_event(_bot_report("bot-llm-started"))
+        s.rtvi_message_to_event(_bot_message("bot-llm-started"))
         self.assertEqual(
-            s.frame_to_event(
-                _bot_report("bot-llm-marker", {"raw": "◐", "text": "◐", "kind": "short"})
+            s.rtvi_message_to_event(
+                _bot_message("bot-llm-marker", {"raw": "◐", "text": "◐", "kind": "short"})
             ),
             {"type": "llm_marker", "text": "◐", "kind": "short", "raw": "◐", "markers": []},
         )
 
     def test_llm_lifecycle_aggregates_text(self):
         s = _stream(bot_audio=False)
-        self.assertEqual(s.frame_to_event(_bot_report("bot-llm-started")), {"type": "llm_started"})
-        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": "Hello "})))
-        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": "world"})))
         self.assertEqual(
-            self._bare(s.frame_to_event(_bot_report("bot-llm-stopped"))),
+            s.rtvi_message_to_event(_bot_message("bot-llm-started")), {"type": "llm_started"}
+        )
+        self.assertIsNone(s.rtvi_message_to_event(_bot_message("bot-llm-text", {"text": "Hello "})))
+        self.assertIsNone(s.rtvi_message_to_event(_bot_message("bot-llm-text", {"text": "world"})))
+        self.assertEqual(
+            self._bare(s.rtvi_message_to_event(_bot_message("bot-llm-stopped"))),
             {"type": "llm_response", "text": "Hello world"},
         )
 
     def test_interruption_suppresses_straggler(self):
         s = _stream(bot_audio=False)
-        interrupt = InputTransportMessageFrame(
-            message={"label": RTVI.MESSAGE_LABEL, "type": "bot-interrupted"}
-        )
-        s.frame_to_event(_bot_report("bot-llm-started"))
-        s.frame_to_event(_bot_report("bot-llm-text", {"text": "Tell me about Paris"}))
-        self.assertEqual(s.frame_to_event(interrupt), {"type": "bot_interrupted"})
+        interrupt = _bot_message("bot-interrupted")
+        s.rtvi_message_to_event(_bot_message("bot-llm-started"))
+        s.rtvi_message_to_event(_bot_message("bot-llm-text", {"text": "Tell me about Paris"}))
+        self.assertEqual(s.rtvi_message_to_event(interrupt), {"type": "bot_interrupted"})
         # Straggler from the interrupted response is dropped.
-        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": " what would"})))
-        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-stopped")))
+        self.assertIsNone(
+            s.rtvi_message_to_event(_bot_message("bot-llm-text", {"text": " what would"}))
+        )
+        self.assertIsNone(s.rtvi_message_to_event(_bot_message("bot-llm-stopped")))
         # The genuinely new response.
-        s.frame_to_event(_bot_report("bot-llm-started"))
-        s.frame_to_event(_bot_report("bot-llm-text", {"text": "Tokyo"}))
+        s.rtvi_message_to_event(_bot_message("bot-llm-started"))
+        s.rtvi_message_to_event(_bot_message("bot-llm-text", {"text": "Tokyo"}))
         self.assertEqual(
-            self._bare(s.frame_to_event(_bot_report("bot-llm-stopped"))),
+            self._bare(s.rtvi_message_to_event(_bot_message("bot-llm-stopped"))),
             {"type": "llm_response", "text": "Tokyo"},
         )
+
+    def test_raw_text_messages_are_no_events(self):
+        # A bot that turned raw text on sends it alongside the bot-llm-text and
+        # bot-tts-text the stream reads, so its text isn't counted twice.
+        s = _stream(bot_audio=True)
+        s.rtvi_message_to_event(_bot_message("bot-llm-started"))
+        self.assertIsNone(s.rtvi_message_to_event(_bot_message("llm-raw-text", {"text": "Hello"})))
+        s.rtvi_message_to_event(_bot_message("bot-llm-text", {"text": "Hello"}))
+        self.assertEqual(
+            self._bare(s.rtvi_message_to_event(_bot_message("bot-llm-stopped"))),
+            {"type": "llm_response", "text": "Hello"},
+        )
+        self.assertIsNone(s.rtvi_message_to_event(_bot_message("tts-raw-text", {"text": "Hello"})))
 
     def test_the_deprecated_user_transcription_is_no_event(self):
         # user-input carries the same transcriptions.
         s = _stream()
         self.assertIsNone(
-            s.frame_to_event(_bot_report("user-transcription", {"text": "hello", "final": True}))
+            s.rtvi_message_to_event(
+                _bot_message("user-transcription", {"text": "hello", "final": True})
+            )
         )
 
     def test_user_transcription_from_message(self):
@@ -242,20 +264,22 @@ class TestFramesToEvents(unittest.TestCase):
         s = _stream()
 
         def msg(data):
-            return InputTransportMessageFrame(
-                message={"label": RTVI.MESSAGE_LABEL, "type": "user-input", "data": data}
-            )
+            return _bot_message("user-input", data)
 
         self.assertEqual(
-            s.frame_to_event(msg({"text": "hello", "input_type": "transcription", "final": True})),
+            s.rtvi_message_to_event(
+                msg({"text": "hello", "input_type": "transcription", "final": True})
+            ),
             {"type": "user_transcription", "transcript": "hello"},
         )
         # Interim transcriptions and chat text are ignored.
         self.assertIsNone(
-            s.frame_to_event(msg({"text": "hel", "input_type": "transcription", "final": False}))
+            s.rtvi_message_to_event(
+                msg({"text": "hel", "input_type": "transcription", "final": False})
+            )
         )
         self.assertIsNone(
-            s.frame_to_event(msg({"text": "hello", "input_type": "chat", "final": True}))
+            s.rtvi_message_to_event(msg({"text": "hello", "input_type": "chat", "final": True}))
         )
 
     def test_backchannels_from_messages(self):
@@ -264,9 +288,7 @@ class TestFramesToEvents(unittest.TestCase):
         s = _stream(bot_audio=True)
 
         def msg(msg_type, data):
-            return InputTransportMessageFrame(
-                message={"label": RTVI.MESSAGE_LABEL, "type": msg_type, "data": data}
-            )
+            return _bot_message(msg_type, data)
 
         def bot_output(output_type, status, accumulated="Mm-hmm."):
             return msg(
@@ -279,18 +301,22 @@ class TestFramesToEvents(unittest.TestCase):
                 },
             )
 
-        self.assertIsNone(s.frame_to_event(bot_output("backchannel", "new", accumulated="")))
+        self.assertIsNone(s.rtvi_message_to_event(bot_output("backchannel", "new", accumulated="")))
         self.assertEqual(
-            s.frame_to_event(bot_output("backchannel", "completed")),
+            s.rtvi_message_to_event(bot_output("backchannel", "completed")),
             {"type": "bot_backchannel", "text": "Mm-hmm."},
         )
-        self.assertIsNone(s.frame_to_event(bot_output("sentence", "completed")))
+        self.assertIsNone(s.rtvi_message_to_event(bot_output("sentence", "completed")))
         self.assertEqual(
-            s.frame_to_event(msg("user-input", {"text": "mhm", "input_type": "backchannel"})),
+            s.rtvi_message_to_event(
+                msg("user-input", {"text": "mhm", "input_type": "backchannel"})
+            ),
             {"type": "user_backchannel", "text": "mhm"},
         )
         self.assertIsNone(
-            s.frame_to_event(msg("user-input", {"text": "hello", "input_type": "transcription"}))
+            s.rtvi_message_to_event(
+                msg("user-input", {"text": "hello", "input_type": "transcription"})
+            )
         )
 
     def test_expression_from_messages(self):
@@ -310,15 +336,13 @@ class TestFramesToEvents(unittest.TestCase):
             }
             if delivery is not None:
                 data["delivery"] = delivery
-            return InputTransportMessageFrame(
-                message={"label": RTVI.MESSAGE_LABEL, "type": "bot-output", "data": data}
-            )
+            return _bot_message("bot-output", data)
 
-        def expression(frame):
-            event = s.frame_to_event(frame)
+        def expression(message):
+            event = s.rtvi_message_to_event(message)
             return event and event["text"]
 
-        s.frame_to_event(_bot_report("bot-llm-started"))
+        s.rtvi_message_to_event(_bot_message("bot-llm-started"))
         # Spoken text counts as it is spoken, not when it is announced.
         self.assertIsNone(expression(bot_output(1, delivery=["excited"], status="new")))
         self.assertEqual(expression(bot_output(1, delivery=["excited"])), "<<excited>>")
@@ -347,14 +371,8 @@ class TestFramesToEvents(unittest.TestCase):
         # Without expressive conversation, spoken text carries no delivery.
         self.assertIsNone(expression(bot_output(8)))
         # Each response starts from the baseline.
-        s.frame_to_event(_bot_report("bot-llm-started"))
+        s.rtvi_message_to_event(_bot_message("bot-llm-started"))
         self.assertIsNone(expression(bot_output(9, delivery=[])))
-
-    def test_transcription_frame_is_ignored_by_the_sink(self):
-        # The user aggregator consumes the STT's TranscriptionFrames to build the
-        # bot's turn; the response is emitted from on_user_turn_stopped, not here.
-        frame = TranscriptionFrame(text="Paris", user_id="bot", timestamp="t")
-        self.assertIsNone(_stream(bot_audio=True).frame_to_event(frame))
 
     def test_reported_speaking_and_vad_events_from_messages(self):
         # The bot's reports about the harness (its raw VAD and turn-level speaking)
@@ -362,43 +380,28 @@ class TestFramesToEvents(unittest.TestCase):
         s = _stream(bot_audio=True)
 
         def msg(msg_type):
-            return InputTransportMessageFrame(
-                message={"label": RTVI.MESSAGE_LABEL, "type": msg_type}
-            )
+            return _bot_message(msg_type)
 
         self.assertEqual(
-            s.frame_to_event(msg("user-started-speaking")),
+            s.rtvi_message_to_event(msg("user-started-speaking")),
             {"type": "user_started_speaking"},
         )
         self.assertEqual(
-            s.frame_to_event(msg("user-stopped-speaking")),
+            s.rtvi_message_to_event(msg("user-stopped-speaking")),
             {"type": "user_stopped_speaking"},
         )
         self.assertEqual(
-            s.frame_to_event(msg("vad-user-started-speaking")),
+            s.rtvi_message_to_event(msg("vad-user-started-speaking")),
             {"type": "vad_user_started_speaking"},
         )
         self.assertEqual(
-            s.frame_to_event(msg("vad-user-stopped-speaking")),
+            s.rtvi_message_to_event(msg("vad-user-stopped-speaking")),
             {"type": "vad_user_stopped_speaking"},
         )
         self.assertEqual(
-            s.frame_to_event(msg("bot-interrupted")),
+            s.rtvi_message_to_event(msg("bot-interrupted")),
             {"type": "bot_interrupted"},
         )
-
-    def test_computed_vad_and_speaking_frames_are_ignored(self):
-        # The user aggregator's own VAD/speaking/interruption frames (computed from
-        # the bot's audio) are internal plumbing, not scenario events.
-        s = _stream(bot_audio=True)
-        for frame in (
-            VADUserStartedSpeakingFrame(),
-            VADUserStoppedSpeakingFrame(),
-            UserStartedSpeakingFrame(),
-            UserStoppedSpeakingFrame(),
-            InterruptionFrame(),
-        ):
-            self.assertIsNone(s.frame_to_event(frame))
 
     def test_user_started_speaking_message_discards_the_unfinished_response(self):
         # A new user turn drops the bot's response in progress, and what the
@@ -406,21 +409,21 @@ class TestFramesToEvents(unittest.TestCase):
         s = _stream(bot_audio=True)
         s._text_buffer = ["greeting"]
         s._queue.put_nowait({"type": "user_transcription", "transcript": "hi"})
-        msg = InputTransportMessageFrame(
-            message={"label": RTVI.MESSAGE_LABEL, "type": "user-started-speaking"}
-        )
-        self.assertEqual(s.frame_to_event(msg), {"type": "user_started_speaking"})
+        msg = _bot_message("user-started-speaking")
+        self.assertEqual(s.rtvi_message_to_event(msg), {"type": "user_started_speaking"})
         self.assertEqual(s._text_buffer, [])
-        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-text", {"text": " and welcome"})))
-        self.assertIsNone(s.frame_to_event(_bot_report("bot-llm-stopped")))
+        self.assertIsNone(
+            s.rtvi_message_to_event(_bot_message("bot-llm-text", {"text": " and welcome"}))
+        )
+        self.assertIsNone(s.rtvi_message_to_event(_bot_message("bot-llm-stopped")))
         self.assertEqual(s._queue.get_nowait(), {"type": "user_transcription", "transcript": "hi"})
         self.assertTrue(s._queue.empty())
 
     def test_function_call(self):
         s = _stream()
         event = self._bare(
-            s.frame_to_event(
-                _bot_report(
+            s.rtvi_message_to_event(
+                _bot_message(
                     "llm-function-call-in-progress",
                     {
                         "function_name": "get_weather",
@@ -436,11 +439,11 @@ class TestFramesToEvents(unittest.TestCase):
 
     def test_tts_text_only_in_audio_mode(self):
         def tts(text):
-            return _bot_report("bot-tts-text", {"text": text})
+            return _bot_message("bot-tts-text", {"text": text})
 
-        self.assertIsNone(_stream(bot_audio=False).frame_to_event(tts("x")))
+        self.assertIsNone(_stream(bot_audio=False).rtvi_message_to_event(tts("x")))
         self.assertEqual(
-            _stream(bot_audio=True).frame_to_event(tts("spoken")),
+            _stream(bot_audio=True).rtvi_message_to_event(tts("spoken")),
             {"type": "tts_response", "text": "spoken"},
         )
 
@@ -448,17 +451,17 @@ class TestFramesToEvents(unittest.TestCase):
         # An interrupted response (no text) emits an empty llm_response; the
         # matcher's aggregation decides whether that should pass or fail.
         s = _stream(bot_audio=False)
-        self.assertEqual(s.frame_to_event(_bot_report("bot-llm-started")), {"type": "llm_started"})
         self.assertEqual(
-            self._bare(s.frame_to_event(_bot_report("bot-llm-stopped"))),
+            s.rtvi_message_to_event(_bot_message("bot-llm-started")), {"type": "llm_started"}
+        )
+        self.assertEqual(
+            self._bare(s.rtvi_message_to_event(_bot_message("bot-llm-stopped"))),
             {"type": "llm_response", "text": ""},
         )
 
     def test_unmapped_message_ignored(self):
-        msg = InputTransportMessageFrame(
-            message={"label": RTVI.MESSAGE_LABEL, "type": "bot-ready", "data": {}}
-        )
-        self.assertIsNone(_stream().frame_to_event(msg))
+        msg = _bot_message("bot-ready", {})
+        self.assertIsNone(_stream().rtvi_message_to_event(msg))
 
 
 class _FakeJudge:
@@ -505,14 +508,14 @@ class TestBotSpeaking(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await stream.wait_bot_quiet(0.01))
 
         self.assertEqual(
-            stream.frame_to_event(_bot_report("bot-started-speaking")),
+            stream.rtvi_message_to_event(_bot_message("bot-started-speaking")),
             {"type": "bot_started_speaking"},
         )
         self.assertTrue(stream.bot_speaking)
         self.assertFalse(await stream.wait_bot_quiet(0.05))
 
         self.assertEqual(
-            stream.frame_to_event(_bot_report("bot-stopped-speaking")),
+            stream.rtvi_message_to_event(_bot_message("bot-stopped-speaking")),
             {"type": "bot_stopped_speaking"},
         )
         self.assertFalse(stream.bot_speaking)
@@ -520,7 +523,7 @@ class TestBotSpeaking(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_interruption_counts_as_the_bot_going_quiet(self):
         stream = _stream()
-        stream.frame_to_event(_bot_report("bot-started-speaking"))
+        stream.rtvi_message_to_event(_bot_message("bot-started-speaking"))
         stream._interrupted()
         self.assertFalse(stream.bot_speaking)
 
@@ -531,11 +534,11 @@ class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
     async def test_the_send_waits_until_the_bot_stops_speaking(self):
         session = _session()
         driver, stream = session._driver, session._stream
-        stream.frame_to_event(_bot_report("bot-started-speaking"))
+        stream.rtvi_message_to_event(_bot_message("bot-started-speaking"))
 
         async def stop_soon():
             await asyncio.sleep(0.15)
-            stream.frame_to_event(_bot_report("bot-stopped-speaking"))
+            stream.rtvi_message_to_event(_bot_message("bot-stopped-speaking"))
 
         task = asyncio.create_task(stop_soon())
         started = asyncio.get_running_loop().time()
@@ -565,12 +568,12 @@ class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
         # however late its transcription lands, is not turn 2's response.
         session = _session(bot_audio=True)
         driver, stream = session._driver, session._stream
-        stream.frame_to_event(_bot_report("bot-started-speaking"))
+        stream.rtvi_message_to_event(_bot_message("bot-started-speaking"))
         await stream.append({"type": "response", "text": "Spring in Japan is gorgeous."})
 
         async def finish_reply():
             await asyncio.sleep(0.1)
-            stream.frame_to_event(_bot_report("bot-stopped-speaking"))
+            stream.rtvi_message_to_event(_bot_message("bot-stopped-speaking"))
 
         task = asyncio.create_task(finish_reply())
         await driver._await_previous_reply()
@@ -587,16 +590,16 @@ class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
         # observing turn's, even when its LLM did not produce it.
         session = _session(bot_audio=True)
         driver, stream = session._driver, session._stream
-        stream.frame_to_event(_bot_report("bot-started-speaking"))
+        stream.rtvi_message_to_event(_bot_message("bot-started-speaking"))
 
         async def finish_reply():
             await asyncio.sleep(0.1)
-            stream.frame_to_event(_bot_report("bot-stopped-speaking"))
+            stream.rtvi_message_to_event(_bot_message("bot-stopped-speaking"))
 
         task = asyncio.create_task(finish_reply())
         await driver._await_previous_reply()
         await task
-        stream.frame_to_event(_bot_report("bot-started-speaking"))
+        stream.rtvi_message_to_event(_bot_message("bot-started-speaking"))
         await stream.bot_turn_stopped("Are you still there?")
         event = await stream.next_event("response", time.monotonic() + 0.05)
         self.assertEqual(event["text"], "Are you still there?")
@@ -640,7 +643,7 @@ class TestJudgeNoIsProvisional(unittest.IsolatedAsyncioTestCase):
     async def test_a_no_while_the_bot_speaks_waits_for_the_rest(self):
         judge = _FakeJudge(["no", "yes"])
         s = _matcher(judge, bot_audio=True)
-        s._stream.frame_to_event(_bot_report("bot-started-speaking"))
+        s._stream.rtvi_message_to_event(_bot_message("bot-started-speaking"))
         await s._stream.append({"type": "response", "text": "Sure. Why don't skeletons fight?"})
 
         async def rest():
@@ -709,7 +712,7 @@ class TestBotTurn(unittest.IsolatedAsyncioTestCase):
     async def test_turn_after_input_and_llm_restart_is_the_reply(self):
         s = _stream(bot_audio=True)
         s.input_sent()
-        s.frame_to_event(_bot_report("bot-llm-started"))  # the bot's new response
+        s.rtvi_message_to_event(_bot_message("bot-llm-started"))  # the bot's new response
         await s.bot_turn_stopped("Tokyo.")
         self.assertEqual(await self._responses(s), ["Tokyo."])
 
@@ -741,7 +744,7 @@ class TestInterruptionKeepsTheUsersTurn(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
         for msg_type in messages:
             message = {"label": RTVI.MESSAGE_LABEL, "type": msg_type}
-            reported = s.frame_to_event(InputTransportMessageFrame(message=message))
+            reported = s.rtvi_message_to_event(message)
             if reported is not None:
                 await s.append(reported)
         return await waiting
@@ -789,7 +792,7 @@ class TestInterruptingSendDropsOpenBotTurn(unittest.IsolatedAsyncioTestCase):
         _capture_injected(client)
         turns = self._Turns()
         client._bot_turns = turns  # type: ignore[assignment]
-        client._stream.frame_to_event(_bot_report("bot-started-speaking"))
+        client._stream.rtvi_message_to_event(_bot_message("bot-started-speaking"))
 
         await client.say("Actually, tell me a joke instead.")
 
@@ -818,10 +821,12 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         stream = _stream(bot_audio=True)
         gate = _BotSpeechGate(stream, EvalTrace(), deque())
         before = time.monotonic()
-        stream.frame_to_event(_bot_report("bot-started-speaking"))  # the send talks over the bot
+        stream.rtvi_message_to_event(
+            _bot_message("bot-started-speaking")
+        )  # the send talks over the bot
         stream.input_sent()
-        stream.frame_to_event(_bot_report("bot-stopped-speaking"))
-        stream.frame_to_event(_bot_report("bot-started-speaking"))  # the reply
+        stream.rtvi_message_to_event(_bot_message("bot-stopped-speaking"))
+        stream.rtvi_message_to_event(_bot_message("bot-started-speaking"))  # the reply
         after = time.monotonic()
         stale = _BotSegmentTranscriptionFrame(
             text="He had seen sunken,", user_id="", timestamp="", segment_started_at=before
@@ -839,11 +844,11 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         # The bot goes on speaking until it notices the user talking over it.
         stream = _stream(bot_audio=True)
         gate = _BotSpeechGate(stream, EvalTrace(), deque())
-        stream.frame_to_event(_bot_report("bot-started-speaking"))
+        stream.rtvi_message_to_event(_bot_message("bot-started-speaking"))
         stream.input_sent()
         still_speaking = time.monotonic()
-        stream.frame_to_event(_bot_report("bot-stopped-speaking"))
-        stream.frame_to_event(_bot_report("bot-started-speaking"))  # the reply
+        stream.rtvi_message_to_event(_bot_message("bot-stopped-speaking"))
+        stream.rtvi_message_to_event(_bot_message("bot-started-speaking"))  # the reply
         reply = time.monotonic()
         stale = _BotSegmentTranscriptionFrame(
             text="She swam past", user_id="", timestamp="", segment_started_at=still_speaking
@@ -864,7 +869,7 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         gate = _BotSpeechGate(stream, EvalTrace(), deque())
         before = time.monotonic()
         stream.observing_boundary()
-        stream.frame_to_event(_bot_report("bot-started-speaking"))  # a presence check
+        stream.rtvi_message_to_event(_bot_message("bot-started-speaking"))  # a presence check
         after = time.monotonic()
         stale = _BotSegmentTranscriptionFrame(
             text="Do you have cities in mind?", user_id="", timestamp="", segment_started_at=before
@@ -892,7 +897,7 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_plain_transcript_passes(self):
         stream = _stream(bot_audio=True)
-        stream.frame_to_event(_bot_report("bot-started-speaking"))
+        stream.rtvi_message_to_event(_bot_message("bot-started-speaking"))
         stream.input_sent()
         gate = _BotSpeechGate(stream, EvalTrace(), deque())
         plain = TranscriptionFrame(text="untagged", user_id="", timestamp="")
@@ -1072,7 +1077,7 @@ class TestBotEnded(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_wait_fails_at_once_once_the_bot_ended_the_call(self):
         s = _stream()
-        s.frame_to_event(_bot_report("bot-started-speaking"))
+        s.rtvi_message_to_event(_bot_message("bot-started-speaking"))
         s.bot_ended()
         await s.append({"type": "bot_ended"})
         self.assertFalse(s.bot_speaking)
@@ -1830,6 +1835,22 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
     async def _push(self, sink, *frames):
         for frame in frames:
             await sink.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+    async def test_frames_that_are_not_the_bots_messages_make_no_events(self):
+        # The STT's transcriptions build the bot's turn in the aggregator, and the
+        # aggregator's own VAD, speaking and interruption frames, computed from the
+        # bot's audio, are internal plumbing: none of them is a scenario event.
+        sink, _ = await self._sink()
+        await self._push(
+            sink,
+            TranscriptionFrame(text="Paris", user_id="bot", timestamp="t"),
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            UserStartedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+            InterruptionFrame(),
+        )
+        self.assertEqual(sink._stream.events_seen, [])
 
     async def test_inject_pushes_downstream(self):
         sink, nxt = await self._sink()
@@ -3827,10 +3848,10 @@ class TestMetricsEvent(unittest.IsolatedAsyncioTestCase):
 
     def test_a_metrics_message_becomes_an_event_with_its_data(self):
         data = {"ttfb": [{"processor": "DeepgramSTTService#0", "value": 0.31}]}
-        frame = InputTransportMessageFrame(
-            message={"label": RTVI.MESSAGE_LABEL, "type": "metrics", "data": data}
+        message = _bot_message("metrics", data)
+        self.assertEqual(
+            _stream().rtvi_message_to_event(message), {"type": "metrics", "data": data}
         )
-        self.assertEqual(_stream().frame_to_event(frame), {"type": "metrics", "data": data})
 
     async def test_metrics_are_recorded_apart_from_the_events_seen(self):
         s = _stream()
@@ -3905,21 +3926,21 @@ class TestFlowNodeEvent(unittest.IsolatedAsyncioTestCase):
     """The bot's flow entering a node is an event named by the node."""
 
     @staticmethod
-    def _frame(data) -> InputTransportMessageFrame:
-        return InputTransportMessageFrame(
-            message={"label": RTVI.MESSAGE_LABEL, "type": "flow-node-entered", "data": data}
-        )
+    def _message(data) -> dict:
+        return _bot_message("flow-node-entered", data)
 
     def test_a_node_entered_becomes_an_event_with_its_data_and_the_node_as_text(self):
         data = {"node": "verify.ask", "previous_node": "start", "parent": "verify"}
         self.assertEqual(
-            _stream().frame_to_event(self._frame(data)),
+            _stream().rtvi_message_to_event(self._message(data)),
             {"type": "flow_node", "data": data, "text": "verify.ask"},
         )
 
     async def test_an_expectation_matches_the_node(self):
         m = _matcher()
-        await m._stream.append(m._stream.frame_to_event(self._frame({"node": "verify.ask"})))
+        await m._stream.append(
+            m._stream.rtvi_message_to_event(self._message({"node": "verify.ask"}))
+        )
         expectation = EvalExpectation(event="flow_node", text_matches=["^verify[.]"])
         self.assertIsNone(await m.match(expectation, time.monotonic(), 1000, 0, 0))
         self.assertEqual(m.last_match_text, "verify.ask")
@@ -3929,15 +3950,13 @@ class TestServerMessageEvent(unittest.IsolatedAsyncioTestCase):
     """A message of the bot's own making is an event a scenario can read."""
 
     @staticmethod
-    def _frame(data) -> InputTransportMessageFrame:
-        return InputTransportMessageFrame(
-            message={"label": RTVI.MESSAGE_LABEL, "type": "server-message", "data": data}
-        )
+    def _message(data) -> dict:
+        return _bot_message("server-message", data)
 
     def test_a_server_message_becomes_an_event_with_its_data_and_its_text(self):
         data = {"done": True, "transcript": "héllo"}
         self.assertEqual(
-            _stream().frame_to_event(self._frame(data)),
+            _stream().rtvi_message_to_event(self._message(data)),
             {
                 "type": "server_message",
                 "data": data,
@@ -3946,13 +3965,13 @@ class TestServerMessageEvent(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_string_data_is_its_own_text(self):
-        event = _stream().frame_to_event(self._frame("finished"))
+        event = _stream().rtvi_message_to_event(self._message("finished"))
         self.assertEqual((event["data"], event["text"]), ("finished", "finished"))
 
     async def test_an_expectation_reads_the_data_and_records_it(self):
         m = _matcher()
         data = {"kind": "result", "ttfb": 0.31}
-        await m._stream.append(m._stream.frame_to_event(self._frame(data)))
+        await m._stream.append(m._stream.rtvi_message_to_event(self._message(data)))
         expectation = EvalExpectation(event="server_message", text_contains='"kind": "result"')
         self.assertIsNone(await m.match(expectation, time.monotonic(), 1000, 0, 0))
         self.assertEqual(json.loads(m.last_match_text), data)
@@ -3960,7 +3979,7 @@ class TestServerMessageEvent(unittest.IsolatedAsyncioTestCase):
     async def test_a_content_check_judges_the_next_message(self):
         # As for any event: the next one of the type is the one checked.
         m = _matcher()
-        await m._stream.append(m._stream.frame_to_event(self._frame({"kind": "progress"})))
+        await m._stream.append(m._stream.rtvi_message_to_event(self._message({"kind": "progress"})))
         expectation = EvalExpectation(event="server_message", text_contains='"kind": "result"')
         failure = await m.match(expectation, time.monotonic(), 1000, 0, 0)
         self.assertIsNotNone(failure)
@@ -3977,7 +3996,7 @@ class TestBotImageEvent(unittest.TestCase):
             "data": {"width": 64, "height": 32, "format": "RGB"},
         }
         self.assertEqual(
-            _stream().frame_to_event(InputTransportMessageFrame(message=message)),
+            _stream().rtvi_message_to_event(message),
             {"type": "image", "width": 64, "height": 32, "format": "RGB"},
         )
 
