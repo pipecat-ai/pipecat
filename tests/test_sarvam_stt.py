@@ -324,6 +324,39 @@ def test_settings_fields_cannot_be_constructor_kwargs(field, value):
         SarvamRealtimeSTTService(api_key="test-key", **{field: value})
 
 
+@pytest.mark.parametrize("service_cls", [SarvamSTTService, SarvamHttpSTTService])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("language", "hi-IN"),
+        ("extra", {"foo": "bar"}),
+    ],
+)
+def test_other_services_reject_settings_fields_as_constructor_kwargs(service_cls, field, value):
+    """``BaseObject`` drops unknown kwargs, so these would be ignored silently."""
+    with pytest.raises(TypeError, match=rf"{field} must be passed via settings="):
+        service_cls(api_key="test-key", **{field: value})
+
+
+def test_legacy_stt_rejects_its_own_vad_settings_as_constructor_kwargs():
+    with pytest.raises(TypeError, match="vad_signals must be passed via settings="):
+        SarvamSTTService(api_key="test-key", vad_signals=True)
+
+
+@pytest.mark.parametrize("service_cls", [SarvamSTTService, SarvamHttpSTTService])
+def test_base_class_kwargs_are_still_accepted(service_cls):
+    service = service_cls(api_key="test-key", name="my-stt", stt_ttfb_timeout=1.0)
+
+    assert service.name == "my-stt"
+
+
+def test_legacy_stt_deprecated_model_still_applies():
+    with pytest.warns(DeprecationWarning, match="model"):
+        service = SarvamSTTService(api_key="test-key", model="saaras:v3")
+
+    assert service._settings.model == "saaras:v3"
+
+
 def test_settings_values_are_applied_via_settings():
     service = SarvamRealtimeSTTService(
         api_key="test-key",
