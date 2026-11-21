@@ -546,19 +546,18 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         Returns:
             Dictionary formatted for Bedrock's tool specification.
         """
-        return {
-            "toolSpec": {
-                "name": function.name,
-                "description": function.description,
-                "inputSchema": {
-                    "json": {
-                        "type": "object",
-                        "properties": function.properties,
-                        "required": function.required,
-                    },
-                },
-            }
+        tool_spec: dict[str, Any] = {"name": function.name}
+        # Bedrock rejects an empty description.
+        if function.description:
+            tool_spec["description"] = function.description
+        tool_spec["inputSchema"] = {
+            "json": {
+                "type": "object",
+                "properties": function.properties,
+                "required": function.required,
+            },
         }
+        return {"toolSpec": tool_spec}
 
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> list[dict[str, Any]]:
         """Convert function schemas to Bedrock's function-calling format.
