@@ -17,7 +17,8 @@ class TestGoogleRTVIProcessor(unittest.TestCase):
         params = RTVIObserverParams(bot_llm_enabled=False, metrics_enabled=False)
         observer = GoogleRTVIProcessor().create_rtvi_observer(params=params)
         self.assertIsInstance(observer, GoogleRTVIObserver)
-        self.assertIs(observer._params, params)
+        # The observer keeps its own copy of the params, with the same settings.
+        self.assertEqual(observer._params, params)
 
 
 if __name__ == "__main__":
