@@ -1,0 +1,1 @@
+- Added `YoobTTSService` and `YoobSTTService` (`pipecat.services.yoob`): Yoob expressive speech with inline tags such as `[laughing]`, and live transcription with interim results, emotion and sound tags.
