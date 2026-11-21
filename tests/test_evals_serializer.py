@@ -22,20 +22,17 @@ from pipecat.evals.serializer import (
     EVAL_IMAGE_MESSAGE_TYPE,
     EvalClientSerializer,
     EvalConnectionFlags,
-    EvalFunctionCallCancelFrame,
     EvalSerializer,
     eval_connect_message,
     parse_eval_connect,
 )
 from pipecat.frames.frames import (
-    FunctionCallResultFrame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
     LLMMessagesUpdateFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     OutputTransportMessageUrgentFrame,
-    SystemFrame,
     TranscriptionFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
@@ -312,29 +309,22 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frame.message["type"], "flow-node-entered")
         self.assertEqual(frame.message["data"], data)
 
-    async def test_cancelled_function_call_is_not_a_system_frame(self):
-        # Queued like the in-progress and result frames, so it can't overtake
-        # the bot's earlier function-call reports.
-        frame = await self.serializer.deserialize(
-            self._server(
-                "llm-function-call-stopped",
-                {"function_name": "write_report", "tool_call_id": "call_1", "cancelled": True},
+    async def test_function_calls_are_kept_like_the_bots_other_reports(self):
+        # The same kind of frame as the bot's other reports, so none can
+        # overtake another: they reach the harness in the order the bot sent them.
+        for cancelled in (True, False):
+            frame = await self.serializer.deserialize(
+                self._server(
+                    "llm-function-call-stopped",
+                    {
+                        "function_name": "write_report",
+                        "tool_call_id": "call_1",
+                        "cancelled": cancelled,
+                    },
+                )
             )
-        )
-        self.assertIsInstance(frame, EvalFunctionCallCancelFrame)
-        self.assertNotIsInstance(frame, SystemFrame)
-        self.assertFalse(frame.interruptible)
-        self.assertEqual(frame.function_name, "write_report")
-        self.assertEqual(frame.tool_call_id, "call_1")
-
-    async def test_finished_function_call_is_a_result(self):
-        frame = await self.serializer.deserialize(
-            self._server(
-                "llm-function-call-stopped",
-                {"function_name": "write_report", "tool_call_id": "call_1", "cancelled": False},
-            )
-        )
-        self.assertIsInstance(frame, FunctionCallResultFrame)
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["data"]["cancelled"], cancelled)
 
     async def test_generic_messages_delegate_to_base(self):
         # Non-eval RTVI messages keep the base RTVIClientSerializer mapping.

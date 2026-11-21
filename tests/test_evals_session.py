@@ -68,7 +68,6 @@ from pipecat.frames.frames import (
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
     FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
     InputTransportMessageFrame,
     InterruptionFrame,
     LLMContextFrame,
@@ -417,8 +416,13 @@ class TestFramesToEvents(unittest.TestCase):
         s = _stream()
         event = self._bare(
             s.frame_to_event(
-                FunctionCallInProgressFrame(
-                    function_name="get_weather", tool_call_id="c", arguments={"city": "Paris"}
+                _bot_report(
+                    "llm-function-call-in-progress",
+                    {
+                        "function_name": "get_weather",
+                        "tool_call_id": "c",
+                        "arguments": {"city": "Paris"},
+                    },
                 )
             )
         )
@@ -1836,7 +1840,9 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
             *_bot_response("Hello"),
             _bot_report("bot-tts-text", {"text": "Hello"}),
             _bot_report("bot-started-speaking"),
-            FunctionCallInProgressFrame(function_name="f", tool_call_id="c", arguments={}),
+            _bot_report(
+                "llm-function-call-in-progress", {"function_name": "f", "tool_call_id": "c"}
+            ),
             InputTransportMessageFrame(message={"label": RTVI.MESSAGE_LABEL, "type": "x"}),
         )
         self.assertEqual(nxt.frames, [])
@@ -1882,13 +1888,15 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
             sink,
             _bot_report("bot-llm-started"),
             _bot_report("bot-llm-text", {"text": "Let me check."}),
-            FunctionCallInProgressFrame(function_name="f", tool_call_id="c", arguments={}),
+            _bot_report(
+                "llm-function-call-in-progress", {"function_name": "f", "tool_call_id": "c"}
+            ),
             _bot_report("bot-llm-stopped"),
         )
         self.assertEqual(context.get_messages(), [])  # held: the call is still running
         await self._push(
             sink,
-            FunctionCallResultFrame(function_name="f", tool_call_id="c", arguments={}, result=1),
+            _bot_report("llm-function-call-stopped", {"function_name": "f", "tool_call_id": "c"}),
             *_bot_response("It's sunny."),
         )
         self.assertEqual(

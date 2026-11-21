@@ -46,7 +46,6 @@ from pipecat.evals.serializer import (
     EVAL_STT_SAMPLE_RATE,
     EvalClientSerializer,
     EvalConnectionFlags,
-    EvalFunctionCallCancelFrame,
 )
 from pipecat.evals.session import DEFAULT_BOT_READY_TIMEOUT_S, EvalSessionParams
 from pipecat.evals.tts import CachingTTSService, tts_sample_rate
@@ -54,8 +53,6 @@ from pipecat.frames.frames import (
     DataFrame,
     EndFrame,
     Frame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
     InputTransportMessageFrame,
     InterruptionFrame,
     LLMConfigureOutputFrame,
@@ -91,18 +88,6 @@ from pipecat.workers.runner import WorkerRunner
 
 # The default, at the name the deprecated ``pipecat.evals.harness`` re-exports.
 BOT_READY_TIMEOUT_S = DEFAULT_BOT_READY_TIMEOUT_S
-
-
-# Frames the bot produced: the sink turns them into events and stops them here.
-# Everything downstream of the sink speaks for the user (a persona LLM, the user
-# TTS, the output) and must never see the bot's text or reports as its own
-# input. The aggregator's context frame and lifecycle frames pass.
-_BOT_FRAMES = (
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
-    EvalFunctionCallCancelFrame,
-    InputTransportMessageFrame,
-)
 
 
 def _close_description(websocket: ClientConnection) -> str:
@@ -292,7 +277,10 @@ class _BotFrameSink(FrameProcessor):
         if isinstance(frame, _BotSegmentTranscribedFrame):
             self._stream.bot_segment_transcribed()
             return
-        if isinstance(frame, _BOT_FRAMES):
+        if isinstance(frame, InputTransportMessageFrame):
+            # The bot's reports, events now. Everything downstream of the sink
+            # speaks for the user (a persona LLM, the user TTS, the output) and
+            # must never take them as its own input.
             return
         elif isinstance(frame, InterruptionFrame) and self._persona is None:
             return
