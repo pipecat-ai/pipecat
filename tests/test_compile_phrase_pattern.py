@@ -41,6 +41,14 @@ class TestCompilePhrasePattern(unittest.TestCase):
         self.assertIsNotNone(pattern.search("hey 小助手今天天气怎么样"))
         self.assertIsNone(pattern.search("they 小助手"))
 
+    def test_phrase_edges_with_combining_marks(self):
+        # The vowel signs that end these words are not word characters for `re`
+        pattern = compile_phrase_pattern("नमस्ते")
+        self.assertIsNotNone(pattern.search("नमस्ते दोस्त"))
+        self.assertIsNotNone(pattern.search("अरे नमस्ते"))
+        self.assertIsNone(pattern.search("नमस्तेजी"))
+        self.assertIsNotNone(compile_phrase_pattern("வணக்கம்").search("வணக்கம் நண்பா"))
+
     def test_empty_phrase_keeps_previous_behavior(self):
         self.assertEqual(compile_phrase_pattern("").pattern, r"\b\b")
 
