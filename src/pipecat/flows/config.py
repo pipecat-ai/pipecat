@@ -117,7 +117,8 @@ class FlowConfig(BaseModel):
     them, such as the id of the element a node stands for in an editor. Flows
     carries it and never acts on it, and it is never sent to the LLM. A
     :class:`~pipecat.flows.Flow` copies it onto the node configs and function
-    schemas it builds.
+    schemas it builds, and :class:`~pipecat.flows.FlowManager` passes it to
+    ``on_node_entered`` handlers and to an RTVI client as the flow moves.
 
     Parameters:
         initial_node: Name of the node the flow starts in.
