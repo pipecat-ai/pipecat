@@ -13,10 +13,8 @@ import unittest
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     InputTransportMessageFrame,
-    InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
-    TranscriptionFrame,
 )
 from pipecat.serializers.rtvi_client import RTVIClientSerializer
 
@@ -56,22 +54,16 @@ class TestRTVIClientDeserialize(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(frame, InputTransportMessageFrame)
             self.assertEqual(frame.message["type"], msg_type)
 
-    async def test_user_transcription_final_vs_interim(self):
-        final = await self.s.deserialize(
-            _server(
-                "user-transcription",
-                {"text": "hello", "user_id": "u", "timestamp": "t", "final": True},
-            )
-        )
-        self.assertIsInstance(final, TranscriptionFrame)
-        self.assertEqual(final.text, "hello")
-        self.assertEqual(final.user_id, "u")
-
-        interim = await self.s.deserialize(
-            _server("user-transcription", {"text": "hel", "final": False})
-        )
-        self.assertIsInstance(interim, InterimTranscriptionFrame)
-        self.assertEqual(interim.text, "hel")
+    async def test_user_transcription_stays_a_raw_message(self):
+        # The bot's transcription of this pipeline's speech: a TranscriptionFrame
+        # would pass it off as this pipeline's own.
+        for data in (
+            {"text": "hello", "user_id": "u", "timestamp": "t", "final": True},
+            {"text": "hel", "final": False},
+        ):
+            frame = await self.s.deserialize(_server("user-transcription", data))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["data"], data)
 
     async def test_function_calls_stay_raw_messages(self):
         # Reports about the bot's own function calls: this pipeline's function

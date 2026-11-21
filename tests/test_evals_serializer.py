@@ -33,7 +33,6 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputImageRawFrame,
     OutputTransportMessageUrgentFrame,
-    TranscriptionFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
 )
@@ -327,15 +326,15 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.serializer.deserialize(self._server("bot-ready")))
         self.assertIsNone(await self.serializer.deserialize("not json"))
 
-    async def test_base_no_longer_maps_user_transcription_to_transcription(self):
-        # Sanity: only the eval subclass diverts user-transcription; the generic
-        # base still produces a TranscriptionFrame (unchanged for other clients).
+    async def test_base_keeps_user_transcription_raw(self):
+        # The generic base keeps it as the bot's raw report; the eval subclass
+        # drops it, since user-input carries the same transcriptions.
         from pipecat.serializers.rtvi_client import RTVIClientSerializer
 
         frame = await RTVIClientSerializer().deserialize(
             self._server("user-transcription", {"text": "hi", "final": True})
         )
-        self.assertIsInstance(frame, TranscriptionFrame)
+        self.assertIsInstance(frame, InputTransportMessageFrame)
 
 
 if __name__ == "__main__":

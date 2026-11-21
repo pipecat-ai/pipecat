@@ -27,7 +27,6 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     InputTransportMessageFrame,
     OutputAudioRawFrame,
-    TranscriptionFrame,
 )
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.serializers.rtvi_client import RTVIClientSerializer
@@ -162,7 +161,7 @@ class _BotServer:
 class TestRTVIClientTransportIntegration(unittest.IsolatedAsyncioTestCase):
     """Run the transport in a pipeline against a real RTVI server."""
 
-    async def test_bot_messages_become_frames(self):
+    async def test_bot_messages_arrive_as_raw_messages(self):
         replies = [
             _rtvi("bot-llm-started"),
             _rtvi("bot-llm-text", {"text": "Paris"}),
@@ -180,14 +179,13 @@ class TestRTVIClientTransportIntegration(unittest.IsolatedAsyncioTestCase):
                 start_timeout=5.0,  # the input transport connects before the pipeline starts
             )
 
-        # The bot's reports about its own LLM arrived as raw messages, in order,
-        # and its transcription as a frame.
+        # The bot's reports arrived as raw messages, in the order it sent them.
         reports = [f.message for f in down if isinstance(f, InputTransportMessageFrame)]
         self.assertEqual(
-            [m["type"] for m in reports], ["bot-llm-started", "bot-llm-text", "bot-llm-stopped"]
+            [m["type"] for m in reports],
+            ["bot-llm-started", "bot-llm-text", "bot-llm-stopped", "user-transcription"],
         )
         self.assertEqual(reports[1]["data"]["text"], "Paris")
-        self.assertEqual([f.text for f in down if isinstance(f, TranscriptionFrame)], ["hello"])
 
         # The transport completed the handshake (the server saw client-ready).
         self.assertTrue(any(m.get("type") == "client-ready" for m in server.received))
