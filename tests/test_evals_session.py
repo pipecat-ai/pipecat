@@ -89,6 +89,7 @@ from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -698,6 +699,22 @@ class TestJudgeNoIsProvisional(unittest.IsolatedAsyncioTestCase):
         assert failure is not None
         self.assertEqual(failure.kind, "judge_no_verdict")
         self.assertIn("judge said none — (none)", failure.reason)
+
+
+class TestBotTurnStrategies(unittest.TestCase):
+    """A persona's LLM also judges whether the bot finished; a scripted run's turns are smart turn's."""
+
+    def test_a_simulation_waits_for_the_persona_to_judge_the_bot_done(self):
+        # Smart turn hears a finished turn at the end of each sentence the bot's
+        # TTS speaks; the turn ends once the persona's LLM marks it complete.
+        aggregator = _client(bot_audio=True)._bot_turn_aggregator(LLMContext(), persona=True)
+        self.assertIsInstance(
+            aggregator._params.user_turn_strategies, FilterIncompleteUserTurnStrategies
+        )
+
+    def test_a_scripted_run_keeps_the_default_strategies(self):
+        aggregator = _client(bot_audio=True)._bot_turn_aggregator(LLMContext(), persona=False)
+        self.assertIsNone(aggregator._params.user_turn_strategies)
 
 
 class TestBotTurn(unittest.IsolatedAsyncioTestCase):

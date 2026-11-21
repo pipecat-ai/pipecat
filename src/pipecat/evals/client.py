@@ -84,6 +84,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transports.websocket.client import WebsocketClientParams
+from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 # The default, at the name the deprecated ``pipecat.evals.harness`` re-exports.
@@ -966,7 +967,7 @@ class EvalClient:
         if bot_stt is not None:
             starts: deque[float] = deque()
             _tag_bot_segments(bot_stt, starts)
-            self._bot_turns = self._bot_turn_aggregator(context)
+            self._bot_turns = self._bot_turn_aggregator(context, persona=persona is not None)
             inbound += [bot_stt, _BotSpeechGate(self._stream, self._trace, starts), self._bot_turns]
 
         speech = [user_tts] if user_tts is not None else []
@@ -983,16 +984,26 @@ class EvalClient:
             ]
         return inbound + [self._sink] + outbound
 
-    def _bot_turn_aggregator(self, context: LLMContext) -> LLMUserAggregator:
+    def _bot_turn_aggregator(self, context: LLMContext, *, persona: bool) -> LLMUserAggregator:
         """The aggregator that cuts the bot's transcribed speech into turns (audio mode).
 
         Its turn hooks give the stream the timing of the bot's replies, and its
         finished turn is the persona's next user message.
+
+        Args:
+            context: The context the aggregator writes the bot's turns to.
+            persona: Whether a persona answers the bot's turns (a simulation).
+                Its LLM then also judges whether the bot finished what it was
+                saying: smart turn hears a finished turn at the end of every
+                sentence the bot's TTS speaks, and the persona waits for the
+                rest of a reply that reads unfinished.
         """
+        strategies = FilterIncompleteUserTurnStrategies() if persona else None
         aggregator = LLMUserAggregator(
             context,
             params=LLMUserAggregatorParams(
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.4))
+                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.4)),
+                user_turn_strategies=strategies,
             ),
         )
 
