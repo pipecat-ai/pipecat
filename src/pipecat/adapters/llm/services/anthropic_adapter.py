@@ -16,6 +16,7 @@ from anthropic import NotGiven as AnthropicNotGiven
 from anthropic.types.cache_control_ephemeral_param import CacheControlEphemeralParam
 from anthropic.types.message_param import MessageParam
 from anthropic.types.text_block_param import TextBlockParam
+from anthropic.types.tool_choice_param import ToolChoiceParam
 from anthropic.types.tool_union_param import ToolUnionParam
 from loguru import logger
 
@@ -25,9 +26,11 @@ from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
+    LLMContextToolChoice,
     LLMSpecificMessage,
     LLMStandardMessage,
 )
+from pipecat.utils.types import NotGiven, is_given
 
 _T = TypeVar("_T")
 
@@ -56,12 +59,47 @@ def anthropic_is_given(value: _T | AnthropicNotGiven) -> TypeGuard[_T]:
     return not isinstance(value, AnthropicNotGiven)
 
 
+def anthropic_from_llm_context_tool_choice(
+    tool_choice: LLMContextToolChoice | NotGiven,
+) -> ToolChoiceParam | AnthropicNotGiven:
+    """Map an LLMContext ``tool_choice`` to Anthropic's ``tool_choice`` param.
+
+    Pipecat uses the OpenAI-shaped ``LLMContextToolChoice`` values. Anthropic
+    expects ``{"type": "none"|"auto"|"any"|"tool"}`` (with ``name`` for
+    ``tool``). ``"required"`` maps to ``{"type": "any"}``.
+    """
+    if not is_given(tool_choice):
+        return ANTHROPIC_NOT_GIVEN
+    if tool_choice == "none":
+        return {"type": "none"}
+    if tool_choice == "auto":
+        return {"type": "auto"}
+    if tool_choice == "required":
+        return {"type": "any"}
+    if isinstance(tool_choice, dict):
+        # OpenAI's ChatCompletionToolChoiceOptionParam is a TypedDict union;
+        # narrow to a plain mapping so pyright accepts key access across variants.
+        choice = cast(dict[str, Any], tool_choice)
+        if choice.get("type") in ("none", "auto", "any"):
+            return cast(ToolChoiceParam, {"type": choice["type"]})
+        name = None
+        function = choice.get("function")
+        if isinstance(function, dict):
+            name = function.get("name")
+        elif choice.get("type") == "tool":
+            name = choice.get("name")
+        if name:
+            return {"type": "tool", "name": name}
+    return ANTHROPIC_NOT_GIVEN
+
+
 class AnthropicLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking Anthropic's LLM API."""
 
     system: str | list[TextBlockParam] | AnthropicNotGiven
     messages: list[MessageParam]
     tools: list[ToolUnionParam]
+    tool_choice: ToolChoiceParam | AnthropicNotGiven
 
 
 class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
@@ -129,6 +167,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             ),
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools) or [],
+            "tool_choice": anthropic_from_llm_context_tool_choice(context.tool_choice),
         }
 
     def get_messages_for_logging(self, context: LLMContext) -> list[dict[str, Any]]:
