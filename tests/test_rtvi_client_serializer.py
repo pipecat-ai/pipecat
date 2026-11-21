@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
     TranscriptionFrame,
-    TTSTextFrame,
 )
 from pipecat.serializers.rtvi_client import RTVIClientSerializer
 
@@ -60,10 +59,10 @@ class TestRTVIClientDeserialize(unittest.IsolatedAsyncioTestCase):
         frame = await self.s.deserialize(_server("bot-llm-marker", {"text": "", "raw": "Hi"}))
         self.assertEqual((frame.marker, frame.kind, frame.raw), (None, None, "Hi"))
 
-    async def test_tts_text(self):
+    async def test_tts_text_stays_a_raw_message(self):
         frame = await self.s.deserialize(_server("bot-tts-text", {"text": "Hello there!"}))
-        self.assertIsInstance(frame, TTSTextFrame)
-        self.assertEqual(frame.text, "Hello there!")
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["data"]["text"], "Hello there!")
 
     async def test_speaking_and_interruption_stay_raw_messages(self):
         # Reports about the bot's own output: this pipeline's speaking frames and

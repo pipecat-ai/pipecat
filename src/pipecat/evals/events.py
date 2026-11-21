@@ -88,7 +88,6 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMarkerResponseFrame,
     LLMTextFrame,
-    TTSTextFrame,
 )
 
 # The bot's reports that end its current turn: what it produced so far is not
@@ -524,10 +523,6 @@ class EvalEventStream:
             if self._llm_text_at is not None:
                 event["started_at"] = self._llm_text_at
             return event
-        elif isinstance(frame, TTSTextFrame):
-            if self._bot_audio:
-                return self._segment_event("tts_response", frame.text)
-            return None
         elif isinstance(frame, (FunctionCallInProgressFrame, ExternalFunctionCallInProgressFrame)):
             return {
                 "type": "function_call",
@@ -644,6 +639,10 @@ class EvalEventStream:
             return {"type": "bot_started_speaking"}
         elif msg_type == "bot-stopped-speaking":
             return {"type": "bot_stopped_speaking"}
+        elif msg_type == "bot-tts-text":
+            if self._bot_audio:
+                return self._segment_event("tts_response", data.get("text", ""))
+            return None
         elif msg_type == "user-started-speaking":
             return {"type": "user_started_speaking"}
         elif msg_type == "bot-interrupted":
