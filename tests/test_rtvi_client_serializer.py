@@ -12,11 +12,9 @@ import unittest
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     FunctionCallInProgressFrame,
+    InputTransportMessageFrame,
     InterimTranscriptionFrame,
-    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerResponseFrame,
@@ -67,16 +65,13 @@ class TestRTVIClientDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(frame, TTSTextFrame)
         self.assertEqual(frame.text, "Hello there!")
 
-    async def test_speaking_and_interruption(self):
-        self.assertIsInstance(
-            await self.s.deserialize(_server("bot-started-speaking")), BotStartedSpeakingFrame
-        )
-        self.assertIsInstance(
-            await self.s.deserialize(_server("bot-stopped-speaking")), BotStoppedSpeakingFrame
-        )
-        self.assertIsInstance(
-            await self.s.deserialize(_server("bot-interrupted")), InterruptionFrame
-        )
+    async def test_speaking_and_interruption_stay_raw_messages(self):
+        # Reports about the bot's own output: this pipeline's speaking frames and
+        # interruptions would be about its own.
+        for msg_type in ("bot-started-speaking", "bot-stopped-speaking", "bot-interrupted"):
+            frame = await self.s.deserialize(_server(msg_type))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["type"], msg_type)
 
     async def test_user_transcription_final_vs_interim(self):
         final = await self.s.deserialize(

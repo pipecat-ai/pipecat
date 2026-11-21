@@ -80,8 +80,6 @@ from collections.abc import Callable
 from pipecat.evals.results import EvalTrace
 from pipecat.evals.serializer import EVAL_BOT_IMAGE_TYPE, EvalFunctionCallCancelFrame
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     ExternalFunctionCallCancelFrame,
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
@@ -474,10 +472,11 @@ class EvalEventStream:
 
         The LLM text is buffered and emitted as one ``llm_response`` when the
         response ends; a marker is its own ``llm_marker`` as soon as it
-        arrives; ``tts_response`` is emitted only in audio mode; the bot's
-        reports about the harness (its VAD, speaking, and transcription messages)
-        become their events. The audio-mode ``response`` is not made here: the
-        aggregator appends it when the bot's spoken turn ends.
+        arrives; ``tts_response`` is emitted only in audio mode; the bot's raw
+        reports, about its own speaking and interruptions and about the harness
+        (its VAD and transcription messages), become their events. The
+        audio-mode ``response`` is not made here: the aggregator appends it
+        when the bot's spoken turn ends.
 
         Args:
             frame: A frame the bot-facing transport produced.
@@ -488,8 +487,14 @@ class EvalEventStream:
         self.touch()
         if isinstance(frame, InputTransportMessageFrame):
             event = self._message_to_event(frame.message)
-            if event is not None and event["type"] in _INTERRUPTION_EVENTS:
+            if event is None:
+                return None
+            if event["type"] in _INTERRUPTION_EVENTS:
                 self._interrupted()
+            elif event["type"] == "bot_started_speaking":
+                self._bot_started_speaking()
+            elif event["type"] == "bot_stopped_speaking":
+                self._bot_quiet.set()
             return event
         elif isinstance(frame, LLMFullResponseStartFrame):
             self._awaiting_reply = False
@@ -526,17 +531,6 @@ class EvalEventStream:
             if self._bot_audio:
                 return self._segment_event("tts_response", frame.text)
             return None
-        elif isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_quiet.clear()
-            if self._talked_over_until == math.inf:
-                self._talked_over_until = time.monotonic()
-            if self._observing:
-                self._observing = False
-                self._awaiting_reply = False
-            return {"type": "bot_started_speaking"}
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_quiet.set()
-            return {"type": "bot_stopped_speaking"}
         elif isinstance(frame, (FunctionCallInProgressFrame, ExternalFunctionCallInProgressFrame)):
             return {
                 "type": "function_call",
@@ -621,6 +615,15 @@ class EvalEventStream:
         self._talked_over_until = math.inf
         self._observing = True
 
+    def _bot_started_speaking(self) -> None:
+        """The bot reported it started speaking: it is no longer quiet, and its speech now is the turn's."""
+        self._bot_quiet.clear()
+        if self._talked_over_until == math.inf:
+            self._talked_over_until = time.monotonic()
+        if self._observing:
+            self._observing = False
+            self._awaiting_reply = False
+
     def _interrupted(self) -> None:
         """The bot reported an interruption: drop its unfinished response and wait for a fresh reply.
 
@@ -635,12 +638,16 @@ class EvalEventStream:
         self._bot_quiet.set()
 
     def _message_to_event(self, message) -> dict | None:
-        """Map one of the bot's reports about the harness to its event, if any."""
+        """Map one of the bot's reports, about its own output or about the harness, to its event, if any."""
         if not isinstance(message, dict):
             return None
         msg_type = message.get("type")
         data = message.get("data") or {}
-        if msg_type == "user-started-speaking":
+        if msg_type == "bot-started-speaking":
+            return {"type": "bot_started_speaking"}
+        elif msg_type == "bot-stopped-speaking":
+            return {"type": "bot_stopped_speaking"}
+        elif msg_type == "user-started-speaking":
             return {"type": "user_started_speaking"}
         elif msg_type == "bot-interrupted":
             return {"type": "bot_interrupted"}

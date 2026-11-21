@@ -63,8 +63,6 @@ from pipecat.evals.script_session import EvalScriptSession
 from pipecat.evals.tts import CachingTTSService
 from pipecat.expressive.perception import PerceptionSignal
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     ErrorFrame,
     ExternalFunctionCallCancelFrame,
     ExternalFunctionCallInProgressFrame,
@@ -112,6 +110,11 @@ def _session(bot_audio: bool = False) -> EvalScriptSession:
 
 def _stream(bot_audio: bool = False) -> EvalEventStream:
     return EvalEventStream(bot_audio=bot_audio, trace=EvalTrace())
+
+
+def _bot_report(msg_type: str) -> InputTransportMessageFrame:
+    """One of the bot's reports about its own output, as the raw message the serializer keeps it as."""
+    return InputTransportMessageFrame(message={"label": RTVI.MESSAGE_LABEL, "type": msg_type})
 
 
 def _matcher(judge=None, bot_audio: bool = False) -> ExpectationMatcher:
@@ -487,20 +490,22 @@ class TestBotSpeaking(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await stream.wait_bot_quiet(0.01))
 
         self.assertEqual(
-            stream.frame_to_event(BotStartedSpeakingFrame()), {"type": "bot_started_speaking"}
+            stream.frame_to_event(_bot_report("bot-started-speaking")),
+            {"type": "bot_started_speaking"},
         )
         self.assertTrue(stream.bot_speaking)
         self.assertFalse(await stream.wait_bot_quiet(0.05))
 
         self.assertEqual(
-            stream.frame_to_event(BotStoppedSpeakingFrame()), {"type": "bot_stopped_speaking"}
+            stream.frame_to_event(_bot_report("bot-stopped-speaking")),
+            {"type": "bot_stopped_speaking"},
         )
         self.assertFalse(stream.bot_speaking)
         self.assertTrue(await stream.wait_bot_quiet(0.01))
 
     async def test_an_interruption_counts_as_the_bot_going_quiet(self):
         stream = _stream()
-        stream.frame_to_event(BotStartedSpeakingFrame())
+        stream.frame_to_event(_bot_report("bot-started-speaking"))
         stream._interrupted()
         self.assertFalse(stream.bot_speaking)
 
@@ -511,11 +516,11 @@ class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
     async def test_the_send_waits_until_the_bot_stops_speaking(self):
         session = _session()
         driver, stream = session._driver, session._stream
-        stream.frame_to_event(BotStartedSpeakingFrame())
+        stream.frame_to_event(_bot_report("bot-started-speaking"))
 
         async def stop_soon():
             await asyncio.sleep(0.15)
-            stream.frame_to_event(BotStoppedSpeakingFrame())
+            stream.frame_to_event(_bot_report("bot-stopped-speaking"))
 
         task = asyncio.create_task(stop_soon())
         started = asyncio.get_running_loop().time()
@@ -545,12 +550,12 @@ class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
         # however late its transcription lands, is not turn 2's response.
         session = _session(bot_audio=True)
         driver, stream = session._driver, session._stream
-        stream.frame_to_event(BotStartedSpeakingFrame())
+        stream.frame_to_event(_bot_report("bot-started-speaking"))
         await stream.append({"type": "response", "text": "Spring in Japan is gorgeous."})
 
         async def finish_reply():
             await asyncio.sleep(0.1)
-            stream.frame_to_event(BotStoppedSpeakingFrame())
+            stream.frame_to_event(_bot_report("bot-stopped-speaking"))
 
         task = asyncio.create_task(finish_reply())
         await driver._await_previous_reply()
@@ -567,16 +572,16 @@ class TestSendWaitsForTheBot(unittest.IsolatedAsyncioTestCase):
         # observing turn's, even when its LLM did not produce it.
         session = _session(bot_audio=True)
         driver, stream = session._driver, session._stream
-        stream.frame_to_event(BotStartedSpeakingFrame())
+        stream.frame_to_event(_bot_report("bot-started-speaking"))
 
         async def finish_reply():
             await asyncio.sleep(0.1)
-            stream.frame_to_event(BotStoppedSpeakingFrame())
+            stream.frame_to_event(_bot_report("bot-stopped-speaking"))
 
         task = asyncio.create_task(finish_reply())
         await driver._await_previous_reply()
         await task
-        stream.frame_to_event(BotStartedSpeakingFrame())
+        stream.frame_to_event(_bot_report("bot-started-speaking"))
         await stream.bot_turn_stopped("Are you still there?")
         event = await stream.next_event("response", time.monotonic() + 0.05)
         self.assertEqual(event["text"], "Are you still there?")
@@ -620,7 +625,7 @@ class TestJudgeNoIsProvisional(unittest.IsolatedAsyncioTestCase):
     async def test_a_no_while_the_bot_speaks_waits_for_the_rest(self):
         judge = _FakeJudge(["no", "yes"])
         s = _matcher(judge, bot_audio=True)
-        s._stream.frame_to_event(BotStartedSpeakingFrame())
+        s._stream.frame_to_event(_bot_report("bot-started-speaking"))
         await s._stream.append({"type": "response", "text": "Sure. Why don't skeletons fight?"})
 
         async def rest():
@@ -769,7 +774,7 @@ class TestInterruptingSendDropsOpenBotTurn(unittest.IsolatedAsyncioTestCase):
         _capture_injected(client)
         turns = self._Turns()
         client._bot_turns = turns  # type: ignore[assignment]
-        client._stream.frame_to_event(BotStartedSpeakingFrame())
+        client._stream.frame_to_event(_bot_report("bot-started-speaking"))
 
         await client.say("Actually, tell me a joke instead.")
 
@@ -798,10 +803,10 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         stream = _stream(bot_audio=True)
         gate = _BotSpeechGate(stream, EvalTrace(), deque())
         before = time.monotonic()
-        stream.frame_to_event(BotStartedSpeakingFrame())  # the send talks over the bot
+        stream.frame_to_event(_bot_report("bot-started-speaking"))  # the send talks over the bot
         stream.input_sent()
-        stream.frame_to_event(BotStoppedSpeakingFrame())
-        stream.frame_to_event(BotStartedSpeakingFrame())  # the reply
+        stream.frame_to_event(_bot_report("bot-stopped-speaking"))
+        stream.frame_to_event(_bot_report("bot-started-speaking"))  # the reply
         after = time.monotonic()
         stale = _BotSegmentTranscriptionFrame(
             text="He had seen sunken,", user_id="", timestamp="", segment_started_at=before
@@ -819,11 +824,11 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         # The bot goes on speaking until it notices the user talking over it.
         stream = _stream(bot_audio=True)
         gate = _BotSpeechGate(stream, EvalTrace(), deque())
-        stream.frame_to_event(BotStartedSpeakingFrame())
+        stream.frame_to_event(_bot_report("bot-started-speaking"))
         stream.input_sent()
         still_speaking = time.monotonic()
-        stream.frame_to_event(BotStoppedSpeakingFrame())
-        stream.frame_to_event(BotStartedSpeakingFrame())  # the reply
+        stream.frame_to_event(_bot_report("bot-stopped-speaking"))
+        stream.frame_to_event(_bot_report("bot-started-speaking"))  # the reply
         reply = time.monotonic()
         stale = _BotSegmentTranscriptionFrame(
             text="She swam past", user_id="", timestamp="", segment_started_at=still_speaking
@@ -844,7 +849,7 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
         gate = _BotSpeechGate(stream, EvalTrace(), deque())
         before = time.monotonic()
         stream.observing_boundary()
-        stream.frame_to_event(BotStartedSpeakingFrame())  # a presence check
+        stream.frame_to_event(_bot_report("bot-started-speaking"))  # a presence check
         after = time.monotonic()
         stale = _BotSegmentTranscriptionFrame(
             text="Do you have cities in mind?", user_id="", timestamp="", segment_started_at=before
@@ -872,7 +877,7 @@ class TestBotSpeechGate(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_plain_transcript_passes(self):
         stream = _stream(bot_audio=True)
-        stream.frame_to_event(BotStartedSpeakingFrame())
+        stream.frame_to_event(_bot_report("bot-started-speaking"))
         stream.input_sent()
         gate = _BotSpeechGate(stream, EvalTrace(), deque())
         plain = TranscriptionFrame(text="untagged", user_id="", timestamp="")
@@ -1052,7 +1057,7 @@ class TestBotEnded(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_wait_fails_at_once_once_the_bot_ended_the_call(self):
         s = _stream()
-        s.frame_to_event(BotStartedSpeakingFrame())
+        s.frame_to_event(_bot_report("bot-started-speaking"))
         s.bot_ended()
         await s.append({"type": "bot_ended"})
         self.assertFalse(s.bot_speaking)
@@ -1814,7 +1819,7 @@ class TestBotFrameSink(unittest.IsolatedAsyncioTestCase):
             sink,
             *_bot_response("Hello"),
             TTSTextFrame(text="Hello", text_type=TextType.SENTENCE),
-            BotStartedSpeakingFrame(),
+            _bot_report("bot-started-speaking"),
             FunctionCallInProgressFrame(function_name="f", tool_call_id="c", arguments={}),
             InputTransportMessageFrame(message={"label": RTVI.MESSAGE_LABEL, "type": "x"}),
         )
