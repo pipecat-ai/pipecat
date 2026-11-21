@@ -4,7 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import re
 import unittest
+from unittest.mock import patch
 
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
@@ -99,6 +101,23 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
         )
         result = await self.aggregator.flush()
         self.assertEqual(result.text, "Done")
+
+    async def test_closed_tag_spaces_not_split(self):
+        """A space inside a closed tag is not a sentence boundary."""
+        await self.aggregator.reset()
+
+        def space_ends_sentence(text, **kwargs):
+            match = re.search(r"\S(\s+)\S", text)
+            return match.start(1) if match else 0
+
+        with patch(
+            "pipecat.utils.text.simple_text_aggregator.match_endofsentence", space_ends_sentence
+        ):
+            results = [agg async for agg in self.aggregator.aggregate("<spell>a b</spell>. Next")]
+
+        self.assertEqual([r.text for r in results], ["<spell>a b</spell>."])
+        result = await self.aggregator.flush()
+        self.assertEqual(result.text, "Next")
 
     async def test_tag_after_emitted_sentence_not_split(self):
         """A tag is still recognized after an earlier sentence has been emitted."""
