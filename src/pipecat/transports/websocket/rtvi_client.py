@@ -24,12 +24,32 @@ import json
 from pydantic import ValidationError
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.frames.frames import InputTransportMessageFrame
 from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.serializers.rtvi_client import RTVIClientSerializer
 from pipecat.transports.websocket.client import (
+    WebsocketClientInputTransport,
     WebsocketClientParams,
     WebsocketClientTransport,
 )
+
+
+class RTVIClientInputTransport(WebsocketClientInputTransport):
+    """Input transport that hands the bot's RTVI messages to the pipeline downstream only.
+
+    A ``PipelineWorker`` puts its own ``RTVIProcessor`` ahead of the pipeline,
+    and it takes any ``InputTransportMessageFrame`` reaching it for a client's
+    message to it. The bot's messages must not reach it: it would answer them
+    with errors sent back to the bot.
+    """
+
+    async def _push_transport_message(self, frame: InputTransportMessageFrame):
+        """Push the bot's message downstream, past nothing upstream of the input.
+
+        Args:
+            frame: The bot's message, as the serializer deserialized it.
+        """
+        await self.push_frame(frame)
 
 
 class RTVIClientTransport(WebsocketClientTransport):
@@ -72,6 +92,16 @@ class RTVIClientTransport(WebsocketClientTransport):
         # Run inline: the bot can send its first reports right after bot-ready,
         # and they must not reach the pipeline before the handler has run.
         self._register_event_handler("on_bot_ready", sync=True)
+
+    def input(self) -> WebsocketClientInputTransport:
+        """Get the input transport, which hands the bot's messages downstream only.
+
+        Returns:
+            The RTVI client input transport instance.
+        """
+        if not self._input:
+            self._input = RTVIClientInputTransport(self, self._session, self._params)
+        return self._input
 
     @property
     def bot_ready(self) -> bool:
