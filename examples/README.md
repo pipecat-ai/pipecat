@@ -107,7 +107,7 @@ Changing service settings at runtime, organized by service type:
 
 ### [`turn-management/`](./turn-management/)
 
-Turn detection, interruption handling, and user input management.
+Turn detection, interruption handling, and user input management. Includes Pipecat Sidechat, which lets a bot in a group conversation speak only when it's spoken to.
 
 ### [`expressive-conversation/`](./expressive-conversation/)
 
