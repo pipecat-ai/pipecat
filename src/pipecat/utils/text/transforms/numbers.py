@@ -13,8 +13,10 @@ from num2words import num2words
 from pipecat.frames.frames import TextType
 from pipecat.utils.text.transforms.text_transform import TextTransform
 
-# Matches integers and decimals, with optional thousand separators.
-_NUMBER_RE = re.compile(r"\b(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\b")
+# Matches integers and decimals, with optional thousand separators. A dotted
+# sequence such as a version ("1.2.3") or an IP address is not a decimal, so no
+# part of it matches.
+_NUMBER_RE = re.compile(r"(?<!\d\.)\b(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\b(?!\.\d)")
 
 
 def expand_numbers(
