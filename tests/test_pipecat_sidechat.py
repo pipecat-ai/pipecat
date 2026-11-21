@@ -451,6 +451,86 @@ async def test_without_the_model_only_a_turn_naming_the_bot_is_answered(monkeypa
     ]
 
 
+@pytest.mark.asyncio
+async def test_a_line_with_one_of_the_bots_commands_is_answered(monkeypatch):
+    model = FakeSidechatModel({"Atlas, what time is it?": RESPOND, "Shall we eat first?": HOLD})
+    sidechat, verdicts = _sidechat(monkeypatch, model, commands=["play chess", "go to sleep"])
+
+    down, _ = await run_test(
+        sidechat,
+        frames_to_send=[
+            *_turn("Let's PLAY CHESS."),  # the model would ignore it
+            *_turn("Did you see the chess players in the park?"),  # the words, not the phrase
+            *_turn("Atlas, what time is it?"),
+            *_turn("Shall we eat first? Then go to sleep."),  # it holds this text otherwise
+        ],
+    )
+
+    assert _answered(down) == 3
+    assert [(v.decision, v.reason) for v in verdicts] == [
+        ("respond", "command"),
+        ("ignore", "model"),
+        ("respond", "model"),
+        ("respond", "command"),
+    ]
+    # The model still read the line: its numbers come with the verdict.
+    assert verdicts[0].respond == IGNORE.respond
+
+
+@pytest.mark.asyncio
+async def test_a_command_from_any_speaker_of_a_turn_answers_it(monkeypatch):
+    sidechat, verdicts = _sidechat(monkeypatch, FakeSidechatModel(), commands=["play chess"])
+
+    down, _ = await run_test(
+        sidechat,
+        frames_to_send=[*_turn("[Speaker 1] Can we play chess? [Speaker 2] After lunch, maybe.")],
+    )
+
+    assert _answered(down) == 1
+    assert [(v.decision, v.reason, v.line.text) for v in verdicts] == [
+        ("respond", "command", "Can we play chess?")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_without_the_model_a_command_is_answered_as_the_bots_name_is(monkeypatch):
+    model = FakeSidechatModel(error=RuntimeError("boom"))
+    sidechat, verdicts = _sidechat(monkeypatch, model, commands=["go to sleep"])
+
+    down, _ = await run_test(
+        sidechat, frames_to_send=[*_turn("Okay, go to sleep."), *_turn("Is it late?")]
+    )
+
+    assert _answered(down) == 1
+    assert [(v.decision, v.reason) for v in verdicts] == [("respond", "error"), ("ignore", "error")]
+
+
+def test_a_command_matches_whole_and_without_case():
+    sidechat = PipecatSidechat(agent_name="Atlas", commands=["play chess", " ", "Chess board"])
+
+    assert sidechat._commanded("play chess")
+    assert sidechat._commanded("Okay, PLAY CHESS!")
+    assert sidechat._commanded("Put the chess board up.")
+    assert not sidechat._commanded("He was displaying chessboards.")
+    assert not sidechat._commanded("Play some chess?")
+    assert not PipecatSidechat(agent_name="Atlas")._commanded("play chess")
+
+
+def test_a_command_is_read_as_speech_recognition_writes_it():
+    sidechat = PipecatSidechat(agent_name="Atlas", commands=["what's on the table"])
+
+    assert sidechat._commanded("So what’s on  the\ntable right now?")
+    assert sidechat._commanded("WHAT'S ON THE TABLE")
+    assert not sidechat._commanded("What is on the table?")
+
+
+def test_one_command_given_as_a_string_is_one_command():
+    sidechat = PipecatSidechat(agent_name="Atlas", commands="play chess")
+
+    assert sidechat._commanded("Let's play chess.")
+    assert not sidechat._commanded("A pleasant day.")  # every letter of the phrase is in here
+
+
 def test_the_bots_role_reaches_the_model():
     role = "voice assistant in the meeting room's screen; it shows the agenda"
     assert PipecatSidechat(agent_name="Atlas", role=role)._classifier._agent.role == role

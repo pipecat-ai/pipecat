@@ -52,9 +52,19 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, F
 SIDECHAT_SPEAKER_FORMAT = "[Speaker {speaker_number}] {text}"
 
 #: Why the processor decided as it did.
-SidechatReason = Literal["model", "silence", "floor_taken", "speculation", "error"]
+SidechatReason = Literal["model", "command", "silence", "floor_taken", "speculation", "error"]
 
 _SPEAKER_FIELD = re.compile(r"\{(speaker|speaker_number)\}")
+
+
+def _command_pattern(phrase: str) -> re.Pattern[str]:
+    """A pattern for a command as speech recognition may write it.
+
+    The phrase matches whole and without case, as an alias of the bot's name
+    does. Any run of spaces fits between its words, and either apostrophe.
+    """
+    words = [re.escape(word).replace("'", "['’]") for word in phrase.replace("’", "'").split()]
+    return re.compile(r"(?<!\w)" + r"\s+".join(words) + r"(?!\w)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -68,12 +78,14 @@ class SidechatVerdict:
         decision: ``"respond"`` when the LLM answers the turn, ``"hold"``
             while the processor waits to see whether anyone else speaks, and
             ``"ignore"``.
-        reason: ``"model"`` for the model's decision, ``"silence"`` for a held
-            turn answered once nobody spoke, ``"floor_taken"`` for a held turn
-            let go because someone did, ``"speculation"`` for a held turn
-            answered from an eager end of turn, which is let go, and
-            ``"error"`` when the model gave no answer and the processor went
-            by whether the line names the bot.
+        reason: ``"model"`` for the model's decision, ``"command"`` for a
+            line the model would not have answered that contains one of the
+            bot's commands, ``"silence"`` for a held turn answered once nobody
+            spoke, ``"floor_taken"`` for a held turn let go because someone
+            did, ``"speculation"`` for a held turn answered from an eager end
+            of turn, which is let go, and ``"error"`` when the model gave no
+            answer and the processor went by whether the line names the bot or
+            one of its commands.
         respond: The model's probability that the bot should speak now, or
             None without an answer.
         open: The model's probability that the line is a question or request
@@ -195,6 +207,15 @@ class PipecatSidechat(FrameProcessor):
     LLM answers it if any of them is for the bot, and a line the bot would
     hold counts only when it is the last.
 
+    The model learned from meetings, where a request that doesn't name the bot
+    is most often for a person. A bot that people ask for the same few things
+    without its name, such as a device in a room, can list them in
+    ``commands``: a line that contains one is answered whatever the model
+    reads. A command matches by its words, so someone saying the same words to
+    another person is answered too. List what people ask the bot for
+    (``"play chess"``, ``"go to sleep"``), not words they also use with each
+    other (``"the clock"``).
+
     A context frame that doesn't follow a user turn, such as a greeting or a
     function call result, passes through. The processor decides whether the
     bot answers a turn, not whether the turn interrupts the bot: that stays
@@ -243,6 +264,7 @@ class PipecatSidechat(FrameProcessor):
         agent_name: str,
         aliases: Sequence[str] = (),
         role: str | None = DEFAULT_ROLE,
+        commands: Sequence[str] = (),
         speaker_format: str | None = SIDECHAT_SPEAKER_FORMAT,
         variant: Literal["base", "small"] = "small",
         revision: str = SIDECHAT_REVISION,
@@ -263,6 +285,10 @@ class PipecatSidechat(FrameProcessor):
                 assistant in the meeting room's screen; it shows the agenda"``.
                 The model reads it with every line. By default the role of a
                 bot on a call.
+            commands: Phrases for what people ask the bot to do, as they say
+                them, such as ``"play chess"``. A line that contains one is
+                answered whatever the model reads. A phrase matches whole and
+                without case, so ``"play chess"`` is not in "chess players".
             speaker_format: The STT service's ``speaker_format``, whose tags
                 say who said each part of a turn, or None when it has none.
             variant: The model's size. ``"small"`` reads a line in a few
@@ -295,6 +321,9 @@ class PipecatSidechat(FrameProcessor):
             threads=threads,
         )
         self._speakers = SidechatSpeakers(speaker_format) if speaker_format else None
+        # One phrase given as a string is one command, not a command per letter.
+        phrases = [commands] if isinstance(commands, str) else list(commands)
+        self._commands = [_command_pattern(phrase) for phrase in phrases if phrase.strip()]
         self._hold_secs = hold_secs
         self._timeout = timeout
 
@@ -446,7 +475,11 @@ class PipecatSidechat(FrameProcessor):
         except (ClassifierError, TimeoutError) as e:
             texts = " / ".join(line.text for line in lines)
             logger.warning(f"{self}: no answer for [{texts}], going by the bot's name: {e}")
-            named = [line for line in lines if mentions(self._classifier.agent, line.text)]
+            named = [
+                line
+                for line in lines
+                if mentions(self._classifier.agent, line.text) or self._commanded(line.text)
+            ]
             return SidechatVerdict(
                 named[-1] if named else lines[-1], "respond" if named else "ignore", "error"
             )
@@ -462,7 +495,13 @@ class PipecatSidechat(FrameProcessor):
         results = await self._classifier.yes_no(self._state(line), questions)
         respond, open_ = results["respond"].probability, results["open"].probability
         decision = decide(respond, open_, self._classifier.thresholds)
+        if decision != "respond" and self._commanded(line.text):
+            return SidechatVerdict(line, "respond", "command", respond, open_)
         return SidechatVerdict(line, decision, "model", respond, open_)
+
+    def _commanded(self, text: str) -> bool:
+        """Whether the text contains one of the bot's commands."""
+        return any(command.search(text) for command in self._commands)
 
     def _state(self, line: SidechatLine) -> dict:
         """A line as the classifier's state."""

@@ -91,6 +91,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # The model downloads from Hugging Face the first time.
     sidechat = PipecatSidechat(
         agent_name=BOT_NAME,
+        # What the bot is and does, in a line, when it isn't an assistant on
+        # a call. The model reads it with every turn.
+        # role="voice assistant in the meeting room's screen; it shows the agenda",
+        # What people ask this bot for without its name, as they say it. A turn
+        # that contains one is answered whatever the model reads, so leave out
+        # words people also use with each other.
+        # commands=["show the agenda", "next item"],
         # The small model reads a turn in a few milliseconds. The base model
         # decides better, most of all on requests that don't name the bot,
         # and takes a few hundred milliseconds on one CPU.
