@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 import pipecat.flows
 from pipecat.flows import ContextStrategy, FlowConfig
+from pipecat.flows.config import case_key
 
 FOOD_ORDERING = """
 initial_node: initial
@@ -273,6 +274,14 @@ class TestFlowConfigValidation(unittest.TestCase):
         self.assertEqual(
             config.nodes["a"].functions[0].transition_to.cases, {"true": "a", "0": "a"}
         )
+
+    def test_yaml_boolean_spellings_and_matching_strings_share_a_key(self):
+        for spelling in ("yes", "on", "true"):
+            self.assertEqual(case_key(spelling), "true", spelling)
+            self.assertEqual(case_key(spelling.upper()), "true", spelling)
+        for spelling in ("no", "off", "false"):
+            self.assertEqual(case_key(spelling), "false", spelling)
+        self.assertEqual(case_key("maybe"), "maybe")
 
     def test_branch_requires_cases(self):
         data = _minimal()

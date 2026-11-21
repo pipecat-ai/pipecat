@@ -608,6 +608,31 @@ class TestBranches(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(next_node)
 
+    async def test_yaml_yes_no_keys_match_string_values(self):
+        # YAML reads the keys `yes:` and `no:` as booleans.
+        cfg = FlowConfig.from_yaml(
+            "initial_node: a\n"
+            "nodes:\n"
+            "  a:\n"
+            "    task_messages: [{role: developer, content: a}]\n"
+            "    functions:\n"
+            "      - name: report\n"
+            "        transition_to:\n"
+            "          field: status\n"
+            "          cases:\n"
+            "            yes: next\n"
+            "            no: other\n"
+            "  next:\n"
+            "    task_messages: [{role: developer, content: next}]\n"
+            "  other:\n"
+            "    task_messages: [{role: developer, content: other}]\n"
+        )
+        flow = make_flow(cfg)
+        schema = flow.node("a")["functions"][0]
+        for status, target in (("yes", "next"), ("Yes", "next"), ("no", "other")):
+            _, next_node = await schema.handler({"status": status}, self.flow_manager)
+            self.assertIs(next_node, flow.node(target), status)
+
     async def test_integer_values_match_integer_or_string_keys(self):
         for key in (7, "7"):
             flow, next_node = await self.branch(
