@@ -10,7 +10,7 @@
 the WebSocket client transport (the ``client-ready`` handshake message and
 ``bot-ready`` detection). ``TestRTVIClientTransportIntegration`` runs the transport
 in a real pipeline against a tiny RTVI WebSocket server and asserts the bot's
-server messages arrive as the right frames.
+server messages arrive as raw messages, in order and downstream only.
 """
 
 import asyncio
