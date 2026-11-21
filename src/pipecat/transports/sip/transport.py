@@ -161,6 +161,21 @@ AUDIO_OUT_RETRY_SECS = 0.01
 _RESAMPLER_QUALITY = "QQ"
 
 
+def _to_mono(pcm: bytes, channels: int) -> bytes:
+    """Average interleaved 16-bit PCM down to one channel."""
+    if channels == 1:
+        return pcm
+    samples = np.frombuffer(pcm, dtype=np.int16).reshape(-1, channels)
+    return samples.mean(axis=1).astype(np.int16).tobytes()
+
+
+def _from_mono(pcm: bytes, channels: int) -> bytes:
+    """Repeat mono 16-bit PCM across ``channels`` interleaved channels."""
+    if channels == 1:
+        return pcm
+    return np.repeat(np.frombuffer(pcm, dtype=np.int16), channels).tobytes()
+
+
 def _get_cv2():
     """Import OpenCV at point of use, so audio-only calls never load it."""
     try:
@@ -210,6 +225,14 @@ class SIPParams(TransportParams):
         audio_out_10ms_chunks: Overrides the base default of 4 with 2,
             so outbound audio reaches the call in 20 ms buffers matching
             typical RTP packet time.
+
+    ``audio_in_channels`` and ``audio_out_channels`` (1 or 2) are the
+    pipeline's side of the call. The call's own channel count comes from
+    the negotiated codec, and the transport converts between the two:
+    received audio is delivered with ``audio_in_channels`` channels, and
+    frames to send must carry ``audio_out_channels`` channels. A rate
+    change goes through mono, so two channels survive as two only when the
+    pipeline and the call share a sample rate.
     """
 
     auto_answer: bool = True
@@ -330,16 +353,21 @@ class SIPInputTransport(BaseInputTransport):
                 pcm = self._connection.read_audio(max_bytes)
                 if not pcm:
                     continue
-                if rx_channels > 1:
-                    # Downmix first: the stream resampler is mono-only.
-                    samples = np.frombuffer(pcm, dtype=np.int16).reshape(-1, rx_channels)
-                    pcm = samples.mean(axis=1).astype(np.int16).tobytes()
-                if rx_rate != self.sample_rate:
-                    pcm = await self._resampler.resample(pcm, rx_rate, self.sample_rate)
-                    if not pcm:
-                        continue
+                in_channels = self._params.audio_in_channels
+                resample = rx_rate != self.sample_rate
+                if resample or rx_channels != in_channels:
+                    # The stream resampler is mono-only, so a rate change
+                    # goes through mono whatever the two channel counts.
+                    pcm = _to_mono(pcm, rx_channels)
+                    if resample:
+                        pcm = await self._resampler.resample(pcm, rx_rate, self.sample_rate)
+                        if not pcm:
+                            continue
+                    pcm = _from_mono(pcm, in_channels)
                 await self.push_audio_frame(
-                    InputAudioRawFrame(audio=pcm, sample_rate=self.sample_rate, num_channels=1)
+                    InputAudioRawFrame(
+                        audio=pcm, sample_rate=self.sample_rate, num_channels=in_channels
+                    )
                 )
         except asyncio.CancelledError:
             raise
@@ -362,6 +390,7 @@ class SIPOutputTransport(BaseOutputTransport):
         self._transport = transport
         self._connection = connection
         self._resampler = create_stream_resampler(quality=_RESAMPLER_QUALITY)
+        self._channel_mismatch_reported = False
         connection.add_event_handler("media_restarted", self._on_media_restarted)
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -416,28 +445,44 @@ class SIPOutputTransport(BaseOutputTransport):
             self._resampler = create_stream_resampler(quality=_RESAMPLER_QUALITY)
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
-        """Write one audio buffer to the call, resampling to its rate.
+        """Write one audio buffer to the call, at its rate and channel count.
 
         The call's transmit buffer never blocks and rejects what it
         cannot hold, so this paces the pipeline against the transmit
         clock: excess buffer fill is slept off before writing, and a
         rejected remainder is retried until the call takes it.
+
+        A frame whose channel count is not ``audio_out_channels`` is
+        dropped, and the mismatch is reported once as a pipeline error.
         """
+        out_channels = self._params.audio_out_channels
+        if frame.num_channels != out_channels:
+            if not self._channel_mismatch_reported:
+                self._channel_mismatch_reported = True
+                await self.push_error(
+                    f"SIP output expects {out_channels}-channel audio (audio_out_channels) "
+                    f"but got a {frame.num_channels}-channel frame; dropping such frames"
+                )
+            return False
+        self._channel_mismatch_reported = False
         info = self._connection.audio_info()
         if info is None or not info.tx_sample_rate:
             return False
         tx_rate = info.tx_sample_rate
-        audio = frame.audio
-        if tx_rate != frame.sample_rate:
-            audio = await self._resampler.resample(audio, frame.sample_rate, tx_rate)
-            if not audio:
-                # The stream resampler is still priming; the frame was
-                # consumed and its audio arrives with a later chunk.
-                return True
         tx_channels = info.tx_channels or 1
-        if tx_channels > 1 and frame.num_channels == 1:
-            # Upmix after resampling: the stream resampler is mono-only.
-            audio = np.repeat(np.frombuffer(audio, dtype=np.int16), tx_channels).tobytes()
+        audio = frame.audio
+        resample = tx_rate != frame.sample_rate
+        if resample or tx_channels != out_channels:
+            # The stream resampler is mono-only, so a rate change goes
+            # through mono whatever the two channel counts.
+            audio = _to_mono(audio, out_channels)
+            if resample:
+                audio = await self._resampler.resample(audio, frame.sample_rate, tx_rate)
+                if not audio:
+                    # The stream resampler is still priming; the frame was
+                    # consumed and its audio arrives with a later chunk.
+                    return True
+            audio = _from_mono(audio, tx_channels)
         bytes_per_sec = tx_rate * 2 * tx_channels
         high_water = int(AUDIO_OUT_BUFFER_SECS * bytes_per_sec)
         if info.tx_buffered > high_water:
@@ -532,6 +577,9 @@ class SIPTransport(BaseTransport):
         super().__init__(input_name=input_name, output_name=output_name)
         self._connection = connection
         self._params = params or SIPParams()
+        for name in ("audio_in_channels", "audio_out_channels"):
+            if getattr(self._params, name) not in (1, 2):
+                raise ValueError(f"SIPParams.{name} must be 1 or 2")
         self._input: SIPInputTransport | None = None
         self._output: SIPOutputTransport | None = None
 
