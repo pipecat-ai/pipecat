@@ -1,0 +1,1 @@
+- Fixed `job()` and `job_group()` leaving child jobs running when the caller is cancelled while waiting for responses on context exit.
