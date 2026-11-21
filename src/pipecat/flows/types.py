@@ -203,8 +203,9 @@ class NodeConfig(TypedDict, total=False):
         respond_immediately: Whether to run LLM inference as soon as the node is
             set (default: True).
         metadata: JSON-serializable data the application attaches to the
-            node. Flows never acts on it and never sends it to the LLM; an
-            RTVI client receives it when the node is entered.
+            node. Flows never acts on it and never sends it to the LLM. An
+            RTVI client receives it when the node is entered, so keep anything
+            the end user should not see out of it.
 
     Example::
 
@@ -390,8 +391,9 @@ class FlowsFunctionSchema:
         timeout_secs: Optional per-tool timeout in seconds, overriding the global
             ``function_call_timeout_secs``. Defaults to None (use global timeout).
         metadata: JSON-serializable data the application attaches to the
-            function. Flows never acts on it and never sends it to the LLM; an
-            RTVI client receives it when the function's call enters a node.
+            function. Flows never acts on it and never sends it to the LLM. An
+            RTVI client receives it when the function's call enters a node, so
+            keep anything the end user should not see out of it.
     """
 
     name: str

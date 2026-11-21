@@ -136,7 +136,9 @@ class FlowManager(BaseObject):
 
     ``type``, ``event`` and ``node`` are always present. The other fields are
     those of :class:`~pipecat.flows.NodeEntered`, and one with no value is
-    left out.
+    left out. The message is sent whenever the worker has RTVI enabled, so
+    keep anything the end user should not see out of node names, function
+    names and metadata.
     """
 
     def __init__(

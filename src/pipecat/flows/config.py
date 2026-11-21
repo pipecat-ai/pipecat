@@ -122,6 +122,8 @@ class FlowConfig(BaseModel):
     :class:`~pipecat.flows.Flow` copies it onto the node configs and function
     schemas it builds, and :class:`~pipecat.flows.FlowManager` passes it to
     ``on_node_entered`` handlers and to an RTVI client as the flow moves.
+    Metadata is sent to the client, so keep anything the end user should not
+    see out of it.
 
     Subflows: a set of nodes used by several flows, or several times in one,
     is written once as a subflow under ``flows``. A node runs it by naming it
