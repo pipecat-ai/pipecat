@@ -8,7 +8,15 @@ import asyncio
 import unittest
 from dataclasses import dataclass
 
-from pipecat.frames.frames import CancelFrame, EndFrame, Frame, InputAudioRawFrame, TextFrame
+from pipecat.frames.frames import (
+    BotSpeakingFrame,
+    CancelFrame,
+    EndFrame,
+    ErrorFrame,
+    Frame,
+    InputAudioRawFrame,
+    TextFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.sync_parallel_pipeline import FrameOrder, SyncParallelPipeline
 from pipecat.pipeline.worker import PipelineWorker
@@ -50,6 +58,17 @@ class EmitTaggedFrameProcessor(FrameProcessor):
             await self.push_frame(TaggedFrame(tag=self._tag))
         else:
             await self.push_frame(frame, direction)
+
+
+class PushErrorProcessor(FrameProcessor):
+    """Pushes an error for every TextFrame it receives."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TextFrame):
+            await self.push_error("error")
+        await self.push_frame(frame, direction)
 
 
 async def end_pipeline(pipeline: SyncParallelPipeline, frames: list[Frame]) -> list[Frame]:
@@ -173,6 +192,37 @@ class TestSyncParallelPipeline(unittest.IsolatedAsyncioTestCase):
                 frames_to_send=frames_to_send,
                 expected_down_frames=expected_down_frames,
             )
+
+    async def test_upstream_system_frame_pushed_once(self):
+        """An upstream system frame comes out once, whether a pipeline pushed it
+        or it came from below, and other upstream frames still come out."""
+        for frame_order in FrameOrder:
+            pipeline = SyncParallelPipeline(
+                [PushErrorProcessor()], [IdentityFilter()], frame_order=frame_order
+            )
+            await run_test(
+                pipeline,
+                frames_to_send=[TextFrame(text="one")],
+                expected_down_frames=[TextFrame],
+                expected_up_frames=[ErrorFrame],
+            )
+
+            pipeline = SyncParallelPipeline(
+                [IdentityFilter()], [IdentityFilter()], frame_order=frame_order
+            )
+            await run_test(
+                pipeline,
+                frames_to_send=[
+                    BotSpeakingFrame(),
+                    SleepFrame(sleep=0.1),
+                    TextFrame(text="two"),
+                    SleepFrame(sleep=0.1),
+                    BotSpeakingFrame(),
+                ],
+                frames_to_send_direction=FrameDirection.UPSTREAM,
+                expected_up_frames=[BotSpeakingFrame, TextFrame, BotSpeakingFrame],
+            )
+            assert all(s["queue"].empty() for s in pipeline._sinks), frame_order
 
     async def test_default_is_arrival(self):
         """The default frame_order should be ARRIVAL."""
