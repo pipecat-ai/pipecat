@@ -65,9 +65,22 @@ class TestVideoInSourcesParams(unittest.TestCase):
         self.assertEqual(TransportParams(**params.model_dump()), params)
 
 
+class _SamplerClock:
+    def __init__(self, now: float, wall_time: float):
+        self.now = now
+        self.wall_time = wall_time
+
+    def time(self) -> float:
+        return self.wall_time
+
+    def monotonic(self) -> float:
+        return self.now
+
+
 class TestVideoInSampler(unittest.TestCase):
-    def _sample_at(self, sampler: _VideoInSampler, now: float):
-        with patch("pipecat.transports.video_in_sampler.time.time", return_value=now):
+    def _sample_at(self, sampler: _VideoInSampler, now: float, wall_time: float | None = None):
+        clock = _SamplerClock(now, now if wall_time is None else wall_time)
+        with patch("pipecat.transports.video_in_sampler.time", clock):
             return sampler.sample()
 
     def _passed(self, sampler: _VideoInSampler, times) -> list[float]:
@@ -84,6 +97,49 @@ class TestVideoInSampler(unittest.TestCase):
         sampler.add_request(request)
         self.assertEqual(self._sample_at(sampler, 1.1), (True, request))
         self.assertFalse(self._sample_at(sampler, 1.2)[0])
+
+    def test_wall_clock_rollback_does_not_delay_frames(self):
+        sampler = _VideoInSampler(1)
+        self.assertEqual(self._sample_at(sampler, 100.0, 1000.0), (True, None))
+        self.assertEqual(self._sample_at(sampler, 101.0, 901.0), (True, None))
+        self.assertEqual(self._sample_at(sampler, 101.2, 901.2), (False, None))
+        self.assertEqual(self._sample_at(sampler, 102.0, 902.0), (True, None))
+
+    def test_wall_clock_forward_jump_does_not_release_early_frame(self):
+        sampler = _VideoInSampler(1)
+        self.assertEqual(self._sample_at(sampler, 100.0, 1000.0), (True, None))
+        self.assertEqual(self._sample_at(sampler, 100.2, 2000.0), (False, None))
+        self.assertEqual(self._sample_at(sampler, 101.0, 2000.8), (True, None))
+
+    def test_request_after_wall_clock_rollback_restarts_schedule(self):
+        sampler = _VideoInSampler(1)
+        self.assertTrue(self._sample_at(sampler, 100.0, 1000.0)[0])
+        request = UserImageRequestFrame(user_id="u")
+        sampler.add_request(request)
+        self.assertEqual(self._sample_at(sampler, 100.2, 900.2), (True, request))
+        self.assertEqual(self._sample_at(sampler, 101.0, 1901.0), (False, None))
+        self.assertEqual(self._sample_at(sampler, 101.2, 801.2), (True, None))
+
+    def test_nonperiodic_modes_do_not_read_a_clock(self):
+        clock = MagicMock()
+        clock.time.side_effect = AssertionError("wall clock read")
+        clock.monotonic.side_effect = AssertionError("monotonic clock read")
+        with patch("pipecat.transports.video_in_sampler.time", clock):
+            for framerate in (None, 0):
+                with self.subTest(framerate=framerate):
+                    sampler = _VideoInSampler(framerate)
+                    self.assertEqual(sampler.sample(), (framerate is None, None))
+                    request = UserImageRequestFrame(user_id="u")
+                    sampler.add_request(request)
+                    self.assertEqual(sampler.sample(), (True, request))
+                    self.assertEqual(sampler.sample(), (framerate is None, None))
+
+    def test_early_frames_do_not_accumulate_schedule_drift(self):
+        sampler = _VideoInSampler(1)
+        self.assertTrue(self._sample_at(sampler, 100.0)[0])
+        for i in range(1, 101):
+            self.assertFalse(self._sample_at(sampler, 100 + i - 0.08)[0])
+            self.assertTrue(self._sample_at(sampler, 100 + i - 0.04)[0])
 
     def test_framerate_below_input_rate(self):
         # A 30 fps stream sampled at 5 fps for ten seconds.
@@ -147,6 +203,32 @@ class TestVideoInSampler(unittest.TestCase):
 
 
 class TestVideoInSamplers(unittest.TestCase):
+    def test_periodic_schedules_are_isolated_by_participant_and_source(self):
+        samplers = _VideoInSamplers()
+        samplers.capture("p1", "camera", 1)
+        samplers.capture("p1", "screenVideo", 2)
+        samplers.capture("p2", "camera", 1)
+        clock = _SamplerClock(100.0, 1000.0)
+        with patch("pipecat.transports.video_in_sampler.time", clock):
+            self.assertEqual(samplers.sample("p1", "camera"), (True, None))
+            clock.now, clock.wall_time = 100.2, 1000.2
+            self.assertEqual(samplers.sample("p1", "screenVideo"), (True, None))
+            self.assertEqual(samplers.sample("p2", "camera"), (True, None))
+
+            request = UserImageRequestFrame(user_id="p1")
+            samplers.add_request("p1", "camera", request)
+            clock.now, clock.wall_time = 100.7, 900.7
+            self.assertEqual(samplers.sample("p1", "screenVideo"), (True, None))
+            self.assertEqual(samplers.sample("p2", "camera"), (False, None))
+            self.assertEqual(samplers.sample("p1", "camera"), (True, request))
+
+            clock.now, clock.wall_time = 101.2, 1901.2
+            self.assertEqual(samplers.sample("p1", "camera"), (False, None))
+            self.assertEqual(samplers.sample("p1", "screenVideo"), (True, None))
+            self.assertEqual(samplers.sample("p2", "camera"), (True, None))
+            clock.now, clock.wall_time = 101.7, 801.7
+            self.assertEqual(samplers.sample("p1", "camera"), (True, None))
+
     def test_unsampled_source_is_never_due(self):
         samplers = _VideoInSamplers()
         samplers.capture("p1", "camera", None)
@@ -245,6 +327,28 @@ class TestDailyVideoInSampling(unittest.IsolatedAsyncioTestCase):
         )
         fake.push_video_frame = AsyncMock()
         return fake
+
+    async def test_periodic_video_callback_ignores_wall_clock_jumps(self):
+        fake = self._fake_input(1)
+        video_frame = SimpleNamespace(buffer=b"pixels", width=1, height=1, color_format="RGB")
+        clock = _SamplerClock(100.0, 1000.0)
+        with patch("pipecat.transports.video_in_sampler.time", clock):
+            for now, wall_time, pushed in (
+                (100.0, 1000.0, 1),
+                (100.2, 2000.0, 1),
+                (101.0, 901.0, 2),
+                (101.2, 901.2, 2),
+            ):
+                clock.now, clock.wall_time = now, wall_time
+                await self.transport_cls._on_participant_video_frame(
+                    fake, "p1", video_frame, "camera"
+                )
+                self.assertEqual(fake.push_video_frame.await_count, pushed)
+        for awaited in fake.push_video_frame.await_args_list:
+            frame = awaited.args[0]
+            self.assertEqual(frame.image, b"pixels")
+            self.assertEqual(frame.user_id, "p1")
+            self.assertEqual(frame.transport_source, "camera")
 
     async def test_request_answered_by_next_frame(self):
         fake = self._fake_input(0)
