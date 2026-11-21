@@ -17,10 +17,12 @@ It is the inverse of
 pipeline frames into server messages on the bot side.
 
 The bot's reports about its own output (its speaking and interruptions, its
-LLM's ``bot-llm-*`` reports and its TTS's ``bot-tts-text``) stay raw messages,
-as :class:`~pipecat.frames.frames.InputTransportMessageFrame`. In this pipeline
-a ``BotStartedSpeakingFrame``, an ``InterruptionFrame``, an ``LLMTextFrame`` or
-a ``TTSTextFrame`` would be about this pipeline's own output, not the bot's.
+LLM's ``bot-llm-*`` reports and function calls, and its TTS's ``bot-tts-text``)
+stay raw messages, as :class:`~pipecat.frames.frames.InputTransportMessageFrame`.
+In this pipeline a ``BotStartedSpeakingFrame``, an ``InterruptionFrame``, an
+``LLMTextFrame``, a ``FunctionCallInProgressFrame`` or a ``TTSTextFrame`` would
+be about this pipeline's own output, not the bot's. Kept as one kind of frame,
+they also reach the pipeline in the order the bot sent them.
 
 .. note::
     This covers the messages a conversation needs (the LLM response lifecycle,
@@ -37,9 +39,6 @@ from loguru import logger
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
     Frame,
-    FunctionCallCancelFrame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
@@ -56,6 +55,8 @@ _BOT_OUTPUT_REPORTS = frozenset(
         "bot-llm-text",
         "bot-llm-marker",
         "bot-llm-stopped",
+        "llm-function-call-in-progress",
+        "llm-function-call-stopped",
         "bot-tts-text",
         "bot-started-speaking",
         "bot-stopped-speaking",
@@ -141,28 +142,6 @@ class RTVIClientSerializer(FrameSerializer):
             return InputTransportMessageFrame(message=message)
 
         match msg_type:
-            case "llm-function-call-in-progress":
-                # function_name/arguments may be absent at the bot's default
-                # report level; "" maps back to "no name reported" downstream.
-                return FunctionCallInProgressFrame(
-                    function_name=payload.get("function_name") or "",
-                    tool_call_id=payload.get("tool_call_id", ""),
-                    arguments=payload.get("arguments") or {},
-                )
-            case "llm-function-call-stopped":
-                # A call ends either by being cancelled or by returning; the two
-                # map to the frames the bot itself would have pushed.
-                if payload.get("cancelled"):
-                    return FunctionCallCancelFrame(
-                        function_name=payload.get("function_name") or "",
-                        tool_call_id=payload.get("tool_call_id", ""),
-                    )
-                return FunctionCallResultFrame(
-                    function_name=payload.get("function_name") or "",
-                    tool_call_id=payload.get("tool_call_id", ""),
-                    arguments={},
-                    result=payload.get("result"),
-                )
             case "user-transcription":
                 text = payload.get("text", "")
                 user_id = payload.get("user_id", "")

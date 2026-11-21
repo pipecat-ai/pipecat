@@ -12,7 +12,6 @@ import unittest
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
-    FunctionCallInProgressFrame,
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
@@ -74,20 +73,27 @@ class TestRTVIClientDeserialize(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(interim, InterimTranscriptionFrame)
         self.assertEqual(interim.text, "hel")
 
-    async def test_function_call(self):
-        frame = await self.s.deserialize(
-            _server(
+    async def test_function_calls_stay_raw_messages(self):
+        # Reports about the bot's own function calls: this pipeline's function
+        # call frames would be about its own.
+        for msg_type, data in (
+            (
                 "llm-function-call-in-progress",
                 {
                     "function_name": "get_weather",
                     "tool_call_id": "c1",
                     "arguments": {"city": "Paris"},
                 },
-            )
-        )
-        self.assertIsInstance(frame, FunctionCallInProgressFrame)
-        self.assertEqual(frame.function_name, "get_weather")
-        self.assertEqual(frame.arguments, {"city": "Paris"})
+            ),
+            (
+                "llm-function-call-stopped",
+                {"function_name": "get_weather", "tool_call_id": "c1", "cancelled": True},
+            ),
+        ):
+            frame = await self.s.deserialize(_server(msg_type, data))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["type"], msg_type)
+            self.assertEqual(frame.message["data"], data)
 
     async def test_unknown_and_non_rtvi_dropped(self):
         self.assertIsNone(await self.s.deserialize(_server("bot-ready", {"version": "2.0.0"})))
