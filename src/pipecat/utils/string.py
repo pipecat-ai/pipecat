@@ -110,6 +110,11 @@ SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset(
     }
 )
 
+# Closing emphasis markers (group 1) and any sentence punctuation after them, before
+# whitespace, as in "*Hi!*. Next". Strikethrough is left out: a struck sentence kept whole
+# transforms to nothing, which TTSService leaves out of the context.
+_EMPHASIS_CLOSER = re.compile(rf"([*_]+)[{re.escape(''.join(SENTENCE_ENDING_PUNCTUATION))}]*(?=\s)")
+
 # Latin punctuation that sentencex handles well — these need sentencex's disambiguation
 # because "." can appear in abbreviations, decimals, etc.
 _LATIN_SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset({".", "!", "?", ";", "…"})
@@ -197,7 +202,17 @@ def match_endofsentence(text: str, *, language: str | None = None) -> int:
         return 0
 
     if len(sentences) > 1:
-        return len(first_sentence)
+        end = len(first_sentence)
+        # Sentencex gives a span's closing markers to the next sentence ("**Hi!", "** Next").
+        # Keep them here when this sentence opened the span and nothing closed it.
+        closer = _EMPHASIS_CLOSER.match(text, end)
+        if closer:
+            run, opener = re.escape(closer[1]), re.escape(closer[1][::-1])
+            if re.search(
+                rf"(?:^|\s){opener}(?![\s*_])(?!.*(?<![*_]){run}(?![*_]))", text[:end], re.S
+            ):
+                end = closer.end()
+        return end
 
     return 0
 

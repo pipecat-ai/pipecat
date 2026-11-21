@@ -235,6 +235,17 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
             with self.subTest(language=language, text=first + rest):
                 assert match_endofsentence(first + rest, language=language) == len(first)
 
+    async def test_endofsentence_emphasis_closer(self):
+        assert match_endofsentence("**Great question!** Let") == 19
+        assert match_endofsentence("**_Wow!_** That") == 10
+        assert match_endofsentence("*Wow **really**!* Next") == 17
+        assert match_endofsentence("I loved *Oklahoma!*. It") == 20
+        assert match_endofsentence("**नमस्ते!**। आप", language="hi") == 12
+        # Markers that close no span opened in the sentence stay.
+        assert match_endofsentence("*Prices\nvary* by store.* Terms") == 23
+        assert match_endofsentence("Our **best** plan is free.* Terms") == 26
+        assert match_endofsentence("* Free shipping on orders.* Some") == 26
+
     async def test_endofsentence_streaming_tokens(self):
         """Test the specific use case of streaming LLM tokens."""
 
