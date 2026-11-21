@@ -82,13 +82,22 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMUserAggregator,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_service import AIService
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.services.tts_service import TTSService
-from pipecat.tests.utils import run_test
+from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_stop import (
+    LLMTurnCompletionUserTurnStopStrategy,
+    SpeechTimeoutUserTurnStopStrategy,
+)
 from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
@@ -715,6 +724,41 @@ class TestBotTurnStrategies(unittest.TestCase):
     def test_a_scripted_run_keeps_the_default_strategies(self):
         aggregator = _client(bot_audio=True)._bot_turn_aggregator(LLMContext(), persona=False)
         self.assertIsNone(aggregator._params.user_turn_strategies)
+
+
+class TestClosingBotTurn(unittest.IsolatedAsyncioTestCase):
+    """The bot's turn after the persona hangs up ends without the persona's LLM."""
+
+    async def test_the_closing_turn_ends_when_the_bot_stops(self):
+        persona = _persona()
+        persona.hang_up()
+        # A speech timeout stands in for smart turn, deciding the bot stopped.
+        strategies = FilterIncompleteUserTurnStrategies(
+            stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.1)]
+        )
+        aggregator = LLMUserAggregator(
+            persona.context, params=LLMUserAggregatorParams(user_turn_strategies=strategies)
+        )
+        ended_by = []
+
+        @aggregator.event_handler("on_user_turn_stopped")
+        async def _on_user_turn_stopped(_aggregator, strategy, _message):
+            ended_by.append(strategy)
+
+        sink = _BotFrameSink(_stream(bot_audio=True), persona=persona)
+        await run_test(
+            Pipeline([aggregator, sink]),
+            frames_to_send=[
+                VADUserStartedSpeakingFrame(),
+                TranscriptionFrame(text="Goodbye!", user_id="bot", timestamp="t"),
+                VADUserStoppedSpeakingFrame(),
+                # Well short of the controller's 5 s stop timeout.
+                SleepFrame(sleep=1.0),
+            ],
+        )
+        # The completion gate ended the turn, not the stop timeout or the EndFrame.
+        self.assertEqual(len(ended_by), 1)
+        self.assertIsInstance(ended_by[0], LLMTurnCompletionUserTurnStopStrategy)
 
 
 class TestBotTurn(unittest.IsolatedAsyncioTestCase):

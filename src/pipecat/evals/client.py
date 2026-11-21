@@ -68,6 +68,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserTurnCompletionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -289,6 +290,15 @@ class _BotFrameSink(FrameProcessor):
             return
         elif isinstance(frame, LLMContextFrame):
             # The aggregator handing the persona the bot's turn (audio mode).
+            if self._persona is not None and self._persona.hung_up:
+                # The persona's LLM, which marks the bot's turn complete, answers
+                # nothing once it hangs up: mark the turn complete in its place,
+                # so the bot's closing turn ends when smart turn hears it end.
+                await self.push_frame(
+                    UserTurnCompletionFrame(kind="complete", context_frame_id=frame.id),
+                    FrameDirection.UPSTREAM,
+                )
+                return
             await self._answer(frame)
             return
         await self.push_frame(frame, direction)
