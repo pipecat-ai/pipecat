@@ -622,6 +622,16 @@ class BaseOutputTransport(FrameProcessor):
             # The same goes for the audio still waiting to fill a chunk.
             self._audio_runs = deque((audio, flag) for audio, flag in self._audio_runs if flag)
 
+            # The resampler can hold audio that never filled a chunk — e.g. a
+            # short reply interrupted before any playback started. When no
+            # uninterruptible audio survives the reset, that leftover is
+            # unwanted too: reset the filter now so it doesn't bleed into the
+            # next speech. When uninterruptible audio survives, the filter
+            # state is kept and flushed with it at the end of the run, the
+            # same way the buffered audio above is.
+            if self._resampler and not self._audio_runs:
+                await self._resampler.reset()
+
             # Likewise, keep the clock task running but drain its interruptible
             # frames, and cancel it if it's waiting to push one.
             self._clock_queue.reset()
