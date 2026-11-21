@@ -903,6 +903,28 @@ class TestResponseLanes:
         assert not service._draining_lanes
 
     @pytest.mark.asyncio
+    async def test_an_abandoned_responses_usage_is_reported(self):
+        """An abandoned response is still billed, so its usage is reported."""
+        abandoned = _completed("lane-1", "resp_0", "stale")
+        abandoned["response"]["usage"] = {
+            "input_tokens": 30,
+            "output_tokens": 4,
+            "total_tokens": 34,
+        }
+        service = _make_lane_service(
+            abandoned, _delta("lane-0", "Hello"), _completed("lane-0", "resp_1", "Hello")
+        )
+        service._draining_lanes = {"lane-1"}
+        service.start_llm_usage_metrics = AsyncMock()
+
+        await _run_inference(service, [{"role": "user", "content": "hi"}])
+
+        tokens = service.start_llm_usage_metrics.call_args[0][0]
+        assert (tokens.prompt_tokens, tokens.completion_tokens) == (30, 4)
+        assert service._previous_response_id == "resp_1"
+        assert not service._draining_lanes
+
+    @pytest.mark.asyncio
     async def test_every_lane_taken_reconnects(self):
         """With every lane holding an abandoned response or the previous
         response, the connection is closed, which ends the abandoned ones."""
