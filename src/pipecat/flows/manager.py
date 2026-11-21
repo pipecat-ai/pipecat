@@ -26,9 +26,9 @@ The flow manager coordinates all aspects of a conversation, including:
 
 import asyncio
 import inspect
+import json
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import asdict
 from typing import Any, cast
 
 from loguru import logger
@@ -90,6 +90,22 @@ _PLACEHOLDER = re.compile(
 )
 
 
+def _as_json_object(value: Mapping[str, Any] | None, field: str, node: str) -> dict | None:
+    """``value`` as a client receives it, or None when it isn't a JSON object."""
+    if value is None:
+        return None
+    try:
+        sent = json.loads(json.dumps(value))
+    except (TypeError, ValueError):
+        sent = None
+    if not isinstance(sent, dict):
+        logger.warning(
+            f"Node '{node}': {field} is not a JSON object, so it is left out of the RTVI message"
+        )
+        return None
+    return sent
+
+
 class FlowManager(BaseObject):
     r"""Manages conversation flows.
 
@@ -138,7 +154,9 @@ class FlowManager(BaseObject):
     The fields are those of :class:`~pipecat.flows.NodeEntered`; ``node`` is
     always present, and a field with no value is left out. The message is sent
     whenever the worker has RTVI enabled, so keep anything the end user should
-    not see out of node names, function names and metadata.
+    not see out of node names, function names and metadata. Metadata that is
+    not a JSON object is left out of the message, with a warning;
+    ``on_node_entered`` handlers still receive it.
     """
 
     def __init__(
@@ -661,6 +679,20 @@ class FlowManager(BaseObject):
         """
         await self._set_node(get_or_generate_node_name(node_config), node_config)
 
+    @staticmethod
+    def _node_entered_data(entered: NodeEntered) -> RTVI.FlowNodeEnteredMessageData:
+        """The ``flow-node-entered`` message data that announces a node; see the class docstring."""
+        return RTVI.FlowNodeEnteredMessageData(
+            node=entered.node,
+            previous_node=entered.previous_node,
+            function=entered.function,
+            metadata=_as_json_object(entered.metadata, "metadata", entered.node),
+            function_metadata=_as_json_object(
+                entered.function_metadata, "function_metadata", entered.node
+            ),
+            parent=entered.parent,
+        )
+
     def _render_node(self, node_id: str, node_config: NodeConfig) -> NodeConfig:
         r"""Fill ``{{ key }}`` placeholders in the node's prompts from ``self.state``.
 
@@ -835,7 +867,7 @@ class FlowManager(BaseObject):
 
             await self._call_event_handler("on_node_entered", entered)
             await self._worker.queue_frame(
-                RTVIFlowNodeEnteredFrame(data=RTVI.FlowNodeEnteredMessageData(**asdict(entered)))
+                RTVIFlowNodeEnteredFrame(data=self._node_entered_data(entered))
             )
 
             # Trigger completion with new context

@@ -18,6 +18,7 @@ The tests use unittest.IsolatedAsyncioTestCase for async support and
 include mocked dependencies for PipelineTask and LLM services.
 """
 
+import threading
 import unittest
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
@@ -1644,6 +1645,35 @@ class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
                     "parent": "verify",
                 },
             ],
+        )
+
+    async def test_metadata_that_is_not_json_is_left_out_of_the_rtvi_message(self):
+        lock = threading.Lock()
+        booking = self.node("booking", metadata={"lock": lock})
+        start = self.node("start", self.edge("begin", booking, metadata={"handle": object()}))
+        flow_manager, entered = self.make_manager()
+
+        with patch("pipecat.flows.manager.logger") as mock_logger:
+            await flow_manager.initialize(start)
+            await self.invoke("begin")
+
+        # The node is entered, and handlers get the metadata as the application wrote it.
+        self.assertEqual(flow_manager.current_node, "booking")
+        self.assertEqual(self.queued_frame_types(self.mock_worker)[-1], "LLMRunFrame")
+        self.assertIs(entered[1].metadata["lock"], lock)
+        self.assertEqual(
+            self.rtvi_messages(self.mock_worker)[1],
+            {"node": "booking", "previous_node": "start", "function": "begin"},
+        )
+        self.assertEqual(mock_logger.warning.call_count, 2)
+
+    async def test_metadata_keys_reach_the_client_as_json_strings(self):
+        flow_manager, entered = self.make_manager()
+        await flow_manager.initialize(self.node("start", metadata={1: "one"}))
+
+        self.assertEqual(entered[0].metadata, {1: "one"})
+        self.assertEqual(
+            self.rtvi_messages(self.mock_worker), [{"node": "start", "metadata": {"1": "one"}}]
         )
 
     async def test_rtvi_message_follows_the_handlers_and_precedes_the_llm_run(self):
