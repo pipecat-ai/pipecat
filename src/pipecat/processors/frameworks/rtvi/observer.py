@@ -6,6 +6,7 @@
 
 """RTVI observer for converting pipeline frames to outgoing RTVI messages."""
 
+import copy
 import inspect
 import time
 from collections.abc import Awaitable, Callable, Mapping
@@ -305,7 +306,11 @@ class RTVIObserver(BaseObserver):
         """
         super().__init__(**kwargs)
         self._rtvi = rtvi
-        self._params = params or RTVIObserverParams()
+        # A copy: an RTVIConfigureObserverFrame changes this observer's
+        # settings, not those of every session the caller's params serve.
+        # Not a dataclasses.replace(), which would warn about deprecated
+        # fields a second time.
+        self._params = copy.copy(params) if params else RTVIObserverParams()
 
         self._ignored_sources: set[FrameProcessor] = set(self._params.ignored_sources)
 
