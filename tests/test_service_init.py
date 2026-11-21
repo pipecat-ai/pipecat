@@ -34,7 +34,10 @@ new services are covered automatically with no per-service maintenance.
 import importlib
 import inspect
 import pkgutil
+import sys
 from dataclasses import fields
+from types import ModuleType
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -54,6 +57,7 @@ _BASE_MODULES = frozenset(
         "pipecat.services.vision_service",
     }
 )
+_FUNASR_MODULE = "pipecat.services.funasr.stt"
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +86,25 @@ def _import_all_service_modules():
 
 
 _import_all_service_modules()
+
+# Keep the FunASR service discoverable when its optional dependency is absent.
+# The fake modules are only needed while importing the service definition.
+if _FUNASR_MODULE not in sys.modules:
+    funasr = ModuleType("funasr")
+    funasr.AutoModel = Mock()
+    funasr_utils = ModuleType("funasr.utils")
+    postprocess_utils = ModuleType("funasr.utils.postprocess_utils")
+    postprocess_utils.rich_transcription_postprocess = lambda text: text
+    with patch.dict(
+        sys.modules,
+        {
+            "funasr": funasr,
+            "funasr.utils": funasr_utils,
+            "funasr.utils.postprocess_utils": postprocess_utils,
+        },
+    ):
+        # Keep the module alive for the subclass walk after patch.dict restores sys.modules.
+        _funasr_service_module = importlib.import_module(_FUNASR_MODULE)
 
 ALL_SETTINGS_CLASSES = sorted(_all_subclasses(ServiceSettings), key=lambda c: c.__qualname__)
 assert ALL_SETTINGS_CLASSES, "No settings classes discovered"
@@ -170,10 +193,18 @@ def test_service_settings_complete(service_cls):
     This is what validate_complete() checks in start().  Catching it
     here means we don't need a running pipeline to find missing defaults.
     """
-    try:
-        svc = _try_instantiate(service_cls)
-    except Exception:
-        pytest.skip("Cannot instantiate with dummy args (needs real args or credentials)")
+    if service_cls.__module__ == _FUNASR_MODULE:
+        model = Mock()
+        with patch.dict(service_cls.__init__.__globals__, {"AutoModel": model}):
+            svc = _try_instantiate(service_cls)
+        model.assert_called_once_with(
+            model="iic/SenseVoiceSmall", device="cpu", disable_update=True
+        )
+    else:
+        try:
+            svc = _try_instantiate(service_cls)
+        except Exception:
+            pytest.skip("Cannot instantiate with dummy args (needs real args or credentials)")
     if not hasattr(svc, "_settings"):
         pytest.skip("Service has no _settings")
     for f in fields(svc._settings):
