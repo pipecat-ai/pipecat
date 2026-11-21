@@ -180,6 +180,13 @@ class TestFlowConfigLoading(unittest.TestCase):
         self.assertEqual(schema["required"], ["initial_node", "nodes"])
         self.assertIn("Branch", schema["$defs"])
 
+    def test_json_schema_has_optional_metadata(self):
+        schema = FlowConfig.model_json_schema()
+        self.assertEqual(schema["required"], ["initial_node", "nodes"])
+        for model in ("Node", "Function"):
+            self.assertIn("metadata", schema["$defs"][model]["properties"])
+            self.assertNotIn("metadata", schema["$defs"][model]["required"])
+
     def test_shipped_schema_file_is_current(self):
         # The repository keeps the schema for editors and other tools to vendor.
         # Regenerate it with `uv run python scripts/flows/write_flow_config_schema.py`.
@@ -309,6 +316,37 @@ class TestFlowConfigValidation(unittest.TestCase):
             }
         ]
         self.assert_invalid(data, "must name the node it transitions to")
+
+    def test_metadata_on_node_and_function(self):
+        data = _minimal()
+        node = data["nodes"]["a"]
+        node["metadata"] = {"graph_node": "n1", "position": {"x": 1, "y": 2.5}, "tags": ["a"]}
+        node["functions"] = [{"name": "f", "metadata": {"exit": "chosen"}}]
+        cfg = FlowConfig.model_validate(data)
+        self.assertEqual(cfg.nodes["a"].metadata, node["metadata"])
+        self.assertEqual(cfg.nodes["a"].functions[0].metadata, {"exit": "chosen"})
+
+        self.assertEqual(FlowConfig.model_validate_json(cfg.model_dump_json()), cfg)
+
+    def test_metadata_defaults_to_none(self):
+        data = _minimal()
+        data["nodes"]["a"]["functions"] = [{"name": "f"}]
+        cfg = FlowConfig.model_validate(data)
+        self.assertIsNone(cfg.nodes["a"].metadata)
+        self.assertIsNone(cfg.nodes["a"].functions[0].metadata)
+
+    def test_metadata_must_be_json(self):
+        data = _minimal()
+        data["nodes"]["a"]["metadata"] = {"handle": object()}
+        self.assert_invalid(data, "metadata")
+
+        data = _minimal()
+        data["nodes"]["a"]["functions"] = [{"name": "f", "metadata": {"handle": object()}}]
+        self.assert_invalid(data, "metadata")
+
+        data = _minimal()
+        data["nodes"]["a"]["metadata"] = ["not", "a", "mapping"]
+        self.assert_invalid(data, "metadata")
 
     def test_transition_only_function(self):
         data = _minimal()

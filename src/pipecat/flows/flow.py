@@ -164,6 +164,8 @@ class Flow:
         strategy = node.context_strategy_enum()
         if strategy is not None:
             config["context_strategy"] = ContextStrategyConfig(strategy=strategy)
+        if node.metadata is not None:
+            config["metadata"] = node.metadata
         return config
 
     def _build_function(
@@ -177,6 +179,7 @@ class Flow:
                 properties={},
                 required=[],
                 handler=self._make_transition_handler(ref),
+                metadata=ref.metadata,
             )
         function = self._lookup(ref.name, kind="tool", where=where, node=node)
         if function is None:
@@ -205,6 +208,7 @@ class Flow:
             handler=self._make_handler(ref, wrapper, where),
             cancel_on_interruption=wrapper.cancel_on_interruption,
             timeout_secs=wrapper.timeout_secs,
+            metadata=ref.metadata,
         )
 
     def _build_action(self, action: "FlowConfig.Action", *, where: str, node: str) -> ActionConfig:

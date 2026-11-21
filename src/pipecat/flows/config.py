@@ -63,7 +63,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 from pipecat.flows.types import ContextStrategy
 from pipecat.utils.yaml import include_loader
@@ -111,6 +111,13 @@ class FlowConfig(BaseModel):
     a stored mapping, and values are rendered with ``str()``. A key that is not
     in state raises :class:`~pipecat.flows.FlowError` when the node is entered.
     To show the LLM a literal ``{{ key }}``, escape it as ``\{{ key }}``.
+
+    Metadata: a node and a function each take an optional ``metadata``
+    mapping of JSON values, for whatever the application wants to keep with
+    them, such as the id of the element a node stands for in an editor. Flows
+    carries it and never acts on it, and it is never sent to the LLM. A
+    :class:`~pipecat.flows.Flow` copies it onto the node configs and function
+    schemas it builds.
 
     Parameters:
         initial_node: Name of the node the flow starts in.
@@ -186,6 +193,8 @@ class FlowConfig(BaseModel):
             transition_to: Node to transition to after the tool completes,
                 or a :class:`FlowConfig.Branch`. Omitted for tools that stay
                 on the current node.
+            metadata: JSON data the application attaches to the tool. See
+                "Metadata" in :class:`FlowConfig`.
         """
 
         model_config = ConfigDict(
@@ -207,6 +216,7 @@ class FlowConfig(BaseModel):
         transition_only: bool = False
         description: str | None = None
         transition_to: "str | FlowConfig.Branch | None" = None
+        metadata: dict[str, JsonValue] | None = None
 
         @model_validator(mode="after")
         def _check_shape(self) -> "FlowConfig.Function":
@@ -294,6 +304,8 @@ class FlowConfig(BaseModel):
                 node. Defaults to the ``FlowManager``'s strategy.
             respond_immediately: Whether the LLM responds as soon as the node
                 is entered. Defaults to True.
+            metadata: JSON data the application attaches to the node. See
+                "Metadata" in :class:`FlowConfig`.
         """
 
         model_config = ConfigDict(extra="forbid")
@@ -305,6 +317,7 @@ class FlowConfig(BaseModel):
         post_actions: "list[FlowConfig.Action]" = Field(default_factory=list)
         context_strategy: Literal["append", "reset"] | None = None
         respond_immediately: bool = True
+        metadata: dict[str, JsonValue] | None = None
 
         @model_validator(mode="after")
         def _check_unique_function_names(self) -> "FlowConfig.Node":
