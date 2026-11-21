@@ -2491,6 +2491,7 @@ class WebsocketTTSService(TTSService, WebsocketService):
             frame: The end frame.
         """
         await super().stop(frame)
+        await self._cancel_reconnect()
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
@@ -2505,11 +2506,13 @@ class WebsocketTTSService(TTSService, WebsocketService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
+        await self._cancel_reconnect()
         await self._disconnect()
 
     async def cleanup(self):
         """Release websocket TTS resources at teardown."""
         await super().cleanup()
+        await self._cancel_reconnect()
         await self._disconnect()
 
     async def _close_connection_contexts(self):
@@ -2618,6 +2621,10 @@ class InterruptibleTTSService(WebsocketTTSService):
         # _bot_speaking so this early, unconfirmed marker never makes a turn
         # that produces no audio look like one that played.
         self._tts_started: bool = False
+        # The reconnect still in progress, if any. The disconnect and the
+        # connect that follows it have to happen in that order, on one task,
+        # so they run off the interruption path instead of inside it.
+        self._reconnect_task: asyncio.Task | None = None
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         # If the bot is not speaking we don't need to reconnect when the user
@@ -2635,8 +2642,43 @@ class InterruptibleTTSService(WebsocketTTSService):
         self._tts_started = False
         await super()._handle_interruption(frame, direction)
         if should_reconnect and not keep_connection:
+            # The interruption has to pass through us to reach the output
+            # transport, which is what stops the audio still queued for the
+            # interrupted reply. Reconnecting first would keep the bot talking
+            # for the whole handshake — several hundred milliseconds with
+            # providers whose connection setup is slow — and would let a reply
+            # that arrives meanwhile queue behind the reconnect, so a second
+            # interruption finds nothing to cancel and that reply still plays.
+            self._schedule_reconnect()
+
+    def _schedule_reconnect(self):
+        """Reconnect on a background task, once any previous reconnect is done.
+
+        A reconnect already running is enough: it closes the connection that
+        was in use and opens a fresh one, which is all a new interruption
+        needs. Starting a second one would close the connection the first is
+        still working on.
+        """
+        if self._reconnect_task and not self._reconnect_task.done():
+            return
+        self._reconnect_task = self.create_task(
+            self._reconnect(), name="tts_reconnect_interruption"
+        )
+
+    async def _reconnect(self):
+        try:
             await self._disconnect()
             await self._connect()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            await self.push_error(error_msg=f"{self} reconnection error: {e}", exception=e)
+
+    async def _cancel_reconnect(self):
+        if self._reconnect_task:
+            task = self._reconnect_task
+            self._reconnect_task = None
+            await self.cancel_task(task)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream with TTS-specific handling.
