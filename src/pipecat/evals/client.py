@@ -220,7 +220,7 @@ class _BotSpeechGate(FrameProcessor):
 class _BotFrameSink(FrameProcessor):
     """Where the bot's output stops and the user's turns start.
 
-    The bot's frames become events on the stream and go no further. The
+    The bot's RTVI messages become events on the stream and go no further. The
     user's turns are injected here, past the bot's side of the pipeline, so
     an interruption there cannot drop them.
 
@@ -242,7 +242,7 @@ class _BotFrameSink(FrameProcessor):
         """Initialize the sink.
 
         Args:
-            stream: Where the bot's frames go as events.
+            stream: Where the bot's RTVI messages go as events.
             persona: The simulated caller, else ``None``.
             persona_hears: Whether the persona hears the bot's responses through
                 the sink (text mode, with no aggregator to hand it the turn).
@@ -263,26 +263,28 @@ class _BotFrameSink(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        # The bot's frames arrive downstream, from the input transport. What
+        # The bot's side arrives downstream, from the input transport. What
         # travels upstream is the user side's own (a persona's function call, a
         # TTS's lifecycle), not bot output, and passes through as is.
         if direction != FrameDirection.DOWNSTREAM:
             await self.push_frame(frame, direction)
             return
-        event = self._stream.frame_to_event(frame)
-        if event is not None:
-            await self._stream.append(event)
-            if self._persona_hears and self._persona is not None:
-                await self._answer(self._persona.hear(event))
+        if isinstance(frame, InputTransportMessageFrame):
+            # The bot's RTVI messages become events and stop here. Everything
+            # downstream of the sink speaks for the user (a persona LLM, the
+            # user TTS, the output) and must never take them as its own input.
+            event = self._stream.rtvi_message_to_event(frame.message)
+            if event is not None:
+                await self._stream.append(event)
+                if self._persona_hears and self._persona is not None:
+                    await self._answer(self._persona.hear(event))
+            return
+        # Not one of the bot's RTVI messages, but activity on its side all the same.
+        self._stream.touch()
         if isinstance(frame, _BotSegmentTranscribedFrame):
             self._stream.bot_segment_transcribed()
             return
-        if isinstance(frame, InputTransportMessageFrame):
-            # The bot's reports, events now. Everything downstream of the sink
-            # speaks for the user (a persona LLM, the user TTS, the output) and
-            # must never take them as its own input.
-            return
-        elif isinstance(frame, InterruptionFrame) and self._persona is None:
+        if isinstance(frame, InterruptionFrame) and self._persona is None:
             return
         elif isinstance(frame, LLMContextFrame):
             # The aggregator handing the persona the bot's turn (audio mode).
