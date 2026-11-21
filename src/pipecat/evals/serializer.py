@@ -374,10 +374,6 @@ _REPORTED_EVENT_TYPES = frozenset(
         "user-stopped-speaking",
         "vad-user-started-speaking",
         "vad-user-stopped-speaking",
-        # The bot reporting *its* output was interrupted. Kept as a message so it
-        # doesn't become an InterruptionFrame, which the harness's own user
-        # aggregator already broadcasts when our VAD detects the bot speaking.
-        "bot-interrupted",
         # What the bot said, read for its backchannels, and what the user said:
         # its transcriptions and backchannels.
         "bot-output",
@@ -405,7 +401,9 @@ class EvalClientSerializer(RTVIClientSerializer):
     can transcribe what the bot actually said. The bot's reports about the
     harness (its transcription, VAD, and speaking messages) stay raw messages
     rather than becoming frames, so they cannot be mistaken for what the
-    harness computes from the bot's audio. So does ``eval-bot-image``, which
+    harness computes from the bot's audio. Its reports about its own output
+    (speaking, interrupted) arrive raw too, from ``RTVIClientSerializer``.
+    So does ``eval-bot-image``, which
     has no frame on the harness's side to become. A cancelled
     ``llm-function-call-stopped`` becomes an :class:`EvalFunctionCallCancelFrame`,
     which keeps its place among the bot's other function-call reports. The

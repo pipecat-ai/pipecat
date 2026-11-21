@@ -17,6 +17,12 @@ It is the inverse of
 :class:`~pipecat.processors.frameworks.rtvi.observer.RTVIObserver`, which turns
 pipeline frames into server messages on the bot side.
 
+The bot's reports about its own output (``bot-started-speaking``,
+``bot-stopped-speaking`` and ``bot-interrupted``) stay raw messages, as
+:class:`~pipecat.frames.frames.InputTransportMessageFrame`. In this pipeline a
+``BotStartedSpeakingFrame`` or an ``InterruptionFrame`` would be about this
+pipeline's own output, not the bot's.
+
 .. note::
     This covers the messages a conversation needs (the LLM response lifecycle,
     the TTS's spoken text, transcriptions, speaking/interruption signals, function
@@ -31,14 +37,12 @@ from loguru import logger
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    InputTransportMessageFrame,
     InterimTranscriptionFrame,
-    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerResponseFrame,
@@ -143,12 +147,10 @@ class RTVIClientSerializer(FrameSerializer):
                 # The message carries only the text; its type (sentence, word)
                 # isn't on the wire.
                 return TTSTextFrame(text=payload.get("text", ""), text_type=TextType.SENTENCE)
-            case "bot-started-speaking":
-                return BotStartedSpeakingFrame()
-            case "bot-stopped-speaking":
-                return BotStoppedSpeakingFrame()
-            case "bot-interrupted":
-                return InterruptionFrame()
+            case "bot-started-speaking" | "bot-stopped-speaking" | "bot-interrupted":
+                # Reports about the bot's own output, which this pipeline has no
+                # frame for: its speaking frames and interruptions are its own.
+                return InputTransportMessageFrame(message=message)
             case "llm-function-call-in-progress":
                 # function_name/arguments may be absent at the bot's default
                 # report level; "" maps back to "no name reported" downstream.

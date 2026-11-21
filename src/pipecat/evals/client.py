@@ -51,8 +51,6 @@ from pipecat.evals.serializer import (
 from pipecat.evals.session import DEFAULT_BOT_READY_TIMEOUT_S, EvalSessionParams
 from pipecat.evals.tts import CachingTTSService, tts_sample_rate
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     DataFrame,
     EndFrame,
     Frame,
@@ -106,8 +104,6 @@ _BOT_FRAMES = (
     LLMMarkerResponseFrame,
     LLMFullResponseEndFrame,
     TTSTextFrame,
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     EvalFunctionCallCancelFrame,
