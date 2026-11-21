@@ -58,7 +58,7 @@ Environment variables:
   provisioned Daily SIP client or an account from the request body; a body
   that names its own ``transport`` wins over this variable.
 - SIP_REG_INTERVAL (optional) - Seconds between registration refreshes,
-  default 600; 0 disables registration (trunk mode).
+  default 240; 0 disables registration (trunk mode).
 - SIP_RTP_TIMEOUT (optional) - Seconds without received RTP after which a
   call is closed as dead; default 0 (off).
 - SIP_AUDIO_CODECS (optional) - Comma-separated codec preference list by
@@ -384,7 +384,7 @@ def sip_runner_arguments(
             integer, or ``SIP_JITTER_BUFFER`` is malformed.
     """
     try:
-        reg_interval = int(os.getenv("SIP_REG_INTERVAL", "600"))
+        reg_interval = int(os.getenv("SIP_REG_INTERVAL", "240"))
         rtp_timeout = int(os.getenv("SIP_RTP_TIMEOUT", "0"))
     except ValueError:
         raise ValueError(

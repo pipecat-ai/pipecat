@@ -359,7 +359,7 @@ class SIPRunnerArguments(RunnerArguments):
     audio_codecs: tuple | None = None
     auth_user: str | None = None
     extra_params: tuple | None = None
-    reg_interval: int = 600
+    reg_interval: int = 240
     rtp_timeout: int = 0
     instance_id: str | None = None
     native_log_level: str = "warning"
