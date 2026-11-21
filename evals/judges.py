@@ -27,9 +27,11 @@ from pipecat.classifiers.openai.decisions.client import (
 )
 from pipecat.classifiers.typesafe.jev.classifier import JevClassifier
 from pipecat.classifiers.typesafe.jev.client import DEFAULT_BASE_URL, DEFAULT_MODEL
+from pipecat.classifiers.zoom.decisions.classifier import ZoomDecisionsClassifier
+from pipecat.classifiers.zoom.decisions.client import DEFAULT_MODEL as ZOOM_DEFAULT_MODEL
 
-# Seconds to wait for a classifier to answer a question. Jev, Clef, and OpenAI's
-# and Google's Decisions APIs answer in a few hundred milliseconds, so a
+# Seconds to wait for a classifier to answer a question. Jev, Clef, and OpenAI's,
+# Google's and Zoom's Decisions APIs answer in a few hundred milliseconds, so a
 # question still waiting this long is one to ask again.
 TIMEOUT = 2.5
 
@@ -135,5 +137,29 @@ def google_classifier(config: dict) -> BaseClassifier:
     return GoogleDecisionsClassifier(
         api_key=api_key,
         model=config.get("model") or GOOGLE_DEFAULT_MODEL,
+        timeout=TIMEOUT,
+    )
+
+
+def zoom_classifier(config: dict) -> BaseClassifier:
+    """Zoom's Decisions API, a classifier that answers in a few hundred milliseconds.
+
+    Args:
+        config: The ``judge.eval:`` block, with an optional ``model``
+            (``zoom-decisions`` or ``zoom-decisions-pro``); the client's
+            default otherwise. The API key comes from ``ZOOM_AI_API_KEY``.
+
+    Returns:
+        The classifier.
+
+    Raises:
+        ValueError: If there is no ``ZOOM_AI_API_KEY``.
+    """
+    api_key = os.environ.get("ZOOM_AI_API_KEY")
+    if not api_key:
+        raise ValueError("Judging with Zoom Decisions needs an API key: set ZOOM_AI_API_KEY.")
+    return ZoomDecisionsClassifier(
+        api_key=api_key,
+        model=config.get("model") or ZOOM_DEFAULT_MODEL,
         timeout=TIMEOUT,
     )
