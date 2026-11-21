@@ -425,6 +425,20 @@ class WordCompletionTracker:
         remaining = self._llm_text[self._llm_spoken_pos :].strip()
         return remaining if remaining else None
 
+    def get_unattributed_llm_text(self) -> str | None:
+        """Return the LLM text not yet attributed to an emitted word frame.
+
+        A word can claim punctuation or markup that no later word event will
+        report. Those characters are already present in that word's raw text,
+        so a caller completing the frame must resume after the attributed cursor
+        rather than the spoken cursor. None without an ``llm_text``, or when
+        every remaining character has already been attributed.
+        """
+        if self._llm_text is None:
+            return None
+        remaining = self._llm_text[self._llm_pos :].strip()
+        return remaining if remaining else None
+
     @property
     def is_complete(self) -> bool:
         """True when this frame has nothing left to speak.

@@ -565,6 +565,50 @@ class TestForceComplete(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tts_frames[0].text, "abc")
         self.assertIsNone(tts_frames[0].raw_text)  # discarded due to corruption
 
+    async def test_force_complete_keeps_original_text_through_transformed_markup(self):
+        """TTS markup must not replace original LLM text when the provider stops early."""
+        seq = _seq()
+        llm_text = "A-B-C."
+        tts_text = 'A<break time="300ms"/>B<break time="300ms"/>C.'
+        await seq.register_spoken(
+            _spoken_frame(llm_text, raw_text=llm_text),
+            "ctx1",
+            tts_text,
+            append_to_context=True,
+        )
+
+        frames = seq.process_word("A", pts=10, context_id="ctx1")
+        frames.extend(seq.force_complete("ctx1", last_word_pts=20))
+        context_text = "".join(
+            (frame.raw_text or frame.text)
+            for frame in frames
+            if isinstance(frame, TTSTextFrame) and frame.append_to_context
+        )
+
+        self.assertEqual(context_text, llm_text)
+        self.assertNotIn("<break", context_text)
+
+    async def test_force_complete_does_not_repeat_attributed_punctuation(self):
+        """Completing an unchanged frame resumes after punctuation already recorded."""
+        seq = _seq()
+        text = "A-B-C."
+        await seq.register_spoken(
+            _spoken_frame(text, raw_text=text),
+            "ctx1",
+            text,
+            append_to_context=True,
+        )
+
+        frames = seq.process_word("A", pts=10, context_id="ctx1")
+        frames.extend(seq.force_complete("ctx1", last_word_pts=20))
+        context_text = "".join(
+            (frame.raw_text or frame.text)
+            for frame in frames
+            if isinstance(frame, TTSTextFrame) and frame.append_to_context
+        )
+
+        self.assertEqual(context_text, text)
+
     async def test_slot_without_tracker_just_marks_complete_and_flushes(self):
         seq = _seq()
         await seq.register_spoken(
@@ -1484,16 +1528,16 @@ class TestVoiceFormattingTransforms(unittest.IsolatedAsyncioTestCase):
 
     # --- force_complete during transform ---
 
-    async def test_force_complete_mid_transform_emits_remaining_tts_text(self):
-        """force_complete when mid-segment emits remaining tts_text (not user_facing_text)."""
+    async def test_force_complete_mid_transform_emits_remaining_original_text(self):
+        """force_complete mid-transform emits the original text, not the expanded TTS text."""
         seq, _ = await self._setup()
         self._advance(seq, "Your", "balance", "is", "five")
         # "dollars," never arrives — force complete
         result = seq.force_complete("ctx1", last_word_pts=99)
         wf = self._word_frames(result)
         self.assertEqual(len(wf), 1)
-        # Remaining tts_text starts with "dollars," (the unexpanded portion)
-        self.assertIn("dollars,", wf[0].text)
+        self.assertIn("$5,", wf[0].text)
+        self.assertEqual(wf[0].raw_text, "$5, due on 3/15. Call us at 555-1234.")
 
     async def test_force_complete_after_transform_emits_remaining_unchanged_text(self):
         """force_complete after the transform emits remaining tts_text correctly."""
