@@ -153,8 +153,9 @@ class FlowManager(BaseObject):
 
     The fields are those of :class:`~pipecat.flows.NodeEntered`; ``node`` is
     always present, and a field with no value is left out. The message is sent
-    whenever the worker has RTVI enabled, so keep anything the end user should
-    not see out of node names, function names and metadata. Metadata that is
+    to RTVI clients of protocol 2.4.0 or later, and to any client before it
+    sends ``client-ready``, so keep anything the end user should not see out of
+    node names, function names and metadata. Metadata that is
     not a JSON object is left out of the message, with a warning;
     ``on_node_entered`` handlers still receive it.
     """

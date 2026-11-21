@@ -71,7 +71,7 @@ class RTVIMessageSpec:
             field that turns the message on, for a message the server only sends
             when it is set.
         min_client_version: The lowest client protocol version the server sends
-            the message to.
+            the message to once the client has sent ``client-ready``.
         deprecated: What replaces a deprecated message.
         details: More about the message, for a reader who needs it beyond the
             description, as Markdown.
@@ -1028,7 +1028,10 @@ def _notes(spec: RTVIMessageSpec) -> list[str]:
         else:
             notes.append(f"Off by default; turned on by the server's `{spec.enabled_by}` setting.")
     if spec.min_client_version:
-        notes.append(f"Sent only to clients of protocol {spec.min_client_version} or later.")
+        notes.append(
+            f"Sent to clients of protocol {spec.min_client_version} or later, and to any "
+            "client before its client-ready."
+        )
     if spec.deprecated:
         notes.append(f"Deprecated. {spec.deprecated}")
     return notes

@@ -1769,7 +1769,7 @@
       "stt_raw_text": {
         "name": "stt-raw-text",
         "title": "stt-raw-text",
-        "summary": "A transcription of the user's speech as the speech-to-text service produces it, including interim transcriptions that may still change. Off by default; turned on by the server's `stt_raw_text_enabled` setting. Sent only to clients of protocol 2.2.0 or later.",
+        "summary": "A transcription of the user's speech as the speech-to-text service produces it, including interim transcriptions that may still change. Off by default; turned on by the server's `stt_raw_text_enabled` setting. Sent to clients of protocol 2.2.0 or later, and to any client before its client-ready.",
         "tags": [
           {
             "name": "Service-Specific Insights"
@@ -2044,7 +2044,7 @@
       "llm_raw_text": {
         "name": "llm-raw-text",
         "title": "llm-raw-text",
-        "summary": "Text exactly as the bot's LLM streams it, a chunk at a time. Off by default; turned on by the server's `llm_raw_text_enabled` setting. Sent only to clients of protocol 2.2.0 or later.",
+        "summary": "Text exactly as the bot's LLM streams it, a chunk at a time. Off by default; turned on by the server's `llm_raw_text_enabled` setting. Sent to clients of protocol 2.2.0 or later, and to any client before its client-ready.",
         "tags": [
           {
             "name": "Service-Specific Insights"
@@ -2086,7 +2086,7 @@
       "tts_raw_text": {
         "name": "tts-raw-text",
         "title": "tts-raw-text",
-        "summary": "Text the bot's text-to-speech service speaks, as it speaks it. Off by default; turned on by the server's `tts_raw_text_enabled` setting. Sent only to clients of protocol 2.2.0 or later.",
+        "summary": "Text the bot's text-to-speech service speaks, as it speaks it. Off by default; turned on by the server's `tts_raw_text_enabled` setting. Sent to clients of protocol 2.2.0 or later, and to any client before its client-ready.",
         "tags": [
           {
             "name": "Service-Specific Insights"
@@ -2476,7 +2476,7 @@
       "flow_node_entered": {
         "name": "flow-node-entered",
         "title": "flow-node-entered",
-        "summary": "The bot's conversation flow entered a node, so a client can follow the conversation through the flow. Sent only to clients of protocol 2.4.0 or later.",
+        "summary": "The bot's conversation flow entered a node, so a client can follow the conversation through the flow. Sent to clients of protocol 2.4.0 or later, and to any client before its client-ready.",
         "tags": [
           {
             "name": "Conversation Flows"
