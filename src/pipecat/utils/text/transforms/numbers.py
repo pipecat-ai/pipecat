@@ -16,6 +16,10 @@ from pipecat.utils.text.transforms.text_transform import TextTransform
 # Matches integers and decimals, with optional thousand separators.
 _NUMBER_RE = re.compile(r"\b(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\b")
 
+# A minus sign touching a number, not a hyphen inside "5-10", "555-1234",
+# "2024-01-05" or "COVID-19", or a spaced dash like "10 - 5".
+_NEGATIVE_NUMBER_RE = re.compile(r"(?<![\w.,])[-−](?=\d)")
+
 
 def expand_numbers(
     digit_cutoff: int | None = 2025,
@@ -66,6 +70,7 @@ def expand_numbers(
         return num2words(whole, lang="en")
 
     async def _transform(text: str, text_type: str | TextType) -> str:
+        text = _NEGATIVE_NUMBER_RE.sub("minus ", text)
         return _NUMBER_RE.sub(_num_to_words, text)
 
     return _transform
