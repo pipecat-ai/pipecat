@@ -75,6 +75,19 @@ def _tool_events() -> list[dict]:
     ]
 
 
+class _EventStream:
+    """An aiobotocore event stream: async-iterable and closeable."""
+
+    def __init__(self, events):
+        self._events = events
+
+    def __aiter__(self):
+        return self._events
+
+    def close(self):
+        pass
+
+
 async def _run(events: list[dict]):
     service = AWSBedrockLLMService(
         aws_access_key="test",
@@ -93,7 +106,9 @@ async def _run(events: list[dict]):
     context = LLMContext()
     context.add_message({"role": "user", "content": "Get the weather in Paris and in Tokyo."})
     with patch.object(
-        service, "_create_converse_stream", AsyncMock(return_value={"stream": stream()})
+        service,
+        "_create_converse_stream",
+        AsyncMock(return_value={"stream": _EventStream(stream())}),
     ):
         await service._process_context(context)
     return service, frames
@@ -196,7 +211,9 @@ async def test_reasoning_cut_short_is_closed_without_a_signature():
     context = LLMContext()
     context.add_message({"role": "user", "content": "What's the weather in Paris?"})
     with patch.object(
-        service, "_create_converse_stream", AsyncMock(return_value={"stream": failing_stream()})
+        service,
+        "_create_converse_stream",
+        AsyncMock(return_value={"stream": _EventStream(failing_stream())}),
     ):
         await service._process_context(context)
 
