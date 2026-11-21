@@ -87,6 +87,9 @@ class StripMarkdown:
                 r"\1",
                 text,
             )
+        # Blockquote markers, nested ones included, before the line-start rules
+        # below so a bullet, header or rule inside a quote is still recognized
+        text = re.sub(r"^(?:>[ \t]?)+", "", text, flags=re.MULTILINE)
         # Strikethrough, with the space before it so the words around it still join
         text = re.sub(r"[ \t]?~~(?=\S).+?(?<=\S)~~", "", text)
         # Horizontal rules (---, ***, * * *), before list bullets so a spaced one
@@ -108,8 +111,6 @@ class StripMarkdown:
         text = re.sub(r"\b_(.+?)_\b", r"\1", text)
         # ATX headers (# ## ### etc.)
         text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
-        # Blockquotes
-        text = re.sub(r"^>\s?", "", text, flags=re.MULTILINE)
         text = text.replace(_STAR, "*")
         return re.sub(rf"{_CODE_OPEN}(\d+){_CODE_CLOSE}", lambda m: codes[int(m.group(1))], text)
 
