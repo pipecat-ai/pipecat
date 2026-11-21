@@ -275,7 +275,7 @@ class UserTurnController(BaseObject):
         """
         return any(s.resolves_proposed_turn_stop_frames for s in self._user_turn_stop_strategies)
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: Frame, *, allow_turn_start: bool = True):
         """Process an incoming frame to detect user turn start or stop.
 
         The frame is passed to the configured user turn strategies, which are
@@ -284,9 +284,23 @@ class UserTurnController(BaseObject):
 
         Args:
             frame: The frame to be processed.
+            allow_turn_start: Whether speech may start or resume a turn. When
+                False, speech state and detector strategies still update while
+                strategies waiting for inference retain their pending response.
 
         """
-        if isinstance(frame, (UserStartedSpeakingFrame, ProposedUserStartedSpeakingFrame)):
+        state_only_start = not allow_turn_start and isinstance(
+            frame,
+            (
+                UserStartedSpeakingFrame,
+                ProposedUserStartedSpeakingFrame,
+                VADUserStartedSpeakingFrame,
+            ),
+        )
+        if state_only_start:
+            self._user_speaking = True
+            self._user_turn_stop_timeout_event.set()
+        elif isinstance(frame, (UserStartedSpeakingFrame, ProposedUserStartedSpeakingFrame)):
             await self._handle_user_started_speaking(frame)
         elif isinstance(frame, (UserStoppedSpeakingFrame, ProposedUserStoppedSpeakingFrame)):
             await self._handle_user_stopped_speaking(frame)
@@ -297,18 +311,21 @@ class UserTurnController(BaseObject):
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_transcription(frame)
 
-        start_strategies = self._user_turn_strategies.start or []
-        for strategy in start_strategies:
-            result = await strategy.process_frame(frame)
-            # Every strategy in an ALL list needs every frame to decide on.
-            # The last strategy's STOP hides the frame from no one.
-            if result == ProcessFrameResult.STOP and self._start_mode == StrategyMode.FIRST:
-                if strategy is not start_strategies[-1]:
-                    self._warn_process_frame_result()
-                break
+        if allow_turn_start:
+            start_strategies = self._user_turn_strategies.start or []
+            for strategy in start_strategies:
+                result = await strategy.process_frame(frame)
+                # Every strategy in an ALL list needs every frame to decide on.
+                # The last strategy's STOP hides the frame from no one.
+                if result == ProcessFrameResult.STOP and self._start_mode == StrategyMode.FIRST:
+                    if strategy is not start_strategies[-1]:
+                        self._warn_process_frame_result()
+                    break
 
         stop_strategies = self._user_turn_stop_strategies
         for strategy in stop_strategies:
+            if state_only_start and strategy.waits_for_inference:
+                continue
             result = await strategy.process_frame(frame)
             # Every strategy in an ALL list needs every frame to decide on.
             # The last strategy's STOP hides the frame from no one.
