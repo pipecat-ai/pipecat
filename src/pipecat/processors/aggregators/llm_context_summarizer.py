@@ -472,8 +472,15 @@ class LLMContextSummarizer(BaseObject):
         # recent messages, but if any message in that range was replaced,
         # removed or shifted (e.g. by LLMMessagesUpdateFrame or set_messages()),
         # the summary no longer matches the context and would overwrite it.
-        current = self._context.messages[: last_summarized_index + 1]
-        requested = summarized_messages[: last_summarized_index + 1]
+        # A leading system message is not part of the summary (_apply_summary
+        # keeps the current one), so replacing only the system prompt is fine.
+        messages = self._context.messages
+        start = min(
+            self._leading_system_message_count(messages),
+            self._leading_system_message_count(summarized_messages),
+        )
+        current = messages[start : last_summarized_index + 1]
+        requested = summarized_messages[start : last_summarized_index + 1]
         if len(current) != len(requested) or any(a is not b for a, b in zip(current, requested)):
             return False
 
