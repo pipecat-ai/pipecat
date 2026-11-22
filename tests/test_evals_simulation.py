@@ -9,6 +9,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pipecat.evals.persona import END_CALL_FUNCTION, EvalPersona
 from pipecat.evals.results import EvalSimulationResult
@@ -867,6 +868,33 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ended_by, "bot")
         self.assertTrue(client.hung_up)
 
+    async def test_the_bots_last_words_before_hanging_up_are_judged(self):
+        judge = _FakeConversationJudge(["yes"])
+        records: list = []
+        driver, stream, _, _ = _driver(_simulation(bot_audio=True), judge, records)
+
+        async def conversation():
+            stream.bot_turn_started()
+            # The bot hangs up as it stops speaking, before the harness has
+            # closed its last words into a turn.
+            await stream.append({"type": BOT_ENDED_EVENT})
+            await asyncio.sleep(0.1)
+            await stream.bot_turn_stopped("Have a wonderful day!")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "bot")
+        self.assertEqual(
+            result.messages[-1], {"role": "assistant", "content": "Have a wonderful day!"}
+        )
+        # The live conversation shows them too, before the run's end.
+        self.assertEqual(
+            [(r.status, r.text) for r in records[-2:]],
+            [("bot", "Have a wonderful day!"), ("ended", "bot")],
+        )
+
     async def test_the_bots_tool_calls_are_the_judges_evidence(self):
         judge = _FakeConversationJudge(["yes"])
         driver, stream, llm, _ = _driver(_simulation(), judge)
@@ -1157,6 +1185,57 @@ class TestClosingTurn(unittest.IsolatedAsyncioTestCase):
         result, _ = await self._hang_up_while_speaking(_simulation(bot_audio=True, max_turns=1))
         self.assertEqual(result.ended_by, "end_call")
         self.assertEqual(result.messages[-1], {"role": "assistant", "content": "Goodbye!"})
+
+    async def test_the_wait_for_the_bots_reply_counts_from_when_it_heard_the_line_end(self):
+        driver, stream, llm, _ = _driver(_simulation(), _FakeConversationJudge(["yes"]))
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Is that all correct?"})
+            await stream.append({"type": "user_started_speaking"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Yes, thanks, goodbye."})
+            await _end_call(llm, success=True, reason="done")
+            # The line plays to the bot for longer than the wait itself.
+            await asyncio.sleep(0.7)
+            await stream.append({"type": "user_stopped_speaking"})
+            await asyncio.sleep(0.3)
+            await stream.append({"type": "llm_response", "text": "Goodbye!"})
+
+        with patch("pipecat.evals.simulation_driver.CLOSING_REPLY_WAIT_S", 0.5):
+            task = asyncio.create_task(conversation())
+            await driver.run()
+            await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertEqual(result.messages[-1], {"role": "assistant", "content": "Goodbye!"})
+
+    async def test_a_long_closing_reply_holds_the_wait_until_the_bot_stops(self):
+        driver, stream, llm, _ = _driver(_simulation(), _FakeConversationJudge(["yes"]))
+
+        async def bot_report(msg_type: str):
+            event = stream.rtvi_message_to_event({"label": RTVI.MESSAGE_LABEL, "type": msg_type})
+            assert event is not None
+            await stream.append(event)
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Is that all correct?"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Yes, goodbye."})
+            await _end_call(llm, success=True, reason="done")
+            await bot_report("bot-started-speaking")
+            # The bot's reply goes on for longer than the wait itself.
+            await asyncio.sleep(0.7)
+            await bot_report("bot-stopped-speaking")
+            await asyncio.sleep(0.2)
+            await stream.append({"type": "llm_response", "text": "Goodbye, safe travels!"})
+
+        with patch("pipecat.evals.simulation_driver.CLOSING_REPLY_WAIT_S", 0.5):
+            task = asyncio.create_task(conversation())
+            await driver.run()
+            await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertEqual(
+            result.messages[-1], {"role": "assistant", "content": "Goodbye, safe travels!"}
+        )
 
     async def test_a_hang_up_with_no_reply_coming_still_ends_as_end_call(self):
         driver, stream, llm, _ = _driver(

@@ -6,6 +6,7 @@
 
 """The simulation driver: lets the persona hold the conversation, then judges the whole of it."""
 
+import math
 import time
 from collections.abc import Awaitable, Callable
 
@@ -40,9 +41,16 @@ from pipecat.utils.text.word_count import count_spoken_words
 # call has gone out to the bot.
 END_CALL_EVENT = "end_call"
 # How long the run waits, after the persona hangs up on its own last line, for
-# the bot's reply to it. A flow makes its final tool calls in that turn, and a
-# caller who hangs up mid-sentence is not what the simulation tests.
+# the bot's reply to it. The wait runs only while neither side is speaking, by
+# the bot's reports, and starts over when one stops: the persona's last line
+# plays out after the call is made, and the bot's reply can be long. A flow
+# makes its final tool calls in that turn, and a caller who hangs up
+# mid-sentence is not what the simulation tests.
 CLOSING_REPLY_WAIT_S = 15.0
+# How long the run waits, after the bot hangs up, for what it said last to close
+# into a turn. The harness hears the bot stop only in the silence that follows,
+# and smart turn may wait out its 3 s silence fallback.
+BOT_ENDED_WAIT_S = 5.0
 
 
 def _call_matches(spec: EvalFunctionCall, call: EvalFunctionCall) -> bool:
@@ -132,6 +140,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         # Set when the persona hangs up on its own last line: the run then
         # waits for the bot's reply to it, or this long, before ending.
         closing_ends: float | None = None
+        # Whether the bot hears the persona speaking, by its own reports.
+        bot_hears_persona = False
         while self._ended_by is None:
             lull_ends = self._stream.last_activity + simulation.max_silence_s
             waits = [deadline, lull_ends] + ([closing_ends] if closing_ends is not None else [])
@@ -159,7 +169,14 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                     self._ended_by = "end_call"
                 else:
                     self._trace.log("persona: hung up; waiting for the bot's closing turn")
-                    closing_ends = time.monotonic() + CLOSING_REPLY_WAIT_S
+                    closing_ends = self._closing_reply_deadline(bot_hears_persona)
+            elif event["type"] in ("user_started_speaking", "user_stopped_speaking"):
+                bot_hears_persona = event["type"] == "user_started_speaking"
+                if closing_ends is not None:
+                    closing_ends = self._closing_reply_deadline(bot_hears_persona)
+            elif event["type"] in ("bot_started_speaking", "bot_stopped_speaking"):
+                if closing_ends is not None:
+                    closing_ends = self._closing_reply_deadline(bot_hears_persona)
             elif event["type"] == BOT_ENDED_EVENT:
                 self._ended_by = "bot"
             elif event["type"] == HARNESS_ERROR_EVENT:
@@ -182,6 +199,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         await self._client.hang_up()
         self._duration_s = round(time.monotonic() - started, 3)
         self._trace.log(f"persona: ended by {self._ended_by} after {self._turns} turn(s)")
+        if self._ended_by == "bot":
+            await self._report_last_words()
         # Whatever the bot said last closes the conversation.
         self._observe_new_events()
         self._conversation.end_bot_turn()
@@ -281,9 +300,22 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 lines.extend(EvalSimulationJudge.call_lines(message))
         return lines
 
+    def _closing_reply_deadline(self, bot_hears_persona: bool) -> float:
+        """When the closing reply wait runs out: never while either side is speaking."""
+        if bot_hears_persona or self._stream.bot_speaking:
+            return math.inf
+        return time.monotonic() + CLOSING_REPLY_WAIT_S
+
     async def _report(self, status: str, text: str) -> None:
         """Emit one line of the conversation, or its end, as progress."""
         await self._progress(EvalSimulationProgress(status=status, text=text, turn=self._turns))
+
+    async def _report_last_words(self) -> None:
+        """Wait for what the bot said before hanging up to close into a turn, and report it."""
+        await self._stream.wait_bot_transcribed(BOT_ENDED_WAIT_S)
+        for event in self._stream.events_seen[self._observed :]:
+            if event["type"] == self._bot_said and event.get("text"):
+                await self._report("bot", event["text"])
 
     def _harness_failure(self, text: str) -> EvalAssertionFailure:
         """The failure a harness pipeline error becomes: the run's error, scored against the current turn."""

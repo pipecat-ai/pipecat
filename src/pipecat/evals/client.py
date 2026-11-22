@@ -68,6 +68,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserTurnCompletionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -231,6 +232,11 @@ class _BotFrameSink(FrameProcessor):
     talking stops). And the persona answers from here: in text mode it hears
     each finished bot response through the sink, in audio mode the aggregator
     hands it the bot's turn; either way nothing reaches it once it hung up.
+
+    Once the persona has hung up, its LLM no longer marks the bot's turns
+    complete. The sink marks the closing turn complete in its place once the
+    bot reports it stopped speaking, so a pause between two of the bot's
+    sentences doesn't end it.
     """
 
     def __init__(
@@ -252,6 +258,9 @@ class _BotFrameSink(FrameProcessor):
         self._stream = stream
         self._persona = persona
         self._persona_hears = persona_hears and persona is not None
+        # The closing turn's latest inference, marked complete once the bot
+        # stopped speaking.
+        self._closing_inference: LLMContextFrame | None = None
 
     async def inject(self, frame: Frame) -> None:
         """Push a user turn into the pipeline, past the bot's side.
@@ -279,6 +288,7 @@ class _BotFrameSink(FrameProcessor):
                 await self._stream.append(event)
                 if self._persona_hears and self._persona is not None:
                     await self._answer(self._persona.hear(event))
+                await self._maybe_complete_closing_turn()
             return
         # Not one of the bot's RTVI messages, but activity on its side all the same.
         self._stream.touch()
@@ -289,6 +299,10 @@ class _BotFrameSink(FrameProcessor):
             return
         elif isinstance(frame, LLMContextFrame):
             # The aggregator handing the persona the bot's turn (audio mode).
+            if self._persona is not None and self._persona.hung_up:
+                self._closing_inference = frame
+                await self._maybe_complete_closing_turn()
+                return
             await self._answer(frame)
             return
         await self.push_frame(frame, direction)
@@ -298,6 +312,16 @@ class _BotFrameSink(FrameProcessor):
         if frame is None or self._persona is None or self._persona.hung_up:
             return
         await self.push_frame(frame)
+
+    async def _maybe_complete_closing_turn(self) -> None:
+        """Mark the closing turn complete for the persona once the bot stopped speaking."""
+        if self._closing_inference is None or self._stream.bot_speaking:
+            return
+        frame, self._closing_inference = self._closing_inference, None
+        await self.push_frame(
+            UserTurnCompletionFrame(kind="complete", context_frame_id=frame.id),
+            FrameDirection.UPSTREAM,
+        )
 
 
 # The event the relay appends for each response the persona completes, and the
@@ -945,6 +969,10 @@ class EvalClient:
             # bot-starter turning away a session over the agent's limit.
             self._refuse("closed_before_ready", _close_description(websocket))
             self._stream.bot_ended()
+            # The persona has nobody left to answer, so the sink marks the bot's
+            # last turn complete in its place.
+            if self._persona is not None:
+                self._persona.hang_up()
             await self._stream.append({"type": BOT_ENDED_EVENT})
 
         return transport
@@ -996,7 +1024,9 @@ class EvalClient:
                 Its LLM then also judges whether the bot finished what it was
                 saying: smart turn hears a finished turn at the end of every
                 sentence the bot's TTS speaks, and the persona waits for the
-                rest of a reply that reads unfinished.
+                rest of a reply that reads unfinished. Once it hangs up, the
+                bot's report that it stopped speaking decides instead (see
+                ``_BotFrameSink``).
         """
         strategies = FilterIncompleteUserTurnStrategies() if persona else None
         aggregator = LLMUserAggregator(
