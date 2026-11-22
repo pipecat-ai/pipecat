@@ -69,6 +69,18 @@ class TestRTVIConfigureObserver(unittest.TestCase):
         observer._apply_config(RTVIConfigureObserverFrame(bot_llm_marker_enabled=None))
         self.assertTrue(observer._params.bot_llm_marker_enabled)
 
+    def test_config_leaves_the_callers_params_alone(self):
+        # Sessions sharing one params object each get their own settings.
+        params = RTVIObserverParams()
+        observer = RTVIObserver(params=params)
+        observer._apply_config(
+            RTVIConfigureObserverFrame(vad_user_speaking_enabled=True, bot_llm_marker_enabled=True)
+        )
+        self.assertTrue(observer._params.vad_user_speaking_enabled)
+        self.assertFalse(params.vad_user_speaking_enabled)
+        self.assertFalse(params.bot_llm_marker_enabled)
+        self.assertFalse(RTVIObserver(params=params)._params.vad_user_speaking_enabled)
+
 
 class TestRTVIObserverLLMMarkers(unittest.IsolatedAsyncioTestCase):
     async def _push(self, observer: RTVIObserver, frame) -> list:
