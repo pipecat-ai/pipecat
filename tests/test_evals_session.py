@@ -727,38 +727,69 @@ class TestBotTurnStrategies(unittest.TestCase):
 
 
 class TestClosingBotTurn(unittest.IsolatedAsyncioTestCase):
-    """The bot's turn after the persona hangs up ends without the persona's LLM."""
+    """The bot's turn after the persona hangs up ends once the bot stopped speaking."""
 
-    async def test_the_closing_turn_ends_when_the_bot_stops(self):
+    async def test_the_closing_turn_ends_when_the_bot_stopped_speaking(self):
+        turns = await self._closing_turns(
+            [
+                _bot_report("bot-started-speaking"),
+                VADUserStartedSpeakingFrame(),
+                TranscriptionFrame(text="Goodbye!", user_id="bot", timestamp="t"),
+                VADUserStoppedSpeakingFrame(),
+                _bot_report("bot-stopped-speaking"),
+            ]
+        )
+        # The completion gate ended the turn, not the stop timeout or the EndFrame.
+        self.assertEqual(len(turns), 1)
+        self.assertIsInstance(turns[0][0], LLMTurnCompletionUserTurnStopStrategy)
+
+    async def test_a_pause_between_sentences_does_not_end_the_closing_turn(self):
+        turns = await self._closing_turns(
+            [
+                _bot_report("bot-started-speaking"),
+                VADUserStartedSpeakingFrame(),
+                TranscriptionFrame(
+                    text="Your table for two is booked.", user_id="bot", timestamp="t"
+                ),
+                VADUserStoppedSpeakingFrame(),
+                # Past the speech timeout, with the bot still speaking.
+                SleepFrame(sleep=0.3),
+                VADUserStartedSpeakingFrame(),
+                TranscriptionFrame(text="See you Friday at seven.", user_id="bot", timestamp="t"),
+                VADUserStoppedSpeakingFrame(),
+                SleepFrame(sleep=0.3),
+                _bot_report("bot-stopped-speaking"),
+            ]
+        )
+        self.assertEqual(len(turns), 1)
+        strategy, text = turns[0]
+        self.assertIsInstance(strategy, LLMTurnCompletionUserTurnStopStrategy)
+        self.assertEqual(text, "Your table for two is booked. See you Friday at seven.")
+
+    async def _closing_turns(self, frames_to_send: list) -> list:
+        """The strategy and text of each turn the aggregator ends after the persona hung up."""
         persona = _persona()
         persona.hang_up()
-        # A speech timeout stands in for smart turn, deciding the bot stopped.
+        # A speech timeout stands in for smart turn, hearing an end at every sentence.
         strategies = FilterIncompleteUserTurnStrategies(
             stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.1)]
         )
         aggregator = LLMUserAggregator(
             persona.context, params=LLMUserAggregatorParams(user_turn_strategies=strategies)
         )
-        ended_by = []
+        turns = []
 
         @aggregator.event_handler("on_user_turn_stopped")
-        async def _on_user_turn_stopped(_aggregator, strategy, _message):
-            ended_by.append(strategy)
+        async def _on_user_turn_stopped(_aggregator, strategy, message):
+            turns.append((strategy, message.content))
 
         sink = _BotFrameSink(_stream(bot_audio=True), persona=persona)
         await run_test(
             Pipeline([aggregator, sink]),
-            frames_to_send=[
-                VADUserStartedSpeakingFrame(),
-                TranscriptionFrame(text="Goodbye!", user_id="bot", timestamp="t"),
-                VADUserStoppedSpeakingFrame(),
-                # Well short of the controller's 5 s stop timeout.
-                SleepFrame(sleep=1.0),
-            ],
+            # Well short of the controller's 5 s stop timeout.
+            frames_to_send=[*frames_to_send, SleepFrame(sleep=1.0)],
         )
-        # The completion gate ended the turn, not the stop timeout or the EndFrame.
-        self.assertEqual(len(ended_by), 1)
-        self.assertIsInstance(ended_by[0], LLMTurnCompletionUserTurnStopStrategy)
+        return turns
 
 
 class TestBotTurn(unittest.IsolatedAsyncioTestCase):
