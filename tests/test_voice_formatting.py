@@ -141,6 +141,21 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
         for text, expected in cases.items():
             self.assertEqual(await strip_markdown(text, "*"), expected, text)
 
+    async def test_escaped_characters_kept_as_text(self):
+        cases = {
+            "Set my\\_var\\_name first": "Set my_var_name first",
+            "Use \\_init\\_ here": "Use _init_ here",
+            "\\# Not a heading": "# Not a heading",
+            "\\- Not a bullet": "- Not a bullet",
+            "\\[Not a link\\](x)": "[Not a link](x)",
+            "Keep \\~\\~this\\~\\~": "Keep ~~this~~",
+            "A \\\\ backslash": "A \\ backslash",
+            "Code `a\\_b` stays": "Code a\\_b stays",
+            "C:\\Users\\me": "C:\\Users\\me",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(await strip_markdown(text, "*"), expected, text)
+
     async def test_list_bullets(self):
         cases = {
             "\n- Coffee for three dollars.": "\nCoffee for three dollars.",
