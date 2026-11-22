@@ -79,6 +79,11 @@ def _currency_match(match: re.Match) -> str:
         frac = int(frac_str[:2].ljust(2, "0"))
         if frac > 0:
             result += " and " + _amount_to_words(frac, c_singular, c_plural)
+        elif whole == 0 and frac_str.strip("0"):
+            # Under one cent there are no whole cents to read, and "zero dollars"
+            # would misstate the price, so read the fraction digit by digit.
+            digits = " ".join(num2words(int(d), lang="en") for d in frac_str.rstrip("0"))
+            return f"{num2words(whole, lang='en')} point {digits} {plural}"
 
     return result
 
