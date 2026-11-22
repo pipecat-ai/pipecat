@@ -867,6 +867,33 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ended_by, "bot")
         self.assertTrue(client.hung_up)
 
+    async def test_the_bots_last_words_before_hanging_up_are_judged(self):
+        judge = _FakeConversationJudge(["yes"])
+        records: list = []
+        driver, stream, _, _ = _driver(_simulation(bot_audio=True), judge, records)
+
+        async def conversation():
+            stream.bot_turn_started()
+            # The bot hangs up as it stops speaking, before the harness has
+            # closed its last words into a turn.
+            await stream.append({"type": BOT_ENDED_EVENT})
+            await asyncio.sleep(0.1)
+            await stream.bot_turn_stopped("Have a wonderful day!")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "bot")
+        self.assertEqual(
+            result.messages[-1], {"role": "assistant", "content": "Have a wonderful day!"}
+        )
+        # The live conversation shows them too, before the run's end.
+        self.assertEqual(
+            [(r.status, r.text) for r in records[-2:]],
+            [("bot", "Have a wonderful day!"), ("ended", "bot")],
+        )
+
     async def test_the_bots_tool_calls_are_the_judges_evidence(self):
         judge = _FakeConversationJudge(["yes"])
         driver, stream, llm, _ = _driver(_simulation(), judge)

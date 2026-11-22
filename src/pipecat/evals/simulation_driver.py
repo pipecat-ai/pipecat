@@ -43,6 +43,10 @@ END_CALL_EVENT = "end_call"
 # the bot's reply to it. A flow makes its final tool calls in that turn, and a
 # caller who hangs up mid-sentence is not what the simulation tests.
 CLOSING_REPLY_WAIT_S = 15.0
+# How long the run waits, after the bot hangs up, for what it said last to close
+# into a turn. The harness hears the bot stop only in the silence that follows,
+# and smart turn may wait out its 3 s silence fallback.
+BOT_ENDED_WAIT_S = 5.0
 
 
 def _call_matches(spec: EvalFunctionCall, call: EvalFunctionCall) -> bool:
@@ -182,6 +186,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         await self._client.hang_up()
         self._duration_s = round(time.monotonic() - started, 3)
         self._trace.log(f"persona: ended by {self._ended_by} after {self._turns} turn(s)")
+        if self._ended_by == "bot":
+            await self._report_last_words()
         # Whatever the bot said last closes the conversation.
         self._observe_new_events()
         self._conversation.end_bot_turn()
@@ -284,6 +290,13 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
     async def _report(self, status: str, text: str) -> None:
         """Emit one line of the conversation, or its end, as progress."""
         await self._progress(EvalSimulationProgress(status=status, text=text, turn=self._turns))
+
+    async def _report_last_words(self) -> None:
+        """Wait for what the bot said before hanging up to close into a turn, and report it."""
+        await self._stream.wait_bot_transcribed(BOT_ENDED_WAIT_S)
+        for event in self._stream.events_seen[self._observed :]:
+            if event["type"] == self._bot_said and event.get("text"):
+                await self._report("bot", event["text"])
 
     def _harness_failure(self, text: str) -> EvalAssertionFailure:
         """The failure a harness pipeline error becomes: the run's error, scored against the current turn."""

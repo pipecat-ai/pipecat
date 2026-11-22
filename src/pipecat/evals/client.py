@@ -969,6 +969,10 @@ class EvalClient:
             # bot-starter turning away a session over the agent's limit.
             self._refuse("closed_before_ready", _close_description(websocket))
             self._stream.bot_ended()
+            # The persona has nobody left to answer, so the sink marks the bot's
+            # last turn complete in its place.
+            if self._persona is not None:
+                self._persona.hang_up()
             await self._stream.append({"type": BOT_ENDED_EVENT})
 
         return transport
