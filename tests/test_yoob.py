@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.services.yoob.stt import YoobSTTService
 from pipecat.services.yoob.tts import YoobTTSService
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.transcriptions.language import Language
 
 
 def _pcm48(seconds: float = 0.5) -> bytes:
@@ -231,3 +232,39 @@ async def test_stt_reports_a_lost_partial_instead_of_committing_it():
     assert not [f for f in down if isinstance(f, TranscriptionFrame)]
     errors = [f for f in list(down) + list(up) if isinstance(f, ErrorFrame)]
     assert any("before the final transcript" in f.error for f in errors)
+
+
+@pytest.mark.asyncio
+async def test_stt_stream_uses_the_configured_model_and_language():
+    seen: dict = {}
+
+    async def handler(ws):
+        seen["path"] = ws.request.path
+        await ws.send(json.dumps({"type": "ready", "id": "s1", "sample_rate": 16000}))
+        async for msg in ws:
+            if isinstance(msg, str) and json.loads(msg)["type"] == "end":
+                await ws.send(
+                    json.dumps(
+                        {"type": "final", "utt": 1, "text": "guten Tag", "start": 0.0, "end": 0.5}
+                    )
+                )
+
+    async with serve(handler, "127.0.0.1", 0) as server:
+        host, port = next(iter(server.sockets)).getsockname()[:2]
+        stt = YoobSTTService(
+            api_key="yoob_test_key",
+            base_url=f"http://{host}:{port}/v1",
+            sample_rate=16000,
+            settings=YoobSTTService.Settings(model="yoob-asr-pro-v1", language="de"),
+        )
+        frames = _audio_frames() + [
+            SleepFrame(sleep=0.2),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=0.3),
+        ]
+        down, _ = await run_test(stt, frames_to_send=frames)
+
+    assert seen["path"] == "/v1/audio/transcriptions/stream?model=yoob-asr-pro-v1&language=de"
+    finals = [f for f in down if isinstance(f, TranscriptionFrame)]
+    assert [f.text for f in finals] == ["guten Tag"]
+    assert finals[0].language == Language.DE

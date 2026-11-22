@@ -18,6 +18,7 @@ import os
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlencode
 
 from loguru import logger
 from websockets.protocol import State
@@ -75,7 +76,8 @@ class YoobSTTService(WebsocketSTTService):
             api_key: Defaults to ``YOOB_API_KEY``. Keys come from https://app.yoob.com.
             base_url: Defaults to ``YOOB_BASE_URL`` or https://tts-api.yoob.com/v1.
             sample_rate: Input rate. Defaults to the pipeline's; audio is resampled to 16 kHz.
-            settings: Runtime settings (model, language).
+            settings: Runtime settings: model (``yoob-asr-turbo-v1``, the default and fastest, or
+                ``yoob-asr-pro-v1``, the most accurate) and language. Changing either reconnects.
             ttfs_p99_latency: P99 time from speech end to final transcript, in seconds.
             **kwargs: Passed to ``WebsocketSTTService``.
         """
@@ -183,12 +185,32 @@ class YoobSTTService(WebsocketSTTService):
                 return
             logger.debug("Connecting to Yoob STT")
             self._websocket = await self._websocket_connect(
-                self._ws_url, additional_headers={"Authorization": f"Bearer {self._api_key}"}
+                self._stream_url(), additional_headers={"Authorization": f"Bearer {self._api_key}"}
             )
             await self._call_event_handler("on_connected")
         except Exception as e:
             self._websocket = None
             await self.push_error(error_msg=f"Unable to connect to Yoob: {e}", exception=e)
+
+    def _stream_url(self) -> str:
+        # The stream reads its model and language from the URL when it opens.
+        params = {"model": self._settings.model}
+        if self._settings.language:
+            params["language"] = str(self._settings.language)
+        return f"{self._ws_url}?{urlencode(params)}"
+
+    async def _update_settings(self, delta: Settings) -> dict[str, Any]:
+        """Apply a settings delta; a new model or language takes a new stream."""
+        changed = await super()._update_settings(delta)
+        if changed:
+            await self._request_reconnect()
+        return changed
+
+    def _language(self) -> Language | None:
+        try:
+            return Language(str(self._settings.language))
+        except ValueError:
+            return None
 
     async def _disconnect_websocket(self):
         ws = self._websocket
@@ -275,13 +297,13 @@ class YoobSTTService(WebsocketSTTService):
             await self.emit_stt_usage_metrics()
             await self.push_frame(
                 TranscriptionFrame(
-                    transcript, self._user_id, time_now_iso8601(), Language.EN, result=result
+                    transcript, self._user_id, time_now_iso8601(), self._language(), result=result
                 )
             )
-            await self._handle_transcription(transcript, True, Language.EN)
+            await self._handle_transcription(transcript, True, self._language())
         else:
             await self.push_frame(
                 InterimTranscriptionFrame(
-                    transcript, self._user_id, time_now_iso8601(), Language.EN, result=result
+                    transcript, self._user_id, time_now_iso8601(), self._language(), result=result
                 )
             )
