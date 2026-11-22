@@ -52,6 +52,7 @@ from .models import (
     AssemblyAIConnectionParams,
     BaseMessage,
     BeginMessage,
+    HeartbeatMessage,
     SpeakerRevisionMessage,
     SpeechStartedMessage,
     TerminationMessage,
@@ -78,7 +79,7 @@ U3_PRO_MODEL_PREFIXES = (
 # Settings AssemblyAI accepts in an ``UpdateConfiguration`` message, so changing
 # them applies to the live session. Every other setting is a connect-time query
 # parameter and only takes effect on a new connection.
-HOT_UPDATABLE_SETTINGS = frozenset({"agent_context", "language_codes"})
+HOT_UPDATABLE_SETTINGS = frozenset({"agent_context", "language_codes", "session_heartbeat"})
 
 # Settings applied locally to the transcripts AssemblyAI returns; never sent.
 LOCAL_SETTINGS = frozenset({"speaker_format"})
@@ -274,6 +275,9 @@ class AssemblyAISTTSettings(STTSettings):
             changing it does not reconnect.
         filter_profanity: Replace profanity in transcribed text with asterisks.
             Defaults to None (not sent; the server leaves text unfiltered).
+        session_heartbeat: Enable periodic Heartbeat messages from the server with
+            session health and audio statistics. Defaults to None (not sent).
+            Can be updated mid-session via UpdateConfiguration.
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
             audio frames as silence. Only applicable to U3 Pro models.
         domain: Optional domain for specialized recognition modes. For example,
@@ -334,6 +338,7 @@ class AssemblyAISTTSettings(STTSettings):
     max_speakers: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     filter_profanity: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    session_heartbeat: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     continuous_partials: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -455,6 +460,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             max_speakers=None,
             speaker_format=None,
             filter_profanity=None,
+            session_heartbeat=None,
             vad_threshold=None,
             domain=None,
             continuous_partials=True,
@@ -500,6 +506,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 default_settings.format_turns = connection_params.format_turns
                 default_settings.speaker_labels = connection_params.speaker_labels
                 default_settings.vad_threshold = connection_params.vad_threshold
+                default_settings.session_heartbeat = connection_params.session_heartbeat
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -770,8 +777,18 @@ class AssemblyAISTTService(WebsocketSTTService):
         if "language_codes" in changed and isinstance(self._settings.language_codes, list):
             # _update_language_codes() guards on model.
             await self._update_language_codes(self._settings.language_codes)
+        if "session_heartbeat" in changed and isinstance(self._settings.session_heartbeat, bool):
+            await self._update_session_heartbeat(self._settings.session_heartbeat)
 
         return changed
+
+    async def _update_session_heartbeat(self, session_heartbeat: bool):
+        """Toggle session heartbeat reporting on the live WebSocket session.
+
+        Args:
+            session_heartbeat: True to enable Heartbeat events, False to disable.
+        """
+        await self._send_update_configuration(session_heartbeat=session_heartbeat)
 
     async def _update_language_codes(self, language_codes: list[Language]):
         """Re-steer the live session toward a new set of declared languages.
@@ -897,6 +914,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             "speaker_labels": s.speaker_labels,
             "max_speakers": s.max_speakers,
             "filter_profanity": s.filter_profanity,
+            "session_heartbeat": s.session_heartbeat,
             "vad_threshold": s.vad_threshold,
             "domain": s.domain,
         }
@@ -1144,6 +1162,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             return TerminationMessage.model_validate(message)
         elif msg_type == "SpeakerRevision":
             return SpeakerRevisionMessage.model_validate(message)
+        elif msg_type == "Heartbeat":
+            return HeartbeatMessage.model_validate(message)
         else:
             raise ValueError(f"Unknown message type: {msg_type}")
 
@@ -1167,6 +1187,12 @@ class AssemblyAISTTService(WebsocketSTTService):
                 # labels they were sent with.
                 turns = [revision.get("turn_order") for revision in parsed_message.revisions]
                 logger.debug(f"{self} speaker labels revised for turns {turns}")
+            elif isinstance(parsed_message, HeartbeatMessage):
+                logger.debug(
+                    f"{self} Heartbeat received: audio={parsed_message.total_audio_received_ms}ms, "
+                    f"duration={parsed_message.total_duration_ms}ms, "
+                    f"rtf={parsed_message.realtime_factor}"
+                )
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 

@@ -139,9 +139,32 @@ class SpeakerRevisionMessage(BaseMessage):
     revisions: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class HeartbeatMessage(BaseMessage):
+    """Periodic heartbeat message sent when session_heartbeat is enabled.
+
+    Parameters:
+        type: Always "Heartbeat" for this message type.
+        total_audio_received_ms: Total audio duration in milliseconds received by server.
+        total_duration_ms: Total session duration in milliseconds elapsed on server.
+        realtime_factor: Ratio of audio duration to processing duration.
+        max_speech_probability: Maximum speech probability detected in the recent window.
+    """
+
+    type: Literal["Heartbeat"] = "Heartbeat"
+    total_audio_received_ms: int | float | None = None
+    total_duration_ms: int | float | None = None
+    realtime_factor: float | None = None
+    max_speech_probability: float | None = None
+
+
 # Union type for all possible message types
 AnyMessage = (
-    BeginMessage | TurnMessage | SpeechStartedMessage | TerminationMessage | SpeakerRevisionMessage
+    BeginMessage
+    | TurnMessage
+    | SpeechStartedMessage
+    | TerminationMessage
+    | SpeakerRevisionMessage
+    | HeartbeatMessage
 )
 
 
@@ -182,6 +205,8 @@ class AssemblyAIConnectionParams(BaseModel):
             align this value with your VAD's activation threshold to avoid the "dead zone"
             where AssemblyAI transcribes speech that your VAD hasn't detected yet.
             Defaults to None (not sent).
+        session_heartbeat: Enable periodic Heartbeat messages from the server with
+            session health and audio statistics. Defaults to None (not sent).
     """
 
     sample_rate: int = 16000
@@ -205,6 +230,7 @@ class AssemblyAIConnectionParams(BaseModel):
     format_turns: bool = True
     speaker_labels: bool | None = None
     vad_threshold: float | None = None
+    session_heartbeat: bool | None = None
 
     @model_validator(mode="after")
     def handle_deprecated_param(self):
