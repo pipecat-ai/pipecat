@@ -351,6 +351,11 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
         if self._settings.system_instruction:
             logger.debug(f"{self}: Using system instruction: {self._settings.system_instruction}")
 
+    async def cleanup(self):
+        """Release service resources and close the Responses API client."""
+        await super().cleanup()
+        await self._client.close()
+
     def _create_client(
         self,
         api_key=None,
