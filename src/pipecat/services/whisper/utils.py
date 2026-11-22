@@ -80,12 +80,14 @@ def extract_openai_gpt4o_probability(frame: TranscriptionFrame) -> float | None:
     if not frame.result:
         return None
 
-    # OpenAI GPT transcription format: response.logprobs
+    # OpenAI GPT transcription format: response.logprobs, one entry per token
+    # carrying its log probability in `logprob`.
     if hasattr(frame.result, "logprobs"):
         logprobs = frame.result.logprobs
-        if logprobs:
+        values = [lp.logprob for lp in logprobs or [] if getattr(lp, "logprob", None) is not None]
+        if values:
             # Calculate average logprob and convert to probability
-            avg_logprob = sum(logprobs) / len(logprobs)
+            avg_logprob = sum(values) / len(values)
             return math.exp(avg_logprob)
 
     return None
