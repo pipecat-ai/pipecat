@@ -50,8 +50,15 @@ DRAFT_VERIFICATION_PROMPT = (
 )
 
 #: What the extension says after a reply that was already spoken turns out
-#: to be wrong. ``{text}`` is the verifier's corrected reply.
+#: to be wrong. ``{text}`` is the verifier's corrected reply. It is English:
+#: a bot that speaks another language passes its own.
 LATE_CORRECTION_TEMPLATE = "Sorry, let me correct that. {text}"
+
+# Added after any prompt, so a custom prompt still gets a readable verdict
+# from a service that can't enforce the schema.
+_VERDICT_FORMAT = (
+    'Answer with only a JSON object: {"correct": true or false, "reply": "..."}. No other text.'
+)
 
 _VERDICT_SCHEMA = {
     "type": "object",
@@ -85,8 +92,11 @@ class LLMDraftVerifier(DraftVerifier):
     """A verifier that asks an LLM service, out of band, whether the reply is right.
 
     The service runs a one-shot inference (``run_inference``) on the
-    conversation, the reply, and ``prompt``, and answers in JSON. It is not
-    in any pipeline: it only needs to be constructed.
+    conversation, the reply, and ``prompt``, and answers in JSON. A service
+    that supports ``response_schema`` gets the verdict schema; any other is
+    asked for the JSON in the prompt, and a verdict wrapped in a code fence or
+    in prose is still read. It is not in any pipeline: it only needs to be
+    constructed.
 
     Example::
 
@@ -119,12 +129,13 @@ class LLMDraftVerifier(DraftVerifier):
             messages=[
                 *messages,
                 {"role": "assistant", "content": draft},
-                {"role": "developer", "content": self._prompt},
+                {"role": "developer", "content": f"{self._prompt}\n\n{_VERDICT_FORMAT}"},
             ]
         )
-        raw = await self._llm.run_inference(context, response_schema=_VERDICT_SCHEMA)
+        schema = _VERDICT_SCHEMA if self._llm.supports_response_schema else None
+        raw = await self._llm.run_inference(context, response_schema=schema)
         try:
-            verdict = json.loads(raw or "")
+            verdict = _parse_verdict(raw or "")
             if verdict["correct"]:
                 return None
             reply = str(verdict["reply"]).strip()
@@ -133,6 +144,15 @@ class LLMDraftVerifier(DraftVerifier):
             logger.warning(f"{self}: unreadable verdict, letting the reply stand: {e}")
             return None
         return reply if reply and reply != draft.strip() else None
+
+
+def _parse_verdict(raw: str) -> Any:
+    """Read the first JSON object in ``raw``, ignoring a code fence or prose around it."""
+    start = raw.find("{")
+    if start < 0:
+        raise ValueError("no JSON object in the verdict")
+    verdict, _ = json.JSONDecoder().raw_decode(raw, start)
+    return verdict
 
 
 @dataclass

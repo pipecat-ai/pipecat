@@ -83,9 +83,11 @@ class _VerifierLLM(LLMService):
         self._verdicts = list(verdicts)
         self._latency = latency
         self.contexts: list[LLMContext] = []
+        self.schemas: list[dict | None] = []
 
     async def run_inference(self, context, max_tokens=None, system_instruction=None, **kwargs):
         self.contexts.append(context)
+        self.schemas.append(kwargs.get("response_schema"))
         verdict = self._verdicts.pop(0)
         await asyncio.sleep(self._latency)
         return verdict
@@ -270,6 +272,37 @@ async def test_an_unreadable_verdict_lets_the_reply_stand():
     down, _ = await run_test(llm, frames_to_send=[_context(), SleepFrame(sleep=0.2)])
 
     assert _spoken(down) == [DRAFT]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        f"```json\n{_correct()}\n```",
+        f"Here is my verdict:\n{_correct()}\nThe reply named the wrong city.",
+    ],
+)
+async def test_a_verdict_in_a_code_fence_or_prose_is_read(verdict):
+    llm, _, _ = _setup(verdicts=[verdict], verifier_latency=0.01, hold_secs=1.0)
+
+    down, _ = await run_test(llm, frames_to_send=[_context(), SleepFrame(sleep=0.2)])
+
+    assert _spoken(down) == [CORRECTED]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("supports_schema", [False, True])
+async def test_the_verdict_format_is_asked_for_with_or_without_a_schema(supports_schema):
+    verifier_llm = _VerifierLLM(verdicts=[_agree()], latency=0.0)
+    verifier_llm.supports_response_schema = supports_schema
+    verifier = LLMDraftVerifier(llm=verifier_llm, prompt="Check the capital city.")
+
+    await verifier.verify([{"role": "user", "content": "Capital of Australia?"}], DRAFT)
+
+    assert (verifier_llm.schemas[0] is not None) == supports_schema
+    instruction = verifier_llm.contexts[0].get_messages()[-1]["content"]
+    assert instruction.startswith("Check the capital city.")
+    assert '{"correct": true or false, "reply": "..."}' in instruction
 
 
 @pytest.mark.asyncio
