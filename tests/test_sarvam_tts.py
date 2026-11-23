@@ -98,9 +98,10 @@ def test_v4_flash_defaults():
 
 
 @pytest.mark.asyncio
-async def test_v4_flash_sends_pitch_and_loudness():
-    """v4-flash applies both; the v3 models ignore them."""
-    service = _service(pitch=0.3, loudness=1.5, pace=1.2)
+@pytest.mark.parametrize("model", ["bulbul:v3", V4_FLASH])
+async def test_both_models_send_every_voice_control(model):
+    """Sarvam takes pace, pitch, loudness and temperature on v3 and v4-flash alike."""
+    service = _service(model=model, voice=None, pitch=0.3, loudness=1.5, pace=1.2, temperature=0.9)
     service._websocket = _FakeWebsocket()
 
     await service._send_config()
@@ -109,28 +110,17 @@ async def test_v4_flash_sends_pitch_and_loudness():
     assert config["pitch"] == 0.3
     assert config["loudness"] == 1.5
     assert config["pace"] == 1.2
+    assert config["temperature"] == 0.9
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("temperature", [0.6, 0.9])
-async def test_v4_flash_drops_temperature(temperature):
-    """The API pins it to 0.6, so sending any value would only mislead."""
-    service = _service(temperature=temperature)
-    service._websocket = _FakeWebsocket()
-
-    await service._send_config()
-
-    assert "temperature" not in _sent_config(service)
-
-
-@pytest.mark.asyncio
-async def test_v4_flash_drops_a_runtime_temperature_update():
+async def test_a_runtime_temperature_update_reaches_v4_flash():
     service = _service()
     service._websocket = _FakeWebsocket()
 
     await service._update_settings(SarvamTTSService.Settings(temperature=0.9))
 
-    assert "temperature" not in _sent_config(service)
+    assert _sent_config(service)["temperature"] == 0.9
 
 
 def test_v4_flash_clamps_pace_to_its_own_range():
@@ -186,7 +176,7 @@ async def test_an_unsupported_model_update_is_ignored(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_http_payload_carries_only_the_parameters_v4_flash_supports():
+async def test_http_payload_carries_every_voice_control():
     session = _FakeSession()
     service = _http_service(session, pitch=0.3, loudness=1.5, temperature=0.9)
 
@@ -196,7 +186,7 @@ async def test_http_payload_carries_only_the_parameters_v4_flash_supports():
     assert payload["speaker"] == "shubh_en_narration_gentle"
     assert payload["pitch"] == 0.3
     assert payload["loudness"] == 1.5
-    assert "temperature" not in payload
+    assert payload["temperature"] == 0.9
 
 
 @pytest.mark.asyncio
@@ -213,7 +203,6 @@ async def test_switching_the_http_service_to_v4_flash_takes_its_capabilities():
     assert payload["model"] == V4_FLASH
     assert payload["speaker"] == "shubh_en_narration_gentle"
     assert payload["pitch"] == 0.3
-    assert "temperature" not in payload
 
 
 @pytest.mark.parametrize("settings_cls", [SarvamTTSService.Settings, SarvamHttpTTSService.Settings])

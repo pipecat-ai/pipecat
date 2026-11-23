@@ -11,18 +11,18 @@ Indian languages:
 
 **Model Variants:**
 
-- **bulbul:v3** (default): Sarvam's current TTS model, with temperature control
-    - Does NOT support: pitch, loudness
-    - Supports: pace (0.5-2.0), temperature (0.01-1.0)
+- **bulbul:v3** (default): Sarvam's current TTS model
+    - Supports: pace (0.5-2.0), pitch (-0.5-0.5), loudness (0.1-2.5),
+      temperature (0.01-1.0)
     - Default sample rate: 24000 Hz
     - Preprocessing is always enabled
     - Speakers: shubh (default), aditya, ritu, priya, neha, rahul, pooja, rohan,
       simran, kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
       kabir, aayan, ashutosh, advait
 
-- **bulbul:v4-flash**: Low-latency TTS model
-    - Supports: pitch, loudness, pace (0.5-2.0)
-    - Does NOT support: temperature
+- **bulbul:v4-flash**: Low-latency TTS model, with the same voice controls
+    - Supports: pace (0.5-2.0), pitch (-0.5-0.5), loudness (0.1-2.5),
+      temperature (0.01-1.0)
     - Default sample rate: 24000 Hz
     - Preprocessing is always enabled
     - Speakers: its own catalogue, listed in Sarvam's docs; the bulbul:v3 names
@@ -75,16 +75,14 @@ class SarvamTTSModel(StrEnum):
                 Will be removed in 2.0.0.
 
         BULBUL_V3_BETA: Pre-GA tag of the v3 model.
-        BULBUL_V3: Current TTS model, with temperature control.
-            - Does NOT support pitch/loudness
+        BULBUL_V3: Current TTS model.
+            - Supports pitch, loudness and temperature
             - Pace range: 0.5-2.0
-            - Supports temperature parameter
             - Default sample rate: 24000 Hz
             - Preprocessing is always enabled
         BULBUL_V4_FLASH: Low-latency TTS model, with its own speaker catalogue.
-            - Supports pitch/loudness
+            - Supports pitch, loudness and temperature
             - Pace range: 0.5-2.0
-            - Does NOT support temperature
             - Default sample rate: 24000 Hz
             - Preprocessing is always enabled
     """
@@ -181,8 +179,8 @@ TTS_MODEL_CONFIGS: dict[str, TTSModelConfig] = {
         speakers=tuple(s.value for s in SarvamTTSSpeakerV2),
     ),
     "bulbul:v3-beta": TTSModelConfig(
-        supports_pitch=False,
-        supports_loudness=False,
+        supports_pitch=True,
+        supports_loudness=True,
         supports_temperature=True,
         default_sample_rate=24000,
         default_speaker="shubh",
@@ -191,8 +189,8 @@ TTS_MODEL_CONFIGS: dict[str, TTSModelConfig] = {
         speakers=tuple(s.value for s in SarvamTTSSpeakerV3),
     ),
     "bulbul:v3": TTSModelConfig(
-        supports_pitch=False,
-        supports_loudness=False,
+        supports_pitch=True,
+        supports_loudness=True,
         supports_temperature=True,
         default_sample_rate=24000,
         default_speaker="shubh",
@@ -203,7 +201,7 @@ TTS_MODEL_CONFIGS: dict[str, TTSModelConfig] = {
     "bulbul:v4-flash": TTSModelConfig(
         supports_pitch=True,
         supports_loudness=True,
-        supports_temperature=False,
+        supports_temperature=True,
         default_sample_rate=24000,
         default_speaker="shubh_en_narration_gentle",
         pace_range=(0.5, 2.0),
@@ -277,13 +275,10 @@ class SarvamHttpTTSSettings(TTSSettings):
         enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
             **Note:** Always enabled for bulbul:v3 and bulbul:v4-flash (cannot be disabled).
         pace: Speech pace multiplier, 0.5 to 2.0. Defaults to 1.0.
-        pitch: Voice pitch adjustment. Defaults to 0.0.
-            **Note:** Supported by bulbul:v4-flash; ignored by bulbul:v3.
-        loudness: Volume multiplier. Defaults to 1.0.
-            **Note:** Supported by bulbul:v4-flash; ignored by bulbul:v3.
+        pitch: Voice pitch adjustment, -0.5 to 0.5. Defaults to 0.0.
+        loudness: Volume multiplier, 0.1 to 2.5. Defaults to 1.0.
         temperature: Controls output randomness (0.01 to 1.0). Lower values = more
             deterministic, higher = more random. Defaults to 0.6.
-            **Note:** Supported by bulbul:v3; ignored by bulbul:v4-flash.
     """
 
     _aliases: ClassVar[dict[str, str]] = {
@@ -325,8 +320,8 @@ class SarvamHttpTTSService(TTSService):
     **Models:**
 
     - **bulbul:v3** (default):
-        - Does NOT support: pitch, loudness (will be ignored)
-        - Supports: pace (0.5 to 2.0), temperature (0.01 to 1.0)
+        - Supports: pace (0.5 to 2.0), pitch (-0.5 to 0.5), loudness (0.1 to 2.5),
+          temperature (0.01 to 1.0)
         - Default sample rate: 24000 Hz
         - Preprocessing is always enabled
         - Speakers: shubh, aditya, ritu, priya, neha, rahul, pooja, rohan, simran,
@@ -334,8 +329,7 @@ class SarvamHttpTTSService(TTSService):
           kabir, aayan, ashutosh, advait
 
     - **bulbul:v4-flash**:
-        - Supports: pitch, loudness, pace (0.5 to 2.0)
-        - Does NOT support: temperature (will be ignored)
+        - Supports: the same four controls as bulbul:v3, over the same ranges
         - Default sample rate: 24000 Hz
         - Preprocessing is always enabled
         - Speakers: its own catalogue, listed in Sarvam's docs; the bulbul:v3
@@ -375,18 +369,20 @@ class SarvamHttpTTSService(TTSService):
 
         Parameters:
             language: Language for synthesis. Defaults to English (India).
-            pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
-                **Note:** Only supported for bulbul:v2. Ignored for v3 models.
+            pitch: Voice pitch adjustment. Defaults to 0.0.
+                - bulbul:v3 and bulbul:v4-flash: Range -0.5 to 0.5
+                - bulbul:v2: Range -0.75 to 0.75
             pace: Speech pace multiplier. Defaults to 1.0.
-                - bulbul:v3: Range 0.5 to 2.0
+                - bulbul:v3 and bulbul:v4-flash: Range 0.5 to 2.0
                 - bulbul:v2: Range 0.3 to 3.0
-            loudness: Volume multiplier (0.3 to 3.0). Defaults to 1.0.
-                **Note:** Only supported for bulbul:v2. Ignored for v3 models.
+            loudness: Volume multiplier. Defaults to 1.0.
+                - bulbul:v3 and bulbul:v4-flash: Range 0.1 to 2.5
+                - bulbul:v2: Range 0.3 to 3.0
             enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
                 **Note:** Always enabled for bulbul:v3 (cannot be disabled).
-            temperature: Controls output randomness for bulbul:v3 (0.01 to 1.0).
+            temperature: Controls output randomness (0.01 to 1.0).
                 Lower values = more deterministic, higher = more random. Defaults to 0.6.
-                **Note:** Only supported for bulbul:v3. Ignored for v2.
+                **Note:** Not supported for bulbul:v2.
         """
 
         language: Language | None = Language.EN
@@ -394,19 +390,19 @@ class SarvamHttpTTSService(TTSService):
             default=0.0,
             ge=-0.75,
             le=0.75,
-            description="Voice pitch adjustment. Only for bulbul:v2.",
+            description="Voice pitch adjustment. v2: -0.75-0.75, v3 and v4-flash: -0.5-0.5.",
         )
         pace: float | None = Field(
             default=1.0,
             ge=0.3,
             le=3.0,
-            description="Speech pace. v2: 0.3-3.0, v3: 0.5-2.0.",
+            description="Speech pace. v2: 0.3-3.0, v3 and v4-flash: 0.5-2.0.",
         )
         loudness: float | None = Field(
             default=1.0,
             ge=0.3,
             le=3.0,
-            description="Volume multiplier. Only for bulbul:v2.",
+            description="Volume multiplier. v2: 0.3-3.0, v3 and v4-flash: 0.1-2.5.",
         )
         enable_preprocessing: bool | None = Field(
             default=False,
@@ -416,7 +412,7 @@ class SarvamHttpTTSService(TTSService):
             default=0.6,
             ge=0.01,
             le=1.0,
-            description="Output randomness for bulbul:v3 only. Range: 0.01-1.0.",
+            description="Output randomness. Not supported for bulbul:v2. Range: 0.01-1.0.",
         )
 
     def __init__(
@@ -692,8 +688,8 @@ class SarvamTTSService(InterruptibleTTSService):
     **Models:**
 
     - **bulbul:v3** (default):
-        - Does NOT support: pitch, loudness (will be ignored)
-        - Supports: pace (0.5 to 2.0), temperature (0.01 to 1.0)
+        - Supports: pace (0.5 to 2.0), pitch (-0.5 to 0.5), loudness (0.1 to 2.5),
+          temperature (0.01 to 1.0)
         - Default sample rate: 24000 Hz
         - Preprocessing is always enabled
         - Speakers: shubh, aditya, ritu, priya, neha, rahul, pooja, rohan, simran,
@@ -701,8 +697,7 @@ class SarvamTTSService(InterruptibleTTSService):
           kabir, aayan, ashutosh, advait
 
     - **bulbul:v4-flash**:
-        - Supports: pitch, loudness, pace (0.5 to 2.0)
-        - Does NOT support: temperature (will be ignored)
+        - Supports: the same four controls as bulbul:v3, over the same ranges
         - Default sample rate: 24000 Hz
         - Preprocessing is always enabled
         - Speakers: its own catalogue, listed in Sarvam's docs; the bulbul:v3
@@ -749,13 +744,15 @@ class SarvamTTSService(InterruptibleTTSService):
             Will be removed in 2.0.0.
 
         Parameters:
-            pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
-                **Note:** Only supported for bulbul:v2. Ignored for v3 models.
+            pitch: Voice pitch adjustment. Defaults to 0.0.
+                - bulbul:v3 and bulbul:v4-flash: Range -0.5 to 0.5
+                - bulbul:v2: Range -0.75 to 0.75
             pace: Speech pace multiplier. Defaults to 1.0.
-                - bulbul:v3: Range 0.5 to 2.0
+                - bulbul:v3 and bulbul:v4-flash: Range 0.5 to 2.0
                 - bulbul:v2: Range 0.3 to 3.0
-            loudness: Volume multiplier (0.3 to 3.0). Defaults to 1.0.
-                **Note:** Only supported for bulbul:v2. Ignored for v3 models.
+            loudness: Volume multiplier. Defaults to 1.0.
+                - bulbul:v3 and bulbul:v4-flash: Range 0.1 to 2.5
+                - bulbul:v2: Range 0.3 to 3.0
             enable_preprocessing: Enable text preprocessing. Defaults to False.
                 **Note:** Always enabled for bulbul:v3.
             min_buffer_size: Minimum characters to buffer before generating audio.
@@ -767,9 +764,9 @@ class SarvamTTSService(InterruptibleTTSService):
             output_audio_bitrate: Audio bitrate (32k, 64k, 96k, 128k, 192k).
                 Defaults to "128k".
             language: Target language for synthesis. Supports Indian languages.
-            temperature: Controls output randomness for bulbul:v3 (0.01 to 1.0).
+            temperature: Controls output randomness (0.01 to 1.0).
                 Lower = more deterministic, higher = more random. Defaults to 0.6.
-                **Note:** Only supported for bulbul:v3. Ignored for v2.
+                **Note:** Not supported for bulbul:v2.
 
         **Speakers by Model:**
 
@@ -787,19 +784,19 @@ class SarvamTTSService(InterruptibleTTSService):
             default=0.0,
             ge=-0.75,
             le=0.75,
-            description="Voice pitch adjustment. Only for bulbul:v2.",
+            description="Voice pitch adjustment. v2: -0.75-0.75, v3 and v4-flash: -0.5-0.5.",
         )
         pace: float | None = Field(
             default=1.0,
             ge=0.3,
             le=3.0,
-            description="Speech pace. v2: 0.3-3.0, v3: 0.5-2.0.",
+            description="Speech pace. v2: 0.3-3.0, v3 and v4-flash: 0.5-2.0.",
         )
         loudness: float | None = Field(
             default=1.0,
             ge=0.3,
             le=3.0,
-            description="Volume multiplier. Only for bulbul:v2.",
+            description="Volume multiplier. v2: 0.3-3.0, v3 and v4-flash: 0.1-2.5.",
         )
         enable_preprocessing: bool | None = Field(
             default=False,
@@ -826,7 +823,7 @@ class SarvamTTSService(InterruptibleTTSService):
             default=0.6,
             ge=0.01,
             le=1.0,
-            description="Output randomness for bulbul:v3 only. Range: 0.01-1.0.",
+            description="Output randomness. Not supported for bulbul:v2. Range: 0.01-1.0.",
         )
 
     def __init__(

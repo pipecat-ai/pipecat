@@ -1,0 +1,1 @@
+- `SarvamTTSService` and `SarvamHttpTTSService` now send `pitch`, `loudness` and `temperature` on both `bulbul:v3` and `bulbul:v4-flash`, which Sarvam documents as supporting all four voice controls; previously each model silently dropped some of them.
