@@ -582,6 +582,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "plivo_tts": (
+        "PlivoTTSService(\n"
+        '        auth_id=os.getenv("PLIVO_AUTH_ID"),\n'
+        '        auth_token=os.getenv("PLIVO_AUTH_TOKEN"),\n'
+        "        settings=PlivoTTSService.Settings(\n"
+        '            voice=os.getenv("PLIVO_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "pockettts_tts": (
         "PocketTTSService(\n"
         "        settings=PocketTTSService.Settings(\n"

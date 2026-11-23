@@ -17,6 +17,7 @@ from pipecat.services.deepgram.tts import DeepgramHttpTTSService, DeepgramTTSSer
 from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService
 from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService, ElevenLabsTTSService
 from pipecat.services.inworld.tts import InworldHttpTTSService, InworldTTSService
+from pipecat.services.plivo.tts import PlivoHttpTTSService, PlivoTTSService
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.text.phonemes import ipa_phones, normalize_ipa, stress_before_vowels
@@ -216,6 +217,30 @@ class TestDeepgramPronunciation(unittest.TestCase):
 
     def test_flux_unsupported(self):
         self.assertIsNone(DeepgramFluxTTSBase.format_pronunciation("Crete", "kriːt"))
+
+
+class TestPlivoPronunciation(unittest.TestCase):
+    def test_ipa(self):
+        self.assertEqual(PlivoTTSService.format_pronunciation("Plivo", "ˈpliːvoʊ"), "{ˈpliːvoʊ}")
+
+    def test_notation_variants_format_the_same(self):
+        a = PlivoTTSService.format_pronunciation("Achoo", "/əˈʧu/")
+        b = PlivoTTSService.format_pronunciation("Achoo", "ə'tʃu")
+        self.assertEqual(a, b)
+
+    def test_phrase_gets_a_span_per_word(self):
+        self.assertEqual(
+            PlivoTTSService.format_pronunciation("New Delhi", "njuː ˈdɛli"), "{njuː} {ˈdɛli}"
+        )
+
+    def test_unusable(self):
+        self.assertIsNone(PlivoTTSService.format_pronunciation("Plivo", ""))
+
+    def test_http_service_matches(self):
+        self.assertEqual(
+            PlivoHttpTTSService.format_pronunciation("Plivo", "ˈpliːvoʊ"),
+            PlivoTTSService.format_pronunciation("Plivo", "ˈpliːvoʊ"),
+        )
 
 
 class TestPronunciationTransforms(unittest.IsolatedAsyncioTestCase):
