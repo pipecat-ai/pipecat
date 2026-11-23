@@ -736,7 +736,7 @@ async def test_segmented_diarized_result_yields_one_frame_per_speaker_run():
 
 @pytest.mark.asyncio
 async def test_segmented_result_without_words_is_not_split():
-    """A model that returns no words, such as canary-1b-asr, yields each segment whole."""
+    """A model that returns no words yields each segment whole."""
     service = NvidiaSegmentedSTTService(
         api_key="test-key",
         settings=NvidiaSegmentedSTTService.Settings(speaker_diarization=True),

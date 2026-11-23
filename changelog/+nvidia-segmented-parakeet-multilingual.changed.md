@@ -1,0 +1,1 @@
+- `NvidiaSegmentedSTTService` now defaults to `parakeet-1.1b-rnnt-multilingual`, since NVIDIA retired the hosted `canary-1b-asr` API on 2026-11-23.
