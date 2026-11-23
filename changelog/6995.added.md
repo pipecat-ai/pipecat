@@ -1,0 +1,1 @@
+- Added `BaseLLMExtension.filter_function_calls()`, which lets an LLM extension filter the function calls its service is about to run. It returns the calls to run; a call it drops is not run, and nothing of it reaches the context or the pipeline. The calls go through the extensions as an outgoing frame does, the one "closest" to the service first.

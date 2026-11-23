@@ -2052,6 +2052,7 @@ class LLMService(AIService, Generic[TAdapter]):
 
         Triggers the on_function_calls_started event and executes functions
         either in parallel or sequentially based on the run_in_parallel setting.
+        The service's extensions filter the calls first.
 
         Args:
             function_calls: The function calls to execute.
@@ -2061,6 +2062,13 @@ class LLMService(AIService, Generic[TAdapter]):
 
         if self._output_gate is not None and not self._output_gate.allow_function_calls():
             return
+
+        # Function calls go through the extensions as an outgoing frame does:
+        # the one "closest" to the service filters them first.
+        for extension in self._extensions:
+            function_calls = await extension.filter_function_calls(function_calls)
+            if not function_calls:
+                return
 
         if self._speculation_gate.is_speculating:
             # Tools run inside the service, so no downstream gate can undo their

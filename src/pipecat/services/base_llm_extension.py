@@ -8,12 +8,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
-from pipecat.frames.frames import Frame
+from pipecat.frames.frames import Frame, FunctionCallFromLLM
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.utils.base_object import BaseObject
 
@@ -104,6 +105,8 @@ class BaseLLMExtension(BaseObject):
     - passes every frame pushed from inside its layer through
       :meth:`filter_push_frame`, which can hold the frame back, drop it, or
       add frames;
+    - passes the function calls it is about to run through
+      :meth:`filter_function_calls`, which can drop some;
     - sends the frames it pushes with :meth:`push_frame` and
       :meth:`broadcast_frame` through the extensions "farther" from the
       service than it, then out of the service.
@@ -125,6 +128,12 @@ class BaseLLMExtension(BaseObject):
     one filters an outgoing frame first and sees an incoming frame last.
     Instructions compose lowest first. Among extensions of equal order, one
     attached earlier sits "closer"."""
+
+    ORDER_INNERMOST: ClassVar[int] = -sys.maxsize
+    """The order of the innermost layer: an extension with it sits "closest"
+    to the service, and filters what the service pushes before any other
+    extension does. If several extensions have it, the one attached first
+    sits "closest", as among any extensions of equal order."""
 
     def __init__(self, **kwargs):
         """Initialize the extension.
@@ -212,6 +221,24 @@ class BaseLLMExtension(BaseObject):
             The frames to push on.
         """
         return [frame]
+
+    async def filter_function_calls(
+        self, function_calls: Sequence[FunctionCallFromLLM]
+    ) -> Sequence[FunctionCallFromLLM]:
+        """Filter the function calls the service is about to run.
+
+        Returns the calls to run: all of them to let them through, fewer or
+        none to drop some. A dropped call is not run, and nothing of it
+        reaches the context or the pipeline. The calls returned go on through
+        the extensions "farther" from the service than this one.
+
+        Args:
+            function_calls: The function calls about to run.
+
+        Returns:
+            The function calls to run.
+        """
+        return function_calls
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame of the extension's own.
