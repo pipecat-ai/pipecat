@@ -242,8 +242,8 @@ async def test_conflicting_jitter_buffers_raise(env):
 
 
 @pytest.mark.asyncio
-async def test_sip_listen_renders_into_config(env):
-    connection = make_connection(reg_interval=0, sip_listen="0.0.0.0:5060")
+async def test_sip_port_renders_into_config(env):
+    connection = make_connection(reg_interval=0, sip_port=5060)
 
     await connection.connect()
 
@@ -253,39 +253,24 @@ async def test_sip_listen_renders_into_config(env):
     )
 
 
-@pytest.mark.parametrize("address", ["0.0.0.0:5060", "[::1]:5070", "sip.example.com:5080"])
-def test_sip_listen_accepts_host_and_port(address):
-    connection = make_connection(sip_listen=address)
+@pytest.mark.parametrize("port", [1, 5060, 65535])
+def test_sip_port_accepts_valid_ports(port):
+    connection = make_connection(sip_port=port)
 
-    assert connection._settings.sip_listen == address
+    assert connection._settings.sip_port == port
 
 
-@pytest.mark.parametrize(
-    "address",
-    [
-        "",
-        "5060",
-        "0.0.0.0",
-        ":5060",
-        "0.0.0.0:",
-        "0.0.0.0:0",
-        "0.0.0.0:65536",
-        "0.0.0.0:sip",
-        "::1:5060",  # IPv6 needs brackets
-        "0.0.0.0:5060\nsip_trace yes",  # one config line, nothing more
-        "0.0.0.0 :5060",
-    ],
-)
-def test_sip_listen_rejects_malformed_addresses(address):
+@pytest.mark.parametrize("port", [0, -1, 65536, "5060", 5060.0, True])
+def test_sip_port_rejects_invalid_values(port):
     with pytest.raises(ValueError):
-        make_connection(sip_listen=address)
+        make_connection(sip_port=port)
 
 
 @pytest.mark.asyncio
-async def test_conflicting_sip_listen_raise(env):
+async def test_conflicting_sip_port_raise(env):
     # One stack per process owns the listen socket.
-    first = make_connection(reg_interval=0, sip_listen="0.0.0.0:5060")
-    second = make_connection(user="1002", reg_interval=0, sip_listen="0.0.0.0:5070")
+    first = make_connection(reg_interval=0, sip_port=5060)
+    second = make_connection(user="1002", reg_interval=0, sip_port=5070)
 
     await first.connect()
     with pytest.raises(ValueError):

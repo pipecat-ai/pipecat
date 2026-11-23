@@ -718,6 +718,7 @@ def _create_sip_transport(
         native_log_level=runner_args.native_log_level,
         sip_trace=runner_args.sip_trace,
         net_interface=runner_args.net_interface,
+        sip_port=runner_args.sip_port,
         jitter_buffer_mode=runner_args.jitter_buffer_mode,
         jitter_buffer_ms=runner_args.jitter_buffer_ms,
     )

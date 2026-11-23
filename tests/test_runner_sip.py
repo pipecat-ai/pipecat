@@ -184,6 +184,7 @@ class TestSipRunnerArguments(unittest.TestCase):
         self.assertEqual(args.native_log_level, "warning")
         self.assertFalse(args.sip_trace)
         self.assertIsNone(args.net_interface)
+        self.assertIsNone(args.sip_port)
         self.assertIsNone(args.jitter_buffer_mode)
         self.assertIsNone(args.jitter_buffer_ms)
         self.assertEqual(args.body, {})
@@ -202,6 +203,7 @@ class TestSipRunnerArguments(unittest.TestCase):
             "SIP_NATIVE_LOG_LEVEL": "debug",
             "SIP_TRACE": "true",
             "SIP_NET_INTERFACE": "127.0.0.1",
+            "SIP_PORT": "5060",
             "SIP_JITTER_BUFFER": "adaptive:20-100",
         }
         with patch.dict("os.environ", env, clear=True):
@@ -216,6 +218,7 @@ class TestSipRunnerArguments(unittest.TestCase):
         self.assertEqual(args.native_log_level, "debug")
         self.assertTrue(args.sip_trace)
         self.assertEqual(args.net_interface, "127.0.0.1")
+        self.assertEqual(args.sip_port, 5060)
         self.assertEqual(args.jitter_buffer_mode, "adaptive")
         self.assertEqual(args.jitter_buffer_ms, (20, 100))
 
@@ -246,6 +249,10 @@ class TestSipRunnerArguments(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 sip_runner_arguments(self.CONFIG)
         self.assertIn("SIP_JITTER_BUFFER", str(ctx.exception))
+        with patch.dict("os.environ", {"SIP_PORT": "five"}, clear=True):
+            with self.assertRaises(ValueError) as ctx:
+                sip_runner_arguments(self.CONFIG)
+        self.assertIn("SIP_PORT", str(ctx.exception))
 
 
 class TestCleanup(unittest.IsolatedAsyncioTestCase):

@@ -87,7 +87,7 @@ binding a SIP server cannot route inbound calls to the bot's AOR, so
 dial-in only works when the peer or provider reaches the bot's
 listening socket directly (direct IP dialing, or a trunk origination
 URI with IP-ACL auth) — which requires a stable, reachable address,
-fixed with ``SIPConnection(sip_listen="0.0.0.0:5060")`` since the stack
+fixed with ``SIPConnection(sip_port=5060)`` since the stack
 otherwise binds an ephemeral port — and ``on_dialin_ready`` never fires (it maps from REGISTER OK); treat
 ``on_connected`` as the ready signal instead. Trunk *mode* is
 independent of :attr:`SIPParams.trunk`, which is only the host used to
