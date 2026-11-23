@@ -790,6 +790,8 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         self._api_key = api_key
         self._http_options = update_google_client_http_options(http_options)
         self._session: AsyncSession | None = None
+        # Read by traced_gemini_live for the llm_setup span.
+        self._sent_tools: list[Any] | None = None
         self._connection_task = None
 
         self._disconnecting = False
@@ -1589,6 +1591,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 # Mark connection start time
                 self._connection_start_time = time.time()
 
+                self._sent_tools = config.tools
                 await self._handle_session_ready(session)
 
                 while True:
