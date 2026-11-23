@@ -48,10 +48,29 @@ class SarvamLLMService(OpenAILLMService):
     supports_developer_role = False
 
     _SUPPORTED_MODELS = frozenset(
-        {"deepseekv4.1-flash", "gemma4", "glm5.3", "sarvam-105b", "sarvam-105b-conversations"}
+        {
+            "deepseekv4.1-flash",
+            "deepseekv4.1-flash-1017",
+            "deepseekv4.1-flash-1017-interactive",
+            "gemma4",
+            "glm5.3",
+            "glm5.3-flash",
+            "sarvam-105b",
+            "sarvam-105b-conversations",
+        }
     )
     _VISION_MODELS = frozenset({"gemma4"})
-    _REASONING_MODELS = frozenset({"deepseekv4.1-flash", "gemma4", "glm5.3", "sarvam-105b"})
+    _REASONING_MODELS = frozenset(
+        {
+            "deepseekv4.1-flash",
+            "deepseekv4.1-flash-1017",
+            "deepseekv4.1-flash-1017-interactive",
+            "gemma4",
+            "glm5.3",
+            "glm5.3-flash",
+            "sarvam-105b",
+        }
+    )
     _WIKI_GROUNDING_MODELS = frozenset({"gemma4", "sarvam-105b"})
     _V1_MODELS = frozenset({"sarvam-105b-conversations"})
     Settings = SarvamLLMSettings
