@@ -1,0 +1,1 @@
+- `GeminiTTSService` documentation now gives December 18, 2026 as the date the Gemini API shuts down `gemini-3.1-flash-tts-preview`, the date Google currently announces.
