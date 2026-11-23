@@ -1,0 +1,1 @@
+- `HeyGenHttpTTSService` settings now include HeyGen's `apply_text_normalization`, `expressiveness_boost`, `speed`, `pitch_shift`, `pitch_variance` and `seed` controls.
