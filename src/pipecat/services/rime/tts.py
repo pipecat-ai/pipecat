@@ -84,7 +84,7 @@ class RimeTTSSettings(TTSSettings):
         repetition_penalty: Token repetition penalty for Coda requests (1.0-2.0).
         temperature: Sampling temperature for Coda requests (0.0-1.0).
         top_p: Cumulative probability threshold for Coda requests (0.0-1.0).
-        timeScaleFactor: Audio playback speed factor for Coda requests.
+        timeScaleFactor: Audio playback speed factor, accepted by Coda and Mist v3.
             Values above 1.0 slow down the audio; values below 1.0 speed it up.
     """
 
@@ -344,6 +344,8 @@ class RimeTTSService(WebsocketTTSService):
             params["segment"] = self._settings.segment
         if self._settings.speedAlpha is not None:
             params["speedAlpha"] = self._settings.speedAlpha
+        if self._settings.timeScaleFactor is not None:
+            params["timeScaleFactor"] = self._settings.timeScaleFactor
 
         if self._settings.model == "coda":
             if self._settings.repetition_penalty is not None:
@@ -352,8 +354,6 @@ class RimeTTSService(WebsocketTTSService):
                 params["temperature"] = self._settings.temperature
             if self._settings.top_p is not None:
                 params["top_p"] = self._settings.top_p
-            if self._settings.timeScaleFactor is not None:
-                params["timeScaleFactor"] = self._settings.timeScaleFactor
         else:  # mistv2/mist
             if self._settings.reduceLatency is not None:
                 params["reduceLatency"] = self._settings.reduceLatency
@@ -820,6 +820,8 @@ class RimeHttpTTSService(TTSService):
             payload["speedAlpha"] = self._settings.speedAlpha
         if self._settings.inlineSpeedAlpha is not None:
             payload["inlineSpeedAlpha"] = self._settings.inlineSpeedAlpha
+        if self._settings.timeScaleFactor is not None:
+            payload["timeScaleFactor"] = self._settings.timeScaleFactor
 
         if self._settings.model == "coda":
             if self._settings.repetition_penalty is not None:
@@ -828,8 +830,6 @@ class RimeHttpTTSService(TTSService):
                 payload["temperature"] = self._settings.temperature
             if self._settings.top_p is not None:
                 payload["top_p"] = self._settings.top_p
-            if self._settings.timeScaleFactor is not None:
-                payload["timeScaleFactor"] = self._settings.timeScaleFactor
         else:  # mistv2/mist
             if self._settings.reduceLatency is not None:
                 payload["reduceLatency"] = self._settings.reduceLatency

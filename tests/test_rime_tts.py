@@ -37,6 +37,22 @@ def test_coda_sampling_params_are_included_in_websocket_params():
     assert params["timeScaleFactor"] == 1.2
 
 
+def test_mist_v3_receives_the_time_scale_factor():
+    service = RimeTTSService(
+        api_key="test-api-key",
+        settings=RimeTTSService.Settings(
+            model="mistv3",
+            voice="luna",
+            timeScaleFactor=0.8,
+        ),
+    )
+
+    params = service._build_ws_params()
+
+    assert params["modelId"] == "mistv3"
+    assert params["timeScaleFactor"] == 0.8
+
+
 def test_inline_speed_lists_one_speed_per_bracketed_span():
     service = RimeTTSService(api_key="test-api-key")
 
