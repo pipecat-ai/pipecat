@@ -59,11 +59,13 @@ def strip_markup(text: str) -> str:
     return "".join(ch for _, ch in _iter_clean_chars(text))
 
 
-_COMPLETE_MARKUP_RE = re.compile(r"<[^\s>][^>]*>")
+_COMPLETE_MARKUP_RE = re.compile(r"<(?:[A-Za-z/!?][^>]*|\d+(?:\.\d+)?)>")
 """Matched '<...>' pairs in a complete text.
 
-A tag never has whitespace right after its '<', so a '<' and a later '>' used
-as comparisons (``"3 < 5 and 7 > 2"``) stay content.
+A tag starts with a letter, '/', '!' or '?' right after its '<' (``<break/>``,
+``</spell>``, ``<!-- -->``), or is a bare number such as Rime's ``<500.0>``
+pause tag. A '<' and a later '>' used as comparisons (``"3 < 5 and 7 > 2"``,
+``"3<5 and 7>2"``, ``"a <= b and c >= d"``) stay content.
 
 The definition of markup for a static text, shared by
 :func:`strip_complete_markup` and :func:`split_markup_runs` so the two can't

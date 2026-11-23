@@ -77,6 +77,17 @@ class TestStripCompleteMarkupHelper(unittest.TestCase):
     def test_strip_complete_markup_keeps_comparisons(self):
         self.assertEqual(strip_complete_markup("Is 3 < 5 and 7 > 2?"), "Is 3 < 5 and 7 > 2?")
 
+    def test_strip_complete_markup_keeps_unspaced_comparisons(self):
+        for text in ["Is 3<5 and 7>2?", "Is a <= b and c >= d?", "I love you <3 and you > me"]:
+            self.assertEqual(strip_complete_markup(text), text)
+
+    def test_strip_complete_markup_strips_numeric_pause_tag(self):
+        self.assertEqual(strip_complete_markup("Hello <500.0> world"), "Hello  world")
+        self.assertEqual(strip_complete_markup("Hello <500> world"), "Hello  world")
+
+    def test_strip_complete_markup_strips_closing_tag_and_comment(self):
+        self.assertEqual(strip_complete_markup("a <!-- note --> b </spell>"), "a  b ")
+
 
 class TestSplitMarkupRuns(unittest.TestCase):
     """split_markup_runs() gives a tag its own run so TextSegmentMap._build can
@@ -105,6 +116,10 @@ class TestSplitMarkupRuns(unittest.TestCase):
 
     def test_comparisons_are_content(self):
         self.assertEqual(split_markup_runs("Is 3 < 5 and 7 > 2?"), ["Is 3 < 5 and 7 > 2?"])
+        self.assertEqual(split_markup_runs("Is 3<5 and 7>2?"), ["Is 3<5 and 7>2?"])
+
+    def test_numeric_pause_tag_gets_its_own_run(self):
+        self.assertEqual(split_markup_runs("Hello <500.0> world"), ["Hello ", "<500.0>", " world"])
 
     def test_runs_concatenate_back_to_the_input(self):
         for text in [
