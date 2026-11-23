@@ -43,7 +43,9 @@ import asyncio
 import gc
 import signal
 import uuid
+import weakref
 from dataclasses import dataclass, field
+from typing import Any
 
 from loguru import logger
 
@@ -160,6 +162,8 @@ class WorkerRunner(BaseObject, BusSubscriber):
         self._cancel_reason: str | None = None
         self._shutdown_event = asyncio.Event()
         self._sig_task: asyncio.Task | None = None
+        self._installed_loop_signals: list[tuple[asyncio.AbstractEventLoop, signal.Signals]] = []
+        self._previous_signal_handlers: list[tuple[signal.Signals, Any]] = []
 
         self._handle_sigint = handle_sigint
         self._handle_sigterm = handle_sigterm
@@ -291,17 +295,13 @@ class WorkerRunner(BaseObject, BusSubscriber):
             pass
 
         try:
-            # Cancel any worker still going and wait for it to finish.
             await self._cancel_spawned_workers()
-
-            # Cleanup base object.
             await self.cleanup()
-
-            # If we are cancelling through a signal, make sure we wait for it so
-            # everything gets cleaned up nicely.
             if self._sig_task:
                 await self._sig_task
         finally:
+            self._teardown_signal_handlers()
+            await self._bus.unsubscribe(self)
             await self._bus.stop()
             self._running = False
 
@@ -535,23 +535,40 @@ class WorkerRunner(BaseObject, BusSubscriber):
             )
             await self._send_registry()
 
-    def _setup_sigint(self) -> None:
-        """Set up SIGINT handler for graceful shutdown."""
+    def _install_signal_handler(self, sig: signal.Signals) -> None:
+        """Install a weakly-referencing signal handler on the running loop or via signal.signal."""
+        runner_ref = weakref.ref(self)
+
+        def on_signal(*_args: Any) -> None:
+            runner = runner_ref()
+            if runner is not None:
+                runner._sig_handler()
+
         try:
             loop = asyncio.get_running_loop()
-            loop.add_signal_handler(signal.SIGINT, lambda *args: self._sig_handler())
+            loop.add_signal_handler(sig, on_signal)
+            self._installed_loop_signals.append((loop, sig))
         except NotImplementedError:
-            # Windows fallback
-            signal.signal(signal.SIGINT, lambda s, f: self._sig_handler())
+            previous = signal.getsignal(sig)
+            signal.signal(sig, on_signal)
+            self._previous_signal_handlers.append((sig, previous))
+
+    def _teardown_signal_handlers(self) -> None:
+        """Remove any signal handlers installed by this runner."""
+        while self._installed_loop_signals:
+            loop, sig = self._installed_loop_signals.pop()
+            loop.remove_signal_handler(sig)
+        while self._previous_signal_handlers:
+            sig, previous = self._previous_signal_handlers.pop()
+            signal.signal(sig, previous)
+
+    def _setup_sigint(self) -> None:
+        """Set up SIGINT handler for graceful shutdown."""
+        self._install_signal_handler(signal.SIGINT)
 
     def _setup_sigterm(self) -> None:
         """Set up SIGTERM handler for graceful shutdown."""
-        try:
-            loop = asyncio.get_running_loop()
-            loop.add_signal_handler(signal.SIGTERM, lambda *args: self._sig_handler())
-        except NotImplementedError:
-            # Windows fallback
-            signal.signal(signal.SIGTERM, lambda s, f: self._sig_handler())
+        self._install_signal_handler(signal.SIGTERM)
 
     def _sig_handler(self) -> None:
         """Handle interrupt signals by cancelling the runner."""

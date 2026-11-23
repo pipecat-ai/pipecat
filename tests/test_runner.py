@@ -5,8 +5,10 @@
 #
 
 import asyncio
+import gc
 import unittest
 import warnings
+import weakref
 
 from pipecat.bus import (
     BusAddWorkerMessage,
@@ -215,6 +217,26 @@ class TestWorkerRunner(unittest.IsolatedAsyncioTestCase):
 
         # Verify task_b was added (duplicate is silently skipped)
         await runner.add_workers(StubTask("task_b"))
+
+    async def test_signal_handlers_removed_and_runner_collected_after_run(self):
+        """A finished runner with signal handling enabled does not stay pinned on the event loop."""
+
+        async def run_once():
+            runner = WorkerRunner(handle_sigint=True, handle_sigterm=True)
+            task = StubTask("task_a")
+            await runner.add_workers(task)
+
+            @runner.event_handler("on_ready")
+            async def on_ready(r):
+                await r.end()
+
+            await asyncio.wait_for(runner.run(), timeout=5.0)
+            return weakref.ref(runner), weakref.ref(task)
+
+        runner_ref, task_ref = await run_once()
+        gc.collect()
+        self.assertIsNone(runner_ref())
+        self.assertIsNone(task_ref())
 
 
 if __name__ == "__main__":
