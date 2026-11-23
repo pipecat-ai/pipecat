@@ -44,6 +44,9 @@ _THINKING_DEFAULTS: dict[str, dict[str, Any]] = {
     "gemini-3.7-flash": {"thinking_level": "low"},
     "gemini-3.8-flash": {"thinking_level": "low"},
     "gemini-4-argon": {"thinking_level": "low"},
+    "gemini-4-carbon": {"thinking_level": "low"},
+    "gemini-4-hydrogen": {"thinking_level": "low"},
+    "gemini-4-neon": {"thinking_level": "low"},
     "gemma-4-26b-a4b-it": {"thinking_level": "minimal"},
     "gemma-4-31b-it": {"thinking_level": "minimal"},
 }
