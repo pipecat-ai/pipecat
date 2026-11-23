@@ -1,0 +1,1 @@
+- `GeminiLiveLLMService` now sends its default `thinking_level` as a `ThinkingLevel`, so connecting a Gemini Live thinking model no longer emits a Pydantic serializer warning.
