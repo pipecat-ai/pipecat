@@ -1,0 +1,1 @@
+- Corrected the `SpeechifyTTSSettings.pronunciations` documentation: Speechify applies pronunciations on `simba-3.5` in every language it speaks, English included.
