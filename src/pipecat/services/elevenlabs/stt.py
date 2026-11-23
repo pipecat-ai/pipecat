@@ -179,7 +179,8 @@ class ElevenLabsSTTSettings(STTSettings):
             (coughing) in the transcription.
         keyterms: List of key terms or phrases to bias transcription towards.
         no_verbatim: Whether to drop filler words, false starts and non-speech
-            sounds from the transcript. Supported by ``scribe_v2`` only.
+            sounds from the transcript. Supported by ``scribe_v2``,
+            ``scribe_v2_medical`` and ``scribe_v3``.
         diarize: Whether to annotate which speaker is talking. Each contiguous
             speaker run of a segment is emitted as its own frame with ElevenLabs'
             speaker id (e.g. ``"speaker_0"``) as ``speaker.label``.
