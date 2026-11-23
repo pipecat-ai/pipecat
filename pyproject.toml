@@ -148,7 +148,7 @@ runner = [ "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<1", "pipecat-ai-prebuilt
 sagemaker = [ "aws_sdk_sagemaker_runtime_http2>=0.6.0,<0.10; python_version>='3.12'" ]
 sambanova = []
 sarvam = [ "sarvamai==0.1.28" ]
-sentry = [ "sentry-sdk>=2.28.0,<3" ]
+sentry = [ "sentry-sdk>=2.28.0,<4" ]
 silero = []
 simli = [ "simli-ai~=2.1.0"]
 sip = [ "baresip-python>=0.6.1,<0.7", "opencv-python-headless>=4.11.0.86,<5" ]
