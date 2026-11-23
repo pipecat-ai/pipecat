@@ -102,12 +102,17 @@ class TurnDetection(BaseModel):
         threshold: Voice activity detection threshold (0.0-1.0). Defaults to 0.5.
         prefix_padding_ms: Padding before speech starts in milliseconds. Defaults to 300.
         silence_duration_ms: Silence duration to detect speech end in milliseconds. Defaults to 500.
+        idle_timeout_ms: How long the user may stay silent before the server
+            prompts them, in milliseconds, counted from the end of the last
+            response's audio. Useful where a long pause is unexpected, such as
+            a phone call. Left unset, the user is never prompted.
     """
 
     type: Literal["server_vad"] | None = "server_vad"
     threshold: float | None = 0.5
     prefix_padding_ms: int | None = 300
     silence_duration_ms: int | None = 500
+    idle_timeout_ms: int | None = None
 
 
 class SemanticTurnDetection(BaseModel):
