@@ -163,3 +163,42 @@ async def test_force_message_sends_force_message_item():
     item = recorder.events[0].item
     assert item.type == "force_message"
     assert item.content[0].text == "This call is being recorded."
+
+
+@pytest.mark.asyncio
+async def test_client_controlled_stop_speaking_skips_duplicate_response_create():
+    service, recorder = _make_service(server_vad=False)
+    await service._handle_evt_session_updated(
+        events.SessionUpdatedEvent(
+            type="session.updated",
+            event_id="evt-cc",
+            session=SessionProperties(
+                turn_detection=TurnDetection(type="client_controlled"),
+            ),
+        )
+    )
+    assert service._api_session_ready is True
+    assert service._server_turn_detection_type == "client_controlled"
+
+    await service._handle_user_stopped_speaking(None)
+
+    assert recorder.kinds() == ["InputAudioBufferCommitEvent"]
+
+    await service._disconnect()
+    assert service._server_turn_detection_type is None
+
+
+@pytest.mark.asyncio
+async def test_manual_turn_without_client_controlled_still_sends_response_create():
+    service, recorder = _make_service(server_vad=False)
+    await service._handle_evt_session_updated(
+        events.SessionUpdatedEvent(
+            type="session.updated",
+            event_id="evt-none",
+            session=SessionProperties(turn_detection=None),
+        )
+    )
+
+    await service._handle_user_stopped_speaking(None)
+
+    assert recorder.kinds() == ["InputAudioBufferCommitEvent", "ResponseCreateEvent"]
