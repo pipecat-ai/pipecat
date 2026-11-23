@@ -143,6 +143,39 @@ class TestFrameProcessorSetupLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertIs(processor.task_manager, second_manager)
         self.assertEqual(processor.texts, ["first", "second"])
 
+    async def test_direct_start_waits_for_setup_and_is_dropped_on_cleanup(self):
+        async def assert_start_admission(cleanup_before_ready):
+            processor = FrameProcessor(enable_direct_mode=True)
+            processor._setup_started()
+            await self._setup(processor, self._manager())
+            processing = []
+            entered = asyncio.Event()
+            frame = StartFrame()
+
+            @processor.event_handler("on_before_process_frame")
+            async def before(processor, frame):
+                processing.append(frame)
+
+            async def queue_start():
+                entered.set()
+                await processor.queue_frame(frame)
+
+            start = asyncio.create_task(queue_start())
+            self.operations.append(start)
+            await asyncio.wait_for(entered.wait(), timeout=2)
+            self.assertFalse(start.done())
+            self.assertEqual(processing, [])
+
+            if cleanup_before_ready:
+                await asyncio.wait_for(processor.cleanup(), timeout=2)
+            processor._setup_finished()
+            await asyncio.wait_for(start, timeout=2)
+            self.assertEqual(processing, [] if cleanup_before_ready else [frame])
+
+        for cleanup_before_ready in (False, True):
+            with self.subTest(cleanup_before_ready=cleanup_before_ready):
+                await assert_start_admission(cleanup_before_ready)
+
     async def test_marker_preserves_initial_and_reused_early_frames(self):
         processor = _RecordingProcessor()
         self.processors.append(processor)

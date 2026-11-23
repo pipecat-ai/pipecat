@@ -343,24 +343,43 @@ class TestFrameProcessorCleanup(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after_events, [])
 
     async def test_cleanup_in_observer_prevents_delivery_and_after_hook(self):
-        after_events = []
-
         class CleaningObserver(BaseObserver):
+            def __init__(self):
+                super().__init__()
+                self.pushes = []
+
             async def on_push_frame(self, data):
+                self.pushes.append(data)
                 await data.source.cleanup()
 
-        observer = CleaningObserver()
-        processor = await self._setup(FrameProcessor(enable_direct_mode=True), observer=observer)
-        sink = await self._setup(_RecordingProcessor())
-        processor.link(sink)
+        async def assert_delivery_suppressed(direction):
+            observer = CleaningObserver()
+            processor = await self._setup(
+                FrameProcessor(enable_direct_mode=True), observer=observer
+            )
+            neighbor = await self._setup(_RecordingProcessor())
+            if direction is FrameDirection.DOWNSTREAM:
+                processor.link(neighbor)
+            else:
+                neighbor.link(processor)
+            after_events = []
 
-        @processor.event_handler("on_after_push_frame")
-        async def after(processor, frame):
-            after_events.append(frame)
+            @processor.event_handler("on_after_push_frame")
+            async def after(processor, frame):
+                after_events.append(frame)
 
-        await processor.push_frame(TextFrame("discarded"), FrameDirection.DOWNSTREAM)
-        self.assertEqual(sink.texts, [])
-        self.assertEqual(after_events, [])
+            frame = TextFrame("discarded")
+            await processor.push_frame(frame, direction)
+
+            self.assertEqual(len(observer.pushes), 1)
+            self.assertIs(observer.pushes[0].frame, frame)
+            self.assertIs(observer.pushes[0].destination, neighbor)
+            self.assertEqual(neighbor.texts, [])
+            self.assertEqual(after_events, [])
+
+        for direction in (FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM):
+            with self.subTest(direction=direction):
+                await assert_delivery_suppressed(direction)
 
     async def test_cleanup_during_neighbor_delivery_stops_the_after_push_event(self):
         processor = await self._setup(FrameProcessor(enable_direct_mode=True))
