@@ -13,6 +13,7 @@ from pipecat.frames.frames import (
     BackgroundWorkStartedFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    FunctionCallFromLLM,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     FunctionCallsStartedFrame,
@@ -725,6 +726,17 @@ class TestUserWaiting(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.events, ["waiting"])
         self.assertFalse(self.controller.waiting_for_user)
+
+    async def test_a_second_async_call_preserves_the_waiting_timer(self):
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        for tool_call_id in ("first", "second"):
+            call = FunctionCallFromLLM("lookup", tool_call_id, {}, LLMContext())
+            await self.controller.process_frame(FunctionCallsStartedFrame(function_calls=[call]))
+            await self.controller.process_frame(BackgroundWorkStartedFrame(work_id=tool_call_id))
+
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
 
     async def test_a_pending_synchronous_call_starts_no_timer(self):
         await self.controller.process_frame(

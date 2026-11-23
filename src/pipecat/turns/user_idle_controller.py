@@ -223,7 +223,9 @@ class UserIdleController(BaseObject):
             self._function_calls_in_progress.update(
                 function_call.tool_call_id for function_call in frame.function_calls
             )
-            await self._cancel_timer()
+            # A new call ends user idle, but does not end an existing wait.
+            if not self._background_work:
+                await self._cancel_timer()
         elif isinstance(frame, FunctionCallResultFrame):
             # An async tool can report progress with intermediate results
             # while it keeps running; only its final result settles the call.
@@ -284,7 +286,7 @@ class UserIdleController(BaseObject):
     async def _settle_function_call(self, tool_call_id: str):
         """Count a function call as finished.
 
-        The call's start cancelled the timer. A reply that speaks first and
+        The call's start cancels an idle timer. A reply that speaks first and
         calls the function after, and then says nothing on its result, leaves
         the conversation quiet with the background work still in flight, so
         the last call settling starts the waiting timer over; the bot speaking
