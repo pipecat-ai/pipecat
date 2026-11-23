@@ -215,6 +215,47 @@ InworldTool = FunctionTool | dict[str, Any]
 #
 
 
+class ReasoningConfig(BaseModel):
+    """Reasoning controls for models that support them.
+
+    Parameters:
+        effort: How much reasoning the model does, from "NONE" to "XHIGH".
+            Inworld applies "MEDIUM" when a reasoning object is present
+            without an effort.
+        max_tokens: Ceiling on reasoning tokens.
+        exclude: Whether reasoning tokens are generated but left out of the
+            response text.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    effort: Literal["NONE", "MINIMAL", "LOW", "MEDIUM", "HIGH", "XHIGH"] | None = None
+    max_tokens: int | None = Field(default=None, alias="maxTokens")
+    exclude: bool | None = None
+
+
+class TextGenerationConfig(BaseModel):
+    """LLM generation parameters for a session.
+
+    Parameters:
+        reasoning: Reasoning controls.
+        temperature: Sampling temperature.
+        top_p: Nucleus sampling probability.
+        max_new_tokens: Maximum tokens the model generates per response.
+        frequency_penalty: Frequency penalty.
+        presence_penalty: Presence penalty.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    reasoning: ReasoningConfig | None = None
+    temperature: float | None = None
+    top_p: float | None = Field(default=None, alias="topP")
+    max_new_tokens: int | None = Field(default=None, alias="maxNewTokens")
+    frequency_penalty: float | None = Field(default=None, alias="frequencyPenalty")
+    presence_penalty: float | None = Field(default=None, alias="presencePenalty")
+
+
 class SessionProperties(BaseModel):
     """Configuration properties for an Inworld Realtime session.
 
@@ -226,6 +267,14 @@ class SessionProperties(BaseModel):
         audio: Audio configuration including input (transcription, turn detection)
             and output (TTS model, voice).
         tools: Available tools for the assistant.
+        max_output_tokens: Ceiling on the tokens a response may contain, from 1
+            to 4096, or "inf" for the model's own limit.
+        tool_choice: How the model picks a tool: "none", "auto", "required", or
+            an object naming a specific function or MCP server.
+        truncation: How the conversation is trimmed to fit the context window:
+            "auto", "disabled", or an object pinning a retention ratio.
+        text_generation_config: LLM generation parameters, including reasoning
+            controls.
     """
 
     # Needed to support ToolSchema in tools field.
@@ -237,6 +286,10 @@ class SessionProperties(BaseModel):
     temperature: float | None = None
     output_modalities: list[Modality] | None = None
     audio: AudioConfiguration | None = None
+    max_output_tokens: int | Literal["inf"] | None = None
+    tool_choice: Literal["none", "auto", "required"] | dict[str, Any] | None = None
+    truncation: Literal["auto", "disabled"] | dict[str, Any] | None = None
+    text_generation_config: TextGenerationConfig | None = None
     # Tools provided by the user may be a ToolsSchema or a plain list of standard
     # tools (the validator below normalizes that to a ToolsSchema); a list of
     # provider-native InworldTool objects passes through.
