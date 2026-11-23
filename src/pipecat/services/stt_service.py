@@ -20,6 +20,7 @@ from pipecat.audio.speech_segment_buffer import SpeechSegmentBuffer
 from pipecat.audio.utils import create_file_resampler, create_stream_resampler, pcm_to_wav
 from pipecat.frames.frames import (
     CancelFrame,
+    EagerTranscriptionFrame,
     EndFrame,
     ErrorFrame,
     Frame,
@@ -105,8 +106,9 @@ class STTService(AIService):
 
     ``text_transforms`` rewrite each transcript before the service pushes it,
     with the text type ``TranscriptionType.FINAL`` for a final transcript and
-    ``TranscriptionType.INTERIM`` for an interim one. Everything after the
-    service sees only the rewritten text, observers included, so a transform
+    ``TranscriptionType.INTERIM`` for an interim one. An eager transcript gets
+    ``TranscriptionType.FINAL`` too, as it predicts the final one. Everything after
+    the service sees only the rewritten text, observers included, so a transform
     can keep text such as a card number out of the context, the client and the
     logs. A transcription whose text a transform changed loses its ``result``,
     the provider's response with the text as heard.
@@ -814,7 +816,7 @@ class STTService(AIService):
             direction: The direction to push the frame.
         """
         if direction == FrameDirection.DOWNSTREAM and isinstance(
-            frame, (TranscriptionFrame, InterimTranscriptionFrame)
+            frame, (TranscriptionFrame, InterimTranscriptionFrame, EagerTranscriptionFrame)
         ):
             await self._transform_transcription(frame)
 
@@ -840,11 +842,13 @@ class STTService(AIService):
 
         await super().push_frame(frame, direction)
 
-    async def _transform_transcription(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
+    async def _transform_transcription(
+        self, frame: TranscriptionFrame | InterimTranscriptionFrame | EagerTranscriptionFrame
+    ):
         """Rewrite a transcription's text with the text transforms that apply to it."""
         if not self._text_transforms:
             return
-        if isinstance(frame, TranscriptionFrame):
+        if isinstance(frame, (TranscriptionFrame, EagerTranscriptionFrame)):
             text_type = TranscriptionType.FINAL
         else:
             text_type = TranscriptionType.INTERIM
