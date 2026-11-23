@@ -411,8 +411,12 @@ class TestPublish:
     """publish.py against a fake git/gh so nothing leaves the machine."""
 
     class FakeShell:
-        def __init__(self, open_prs=None, branches=None, commits=None, label_prs=None):
+        def __init__(
+            self, open_prs=None, branches=None, commits=None, label_prs=None, push_failures=0
+        ):
             self.calls = []
+            # How many `git push` calls lose to another group's push before one lands.
+            self.push_failures = push_failures
             self.open_prs = open_prs or {}
             self.branches = set(branches or [])
             self.commits = commits or {}  # branch -> [(subject, body), ...]
@@ -423,6 +427,9 @@ class TestPublish:
 
         def run(self, *args, cwd=None, check=True):
             self.calls.append(args)
+            if args[:2] == ("git", "push") and self.push_failures:
+                self.push_failures -= 1
+                raise RuntimeError("git push: ! [rejected] main -> main (fetch first)")
             if args[:3] == ("gh", "pr", "list") and "--label" in args:
                 return json.dumps(self.label_prs)
             if args[:3] == ("gh", "pr", "list"):
@@ -700,6 +707,20 @@ class TestPublish:
         publish.publish_prs(publish.load_reports(tmp_path, "2026-08-20"), **kwargs)
         after = len([c for c in sh.calls if c[:3] == ("gh", "pr", "create")])
         assert before == 3 and after == 3
+
+    def test_push_reports_retries_until_the_push_lands(self, reports_dir):
+        tmp_path, publish = reports_dir
+        sh = self.FakeShell(push_failures=2)
+        assert publish.push_reports(sh, tmp_path, "2026-08-20")
+        pushes_and_pulls = [c[:2] for c in sh.calls if c[:2] in (("git", "push"), ("git", "pull"))]
+        assert pushes_and_pulls == [("git", "push"), ("git", "pull")] * 2 + [("git", "push")]
+
+    def test_push_reports_gives_up_after_push_attempts(self, reports_dir):
+        tmp_path, publish = reports_dir
+        sh = self.FakeShell(push_failures=publish.PUSH_ATTEMPTS)
+        with pytest.raises(RuntimeError):
+            publish.push_reports(sh, tmp_path, "2026-08-20")
+        assert sh.calls.count(("git", "push")) == publish.PUSH_ATTEMPTS
 
     def test_ensure_digest_keeps_the_rendered_digest(self, reports_dir):
         tmp_path, publish = reports_dir
