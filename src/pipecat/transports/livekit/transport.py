@@ -809,10 +809,21 @@ class LiveKitTransportClient:
         """Handle track unsubscribed events."""
         logger.info(f"Track unsubscribed: {publication.sid} from {participant.identity}")
         if track.kind == rtc.TrackKind.KIND_AUDIO:
+            current = self._audio_tracks.get(participant.identity)
+            if current is not None and current.sid != track.sid:
+                # A republished track was subscribed first; its stream stays.
+                logger.debug(f"Ignoring unsubscribe of replaced audio track {track.sid}")
+                return
+            self._audio_tracks.pop(participant.identity, None)
             await self._close_audio_stream(participant.identity)
             await self._callbacks.on_audio_track_unsubscribed(participant.identity)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
             video_source = _video_source(publication)
+            current = self._video_tracks.get((participant.identity, video_source))
+            if current is not None and current.sid != track.sid:
+                # A republished track was subscribed first; its stream stays.
+                logger.debug(f"Ignoring unsubscribe of replaced video track {track.sid}")
+                return
             self._video_tracks.pop((participant.identity, video_source), None)
             self._video_publications.pop((participant.identity, video_source), None)
             await self._close_video_stream(participant.identity, video_source)
