@@ -1,0 +1,1 @@
+- Google's Gemini services now send `gemini-4-carbon`, `gemini-4-hydrogen` and `gemini-4-neon` the lowest thinking level Google documents for them, `low`, as they already do for `gemini-4-argon`.
