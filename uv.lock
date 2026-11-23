@@ -6401,7 +6401,7 @@ requires-dist = [
     { name = "httpx", extras = ["http2"], marker = "extra == 'openai'", specifier = ">=0.27,<1" },
     { name = "httpx", extras = ["http2"], marker = "extra == 'typesafe'", specifier = ">=0.27,<1" },
     { name = "httpx", extras = ["http2"], marker = "extra == 'zoom-ai'", specifier = ">=0.27,<1" },
-    { name = "huggingface-hub", marker = "extra == 'expressivity'", specifier = ">=0.30,<2" },
+    { name = "huggingface-hub", marker = "extra == 'expressivity'", specifier = ">=0.30,<3" },
     { name = "jinja2", marker = "extra == 'cli'", specifier = ">=3.1.0,<4" },
     { name = "kokoro-onnx", marker = "extra == 'kokoro'", specifier = ">=0.5.0,<1" },
     { name = "langchain", marker = "extra == 'langchain'", specifier = ">=1.2.13,<2" },
