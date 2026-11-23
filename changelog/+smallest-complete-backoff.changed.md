@@ -1,0 +1,1 @@
+- `SmallestTTSService.Settings` gained `complete_backoff_ms`, Waves' control over how long the server waits after the last audio chunk before sending the `complete` status that ends the service's metrics.

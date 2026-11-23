@@ -122,6 +122,10 @@ class SmallestTTSSettings(TTSSettings):
         number_pronunciation_language: Language used to read numerals, currency,
             times and dates, independent of the synthesis language. If None, the
             API reads them in the synthesis language.
+        complete_backoff_ms: How long, in milliseconds (0–10000), the server waits
+            after the last audio chunk before sending the ``complete`` status that
+            ends the generation; the service stops its metrics on that status. If
+            None, the API default (4000ms) applies.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -135,6 +139,7 @@ class SmallestTTSSettings(TTSSettings):
     number_pronunciation_language: Language | str | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
+    complete_backoff_ms: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SmallestTTSService(InterruptibleTTSService):
@@ -216,6 +221,7 @@ class SmallestTTSService(InterruptibleTTSService):
             content_filter=None,
             date_format=None,
             number_pronunciation_language=None,
+            complete_backoff_ms=None,
         )
 
         if settings is not None:
@@ -331,6 +337,9 @@ class SmallestTTSService(InterruptibleTTSService):
                 self.language_to_service_language(npl) if isinstance(npl, Language) else npl
             )
 
+        if self._settings.complete_backoff_ms is not None:
+            msg["complete_backoff_ms"] = self._settings.complete_backoff_ms
+
         if self._word_timestamps:
             msg["word_timestamps"] = True
 
@@ -376,8 +385,8 @@ class SmallestTTSService(InterruptibleTTSService):
         """Apply a settings delta.
 
         All fields (model, speed, math_notation, content_filter, date_format,
-        number_pronunciation_language, voice, language) take effect on the next
-        ``_build_msg`` call without reconnecting.
+        number_pronunciation_language, complete_backoff_ms, voice, language) take
+        effect on the next ``_build_msg`` call without reconnecting.
         """
         return await super()._update_settings(delta)
 
