@@ -326,12 +326,25 @@ class XAIWebsocketTTSSettings(TTSSettings):
         text_normalization: Whether to normalize text before synthesis.
         with_timestamps: Whether to request character timings. When enabled, the
             service converts them into per-word ``TTSTextFrame`` objects.
+        replace: Map of phrases to spoken substitutions applied before
+            synthesis, e.g. ``{"Acme Mobile": "Acme Mobull"}``. Values are
+            respellings or IPA phonetics in forward slashes. Up to 200 entries.
+            The map is sent once per connection and applies to every utterance
+            on it.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     optimize_streaming_latency: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     text_normalization: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     with_timestamps: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    replace: dict[str, str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class XAITTSService(WebsocketTTSService):
@@ -390,6 +403,7 @@ class XAITTSService(WebsocketTTSService):
             optimize_streaming_latency=None,
             text_normalization=None,
             with_timestamps=True,
+            replace=None,
         )
 
         if settings is not None:
@@ -502,6 +516,14 @@ class XAITTSService(WebsocketTTSService):
             url = self._build_url()
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self._websocket = await self._websocket_connect(url, additional_headers=headers)
+
+            # The pronunciation map lives on the session rather than the URL, so
+            # it is sent once per connection and covers every utterance on it.
+            replace = assert_given(self._settings.replace)
+            if replace is not None:
+                await self._websocket.send(
+                    json.dumps({"type": "session.update", "replace": replace})
+                )
 
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -619,6 +641,8 @@ class XAITTSService(WebsocketTTSService):
                 await self.push_error(error_msg=f"xAI TTS error: {error_detail}")
             elif msg_type == "audio.clear":
                 logger.trace(f"{self}: xAI acknowledged audio clear")
+            elif msg_type == "session.updated":
+                logger.trace(f"{self}: xAI acknowledged session update")
             else:
                 logger.debug(f"{self}: unhandled xAI message type: {msg_type}")
 
