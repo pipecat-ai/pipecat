@@ -44,6 +44,51 @@ def test_parse_session_created_from_live_shape():
     assert evt.session.turn_detection.type is None
 
 
+def test_parse_session_updated_with_client_controlled_turn_detection():
+    """session.updated echoes client_controlled when manual turn detection is active."""
+    raw = _event(
+        {
+            "type": "session.updated",
+            "event_id": "evt-1b",
+            "session": {
+                "id": "sess-1",
+                "object": "realtime.session",
+                "instructions": "Be concise.",
+                "voice": "eve",
+                "model": "grok-voice-3.0",
+                "turn_detection": {
+                    "type": "client_controlled",
+                    "threshold": 0.85,
+                    "silence_duration_ms": 500,
+                    "prefix_padding_ms": 333,
+                },
+                "audio": {
+                    "input": {
+                        "format": {"type": "audio/pcm", "rate": 16000},
+                        "turn_detection": {
+                            "type": "client_controlled",
+                            "threshold": 0.85,
+                            "silence_duration_ms": 500,
+                            "prefix_padding_ms": 333,
+                        },
+                    },
+                    "output": {
+                        "format": {"type": "audio/pcm", "rate": 24000},
+                        "voice": "eve",
+                    },
+                },
+                "tools": [],
+            },
+        }
+    )
+
+    evt = events.parse_server_event(raw)
+
+    assert isinstance(evt, events.SessionUpdatedEvent)
+    assert evt.session.turn_detection is not None
+    assert evt.session.turn_detection.type == "client_controlled"
+
+
 def test_parse_transcription_updated_is_cumulative():
     raw = _event(
         {

@@ -82,7 +82,8 @@ class TurnDetection(BaseModel):
     """Server-side voice activity detection configuration.
 
     Parameters:
-        type: Detection type, must be "server_vad" or None for manual.
+        type: Detection type: ``"server_vad"`` for server-side VAD, or
+            ``"client_controlled"`` / ``None`` for manual client-driven turns.
         threshold: VAD activation threshold (0.1–0.9). Higher requires louder audio.
         silence_duration_ms: Silence before the server ends the user turn.
         prefix_padding_ms: Audio (ms) included before detected speech start.
@@ -90,7 +91,7 @@ class TurnDetection(BaseModel):
             silence following an assistant response (``timeout_triggered``).
     """
 
-    type: Literal["server_vad"] | None = "server_vad"
+    type: Literal["server_vad", "client_controlled"] | None = "server_vad"
     threshold: float | None = None
     silence_duration_ms: int | None = None
     prefix_padding_ms: int | None = None
