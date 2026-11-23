@@ -24,12 +24,14 @@ whether the turn needs the backend.
 
 - Otherwise, the frontend handles the turn as usual, having waited for
   nothing (note that it may still choose to ``delegate``).
+
+The race is decided inside the frontend, by an LLM extension
+(:class:`~pipecat.pipeline.llm_with_backend.llm_extension.PredictiveDelegationRaceLLMExtension`),
+which sees the frontend's inference start and its first output.
 """
 
 import asyncio
 import uuid
-from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any
 
 from loguru import logger
@@ -40,240 +42,25 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     InterruptionFrame,
     LLMContextFrame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
     MetricsFrame,
-    SystemFrame,
     UserStartedSpeakingFrame,
 )
 from pipecat.metrics.metrics import MetricsData
 from pipecat.pipeline.llm_with_backend.connector import DELEGATE_TOOL_NAME, BackendConnector
+from pipecat.pipeline.llm_with_backend.llm_extension import (
+    PredictiveDelegationRaceLLMExtension,
+    _EarlyDelegationFrame,
+)
 from pipecat.pipeline.llm_with_backend.prompts import (
     BACKEND_MESSAGE_RELAY_INSTRUCTION,
     _is_backend_message,
 )
 from pipecat.processors.aggregators.llm_context import LLMContextMessage
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
-from pipecat.services.llm_service import LLMService, _OutputGate
+from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_stop.llm_turn_completion.llm_extension import LLMTurnCompletionLLMExtension
 from pipecat.utils.types import assert_given
-
-# ---------------------------------------------------------------------------
-# _PredictiveDelegationRace tracks whether a classifier "yes" arrives before the
-# frontend's first output, and so whether the turn is delegated early or
-# handled by the frontend as usual. A classifier "no" plays no part. The
-# frontend is normally idle when a turn ends (the user's speech interrupts
-# it), so its inference starts at once; a "yes" that comes while it is still
-# busy is held until it starts. The race is attached to the frontend as its
-# output gate (`_OutputGate` in `pipecat.services.llm_service`), which the
-# frontend consults from its process_frame, push_frame and run_function_calls.
-# ---------------------------------------------------------------------------
-
-
-class _PredictiveDelegationRaceState(Enum):
-    """Where the predictive delegation race for a user's turn stands.
-
-    - ``PENDING``: the frontend has been asked to reply to the user's turn,
-      but hasn't started its inference yet: normally for only a moment, longer
-      if it's still busy with an earlier response. A classifier "yes" now is
-      held until the inference starts.
-    - ``RACING``: the frontend's inference is running and hasn't produced any
-      output yet. A classifier "yes" now, or one held from ``PENDING``,
-      delegates the turn early.
-    - ``FRONTEND_WON``: the frontend's inference produced output before any
-      classifier "yes", or the turn was interrupted. The frontend handles the
-      turn as usual.
-    - ``CLASSIFIER_WON``: a classifier "yes" came first. The turn is delegated
-      early, and the frontend's inference is cancelled.
-    """
-
-    PENDING = "pending"
-    RACING = "racing"
-    FRONTEND_WON = "frontend won"
-    CLASSIFIER_WON = "classifier won"
-
-
-@dataclass
-class _EarlyDelegationFrame(SystemFrame):
-    """Asks the frontend to delegate a user's turn now, in place of its own inference.
-
-    Sent by PredictiveDelegation when its classifier says "yes". If the
-    frontend's inference for the turn hasn't produced anything yet, the
-    frontend makes the given calls and cancels the inference; otherwise the
-    frame does nothing. A system frame, so the frontend handles it at once,
-    while the inference runs on another task.
-
-    Parameters:
-        turn: The context frame of the user's turn.
-        function_calls: The calls made in place of the inference (the
-            ``delegate`` call).
-    """
-
-    turn: LLMContextFrame | None = None
-    function_calls: list[FunctionCallFromLLM] = field(default_factory=list)
-
-
-class _PredictiveDelegationRace(_OutputGate):
-    """Tracks whether a classifier "yes" arrives before the frontend's first output for a turn.
-
-    See the module docstring and the comment above. Early delegation makes
-    the frame's calls, then cancels the frontend's inference with
-    ``FrameProcessor._cancel_frame_in_progress``, which keeps the frontend's
-    queue, including the acknowledgement run the call starts. Downstream sees
-    an ordinary response holding the call; any other output the inference
-    pushes before it's cancelled is dropped.
-
-    The frontend's inference is recognized by the task its frames and calls
-    come from, the frontend's process task; everything else the frontend
-    pushes is left alone. All checks are synchronous, so the frontend's first
-    output and early delegation can't interleave.
-    """
-
-    def __init__(self):
-        """Initialize with no race started."""
-        self._turn: LLMContextFrame | None = None
-        # The frontend's process task, which runs its inference for the turn
-        # and goes on to process the frames after it.
-        self._frontend_inference_task: asyncio.Task | None = None
-        # None until the first user turn starts a race; after that, the latest
-        # race's state, which stays put once decided until the next turn.
-        self._state: _PredictiveDelegationRaceState | None = None
-        self._frontend: LLMService[Any] | None = None
-        # A "yes" that arrived while PENDING, held until the inference starts
-        # its response.
-        self._held_early_delegation: _EarlyDelegationFrame | None = None
-
-    def start(self, frame: LLMContextFrame) -> None:
-        """Start a race for a user's turn, just before the turn is passed to the frontend.
-
-        Args:
-            frame: The context frame of the user's turn.
-        """
-        self._turn = frame
-        self._frontend_inference_task = None
-        self._state = _PredictiveDelegationRaceState.PENDING
-        self._held_early_delegation = None
-
-    async def process_frame(self, service: LLMService[Any], frame: Frame) -> None:
-        """Follow the race through the frames the frontend processes.
-
-        Implements ``_OutputGate.process_frame``. Racing starts when the
-        frontend's inference for the turn starts, an interruption leaves the
-        turn to the frontend, and an early delegation frame is carried out
-        while racing.
-
-        Args:
-            service: The frontend service.
-            frame: The frame it is processing.
-        """
-        if isinstance(frame, LLMContextFrame):
-            if frame is self._turn and self._state == _PredictiveDelegationRaceState.PENDING:
-                self._frontend = service
-                self._frontend_inference_task = asyncio.current_task()
-                self._state = _PredictiveDelegationRaceState.RACING
-        elif isinstance(frame, InterruptionFrame):
-            # The interruption cancels the inference: there is nothing left
-            # for early delegation to replace.
-            if self._state in (
-                _PredictiveDelegationRaceState.PENDING,
-                _PredictiveDelegationRaceState.RACING,
-            ):
-                self._state = _PredictiveDelegationRaceState.FRONTEND_WON
-        elif isinstance(frame, _EarlyDelegationFrame):
-            await self._delegate_early(service, frame)
-
-    def allow_push(self, frame: Frame) -> bool:
-        """Whether the frontend may push a frame; notes its inference's first output.
-
-        Implements ``_OutputGate.allow_push``.
-
-        Args:
-            frame: The frame the frontend is about to push.
-
-        Returns:
-            Whether the frontend may push the frame: False only for what the
-            inference pushes after the turn was delegated early and before its
-            cancellation lands, other than the end of its response.
-        """
-        if not self._called_from_frontend_inference():
-            return True
-        self._note_frontend_inference_push(frame)
-        if self._state == _PredictiveDelegationRaceState.CLASSIFIER_WON:
-            return isinstance(frame, (SystemFrame, LLMFullResponseEndFrame))
-        return True
-
-    def allow_function_calls(self) -> bool:
-        """Whether the frontend may run function calls; notes its inference's first call.
-
-        Implements ``_OutputGate.allow_function_calls``.
-
-        Returns:
-            Whether the frontend may run them: False only for calls the
-            inference reaches after the turn was delegated early and before
-            its cancellation lands.
-        """
-        if not self._called_from_frontend_inference():
-            return True
-        self._note_frontend_inference_function_calls()
-        return self._state != _PredictiveDelegationRaceState.CLASSIFIER_WON
-
-    def _called_from_frontend_inference(self) -> bool:
-        """Whether the caller is the frontend's process task, running its inference for the turn."""
-        return (
-            self._frontend_inference_task is not None
-            and asyncio.current_task() is self._frontend_inference_task
-        )
-
-    def _note_frontend_inference_push(self, frame: Frame) -> None:
-        """Note a frame the frontend's inference pushes while racing.
-
-        The start of its response carries out an early delegation held from
-        ``PENDING``. Any other output but a system frame is the inference's
-        first, and leaves the turn to the frontend.
-        """
-        if self._state != _PredictiveDelegationRaceState.RACING:
-            return
-        if isinstance(frame, LLMFullResponseStartFrame):
-            if self._held_early_delegation and self._frontend:
-                # Carried out on the frontend's input task, like any early
-                # delegation frame, once this start frame is downstream.
-                held, self._held_early_delegation = self._held_early_delegation, None
-                self._frontend.create_task(self._frontend.queue_frame(held))
-        elif not isinstance(frame, SystemFrame):
-            self._state = _PredictiveDelegationRaceState.FRONTEND_WON
-
-    def _note_frontend_inference_function_calls(self) -> None:
-        """Note the frontend's inference reaching function calls.
-
-        While racing, its first call leaves the turn to the frontend.
-        """
-        if self._state == _PredictiveDelegationRaceState.RACING:
-            self._state = _PredictiveDelegationRaceState.FRONTEND_WON
-
-    async def _delegate_early(
-        self, frontend: LLMService[Any], frame: _EarlyDelegationFrame
-    ) -> None:
-        """If the turn is racing, make the frame's calls and cancel the inference.
-
-        A frame that arrives while the turn is pending is held until the
-        inference starts.
-        """
-        turn = frame.turn
-        if turn is None or turn is not self._turn:
-            return
-        if self._state == _PredictiveDelegationRaceState.PENDING:
-            logger.debug("Predictive delegation: turn pending; holding the early delegation")
-            self._held_early_delegation = frame
-            return
-        if self._state != _PredictiveDelegationRaceState.RACING:
-            logger.debug("Predictive delegation: not delegating early (the race is decided)")
-            return
-        logger.debug("Predictive delegation: delegating early, cancelling the frontend's inference")
-        self._state = _PredictiveDelegationRaceState.CLASSIFIER_WON
-        await frontend.run_function_calls(frame.function_calls)
-        await frontend._cancel_frame_in_progress(turn)
-
 
 #: How likely a classifier "yes" must be for a turn to be delegated early.
 _DELEGATION_PREDICTION_THRESHOLD = 0.6
@@ -324,7 +111,7 @@ class PredictiveDelegation(FrameProcessor):
         """
         super().__init__(**kwargs)
         self._classifier = classifier
-        self._race = _PredictiveDelegationRace()
+        self._race = PredictiveDelegationRaceLLMExtension()
         self._frontend: LLMService[Any] | None = None
         self._question: YesNoQuestion | None = None
         self._last_raced: LLMContextMessage | None = None
@@ -332,9 +119,9 @@ class PredictiveDelegation(FrameProcessor):
         self._warned: set[str] = set()
 
     def _bind(self, frontend: LLMService[Any], connector: BackendConnector) -> None:
-        """Attach the race to the frontend and build the classifier's question."""
+        """Install the race on the frontend and build the classifier's question."""
         self._frontend = frontend
-        frontend._output_gate = self._race
+        frontend.add_extension(self._race)
         self._question = YesNoQuestion(
             instructions=(
                 "Does the user's latest message need to be handed to the assistant's backend "
@@ -371,7 +158,7 @@ class PredictiveDelegation(FrameProcessor):
             and self._should_start_race(frame)
         ):
             await self._cancel_classification()
-            self._race.start(frame)
+            self._race.start_race(frame)
             state = self._classifier_state(frame)
             await self.push_frame(frame, direction)
             self._classify_task = self.create_task(

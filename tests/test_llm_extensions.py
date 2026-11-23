@@ -356,34 +356,6 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(_texts(received_down), ["from C", "from B", "from A"])
 
-    async def test_what_an_extension_pushes_is_past_the_output_gate(self):
-        class ClosedGate:
-            """Stands in for the gate predictive delegation installs: lets no text out."""
-
-            async def process_frame(self, service, frame):
-                pass
-
-            def allow_push(self, frame):
-                return not isinstance(frame, LLMTextFrame)
-
-            def allow_function_calls(self):
-                return True
-
-        class Speaker(BaseLLMExtension):
-            async def process_frame(self, frame: Frame, direction: FrameDirection):
-                if isinstance(frame, UserTurnInferenceCompletedFrame):
-                    await self.push_frame(LLMTextFrame("from the extension"))
-
-        service = _MockLLMService(extensions=[Speaker()])
-        service._output_gate = ClosedGate()  # type: ignore[assignment]
-
-        received_down, _ = await run_test(
-            service,
-            frames_to_send=[UserTurnInferenceCompletedFrame(), LLMTextFrame("from the service")],
-        )
-
-        self.assertEqual(_texts(received_down), ["from the extension"])
-
     async def test_extensions_are_set_up_and_cleaned_up_with_the_service(self):
         extension = _Recorder()
         service = _MockLLMService(extensions=[extension])
