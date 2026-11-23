@@ -163,6 +163,7 @@ class DeepgramSageMakerSTTService(STTService):
             profanity_filter=None,
             punctuate=True,
             redact=None,
+            redact_usage=None,
             replace=None,
             search=None,
             smart_format=False,

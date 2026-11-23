@@ -1,0 +1,1 @@
+- Added a `redact_usage` setting to the Deepgram STT services, which stores `keyterm`, `keywords`, `replace`, `search` and `extra` as `[REDACTED]` in Deepgram's usage records. `DeepgramSTTService` needs deepgram-sdk 7.19.0 or later for it.
