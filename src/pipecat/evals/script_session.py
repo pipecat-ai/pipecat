@@ -40,6 +40,13 @@ from pipecat.evals.tts import CachingTTSService
 from pipecat.services.stt_service import STTService
 from pipecat.utils.deprecation import warn_deprecated
 
+_REPORT_LEVELS = (None, "name", "arguments", "full")
+
+
+def _most_detailed(*levels: str | None) -> str | None:
+    """The function-call report level that covers each of ``levels``."""
+    return max(levels, key=_REPORT_LEVELS.index)
+
 
 class EvalScriptSession(EvalSession[EvalScriptResult]):
     """Runs one :class:`~pipecat.evals.script.EvalScriptScenario` against a bot.
@@ -101,7 +108,9 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
                 user_speech=scenario.user_speech,
                 capture_bot_audio=scenario.wants_response(),
                 capture_bot_images=scenario.needs_bot_images(),
-                report_level=scenario.required_report_level(),
+                report_level=_most_detailed(
+                    scenario.required_report_level(), self._params.function_call_report_level
+                ),
                 vad_events=scenario.needs_vad_events(),
                 marker_events=scenario.needs_marker_events(),
                 context=list(scenario.context or []),

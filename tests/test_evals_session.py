@@ -1617,6 +1617,42 @@ class TestRequiredReportLevel(unittest.TestCase):
         )
 
 
+class TestFunctionCallReportLevelParam(unittest.TestCase):
+    """A run can ask for more function-call detail than its expectations need."""
+
+    def _asked(self, level: str | None, *expects: EvalExpectation) -> str | None:
+        scenario = EvalScriptScenario(
+            name="t", turns=[EvalScriptTurn(user="x", expect=list(expects))]
+        )
+        params = (
+            EvalSessionParams()
+            if level is None
+            else EvalSessionParams(function_call_report_level=level)
+        )
+        session = EvalScriptSession(scenario, "ws://localhost:0", params=params)
+        return session._client._params.report_level
+
+    def test_nothing_asked_by_default(self):
+        self.assertIsNone(self._asked(None, EvalExpectation(event="llm_response")))
+
+    def test_the_run_asks_without_a_function_call_expectation(self):
+        for level in ("name", "arguments", "full"):
+            self.assertEqual(self._asked(level, EvalExpectation(event="llm_response")), level)
+
+    def test_the_more_detailed_of_the_run_and_the_expectations_wins(self):
+        named = EvalExpectation(event="function_call", calls=[EvalFunctionCall(name="f")])
+        with_args = EvalExpectation(
+            event="function_call", calls=[EvalFunctionCall(name="f", args={"a": 1})]
+        )
+        self.assertEqual(self._asked("arguments", named), "arguments")
+        self.assertEqual(self._asked("name", with_args), "full")
+        self.assertEqual(self._asked(None, named), "name")
+
+    def test_an_unknown_level_is_rejected(self):
+        with self.assertRaises(ValueError):
+            EvalSessionParams(function_call_report_level="none")
+
+
 class TestNeedsVadEvents(unittest.TestCase):
     """The harness enables raw VAD events only when a scenario references them."""
 

@@ -150,7 +150,11 @@ class EvalScriptResult:
             file for a denominator. ``failures`` is these turns' failures
             flattened, plus any that belong to no turn (a failed connect).
         duration_ms: Wall-clock time the run took, in milliseconds.
-        events_seen: Every friendly event observed, for diagnostics.
+        events_seen: Every friendly event observed, for diagnostics. A
+            ``function_call`` event holds the call's name and arguments when
+            the bot reports them: the scenario's expectations, the run's
+            :attr:`~pipecat.evals.session.EvalSessionParams.function_call_report_level`
+            or the bot's own settings can ask for them.
         debug_log: Timestamped trace of the harness's own decisions (events
             received, audio transcribed, matcher progress), for diagnosing flaky
             runs. Saved per-scenario by the orchestrator alongside the bot log.
