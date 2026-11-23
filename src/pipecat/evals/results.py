@@ -150,7 +150,9 @@ class EvalScriptResult:
             file for a denominator. ``failures`` is these turns' failures
             flattened, plus any that belong to no turn (a failed connect).
         duration_ms: Wall-clock time the run took, in milliseconds.
-        events_seen: Every friendly event observed, for diagnostics.
+        events_seen: Every friendly event observed apart from metrics, in
+            arrival order, for diagnostics; :mod:`pipecat.evals.events` gives
+            each event's keys.
         debug_log: Timestamped trace of the harness's own decisions (events
             received, audio transcribed, matcher progress), for diagnosing flaky
             runs. Saved per-scenario by the orchestrator alongside the bot log.
@@ -294,7 +296,9 @@ class EvalSimulationResult:
         end_call: The persona's own ``end_call`` claim (``success``, ``reason``)
             when it made one; advisory, the judge decides ``succeeded``.
         duration_ms: Wall-clock time the run took, in milliseconds.
-        events_seen: Every friendly event observed, for diagnostics.
+        events_seen: Every friendly event observed apart from metrics, in
+            arrival order, for diagnostics; :mod:`pipecat.evals.events` gives
+            each event's keys.
         debug_log: Timestamped trace of the harness's own decisions.
         confidence: How sure the judge is of its goal verdict, from 0 to 1;
             ``None`` when it gave none.

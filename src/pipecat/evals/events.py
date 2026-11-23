@@ -68,6 +68,44 @@ scenario ``event:``             RTVI server message(s)
                                 ``[[pause 600]]`` for a pause. A tag the TTS can't
                                 perform is never reported
 ==========================      ==============================================
+
+Each event is a dict. Every one has ``type``, the recorded event name,
+and ``at``, the seconds from the start of the run's stream to its arrival. The
+rest depends on the type:
+
+==============================  ==============================================
+``type``                        further keys
+==============================  ==============================================
+``llm_response``                ``text``, which may be empty, as for a response
+                                that only makes a function call; and
+                                ``started_at``, when its first text message
+                                arrived (in the same seconds as ``at``), when
+                                any did
+``tts_response``, ``response``  ``text``
+``user_transcription``          ``transcript``
+``function_call``               ``name``, the function's name as the bot
+                                reports it, or ``None``; ``args``, its
+                                arguments as reported, or ``{}``
+``function_call_stopped``       ``name``, as above; ``args``, holding
+                                ``tool_call_id`` and ``cancelled``
+``llm_marker``                  ``text``, ``kind``, ``raw``, ``markers``
+``image``                       ``width``, ``height``, ``format``
+``metrics``                     ``data``, the measurements grouped by kind
+``server_message``              ``data``, ``text``
+``flow_node``                   ``data``, ``text``
+``bot_backchannel``             ``text``
+``user_backchannel``            ``text``
+``expression``                  ``text``
+==============================  ==============================================
+
+``bot_started_speaking``, ``bot_stopped_speaking``, the VAD events,
+``llm_started`` and ``bot_interrupted`` have no further keys. The harness adds events of its own to the stream: ``bot_ended``
+when the bot closes the connection; ``harness_error``, with ``text``, the
+error, when the harness's pipeline reports one; and in a simulation
+``persona_turn``, with ``text``, the words sent to the bot, and ``end_call``,
+with ``text``, ``success`` and ``reason``, when the persona hangs up. A run's
+result keeps them all, in arrival order, as ``events_seen``, apart from
+``metrics``: those are in ``bot_metrics``, each as ``at`` and ``data``.
 """
 
 import asyncio
