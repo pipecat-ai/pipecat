@@ -111,6 +111,7 @@ class WordCompletionTracker:
         # --- Answers about the most recent word ---
         # Rewritten by every add_word_and_check_complete call and read back
         # through the get_* accessors.
+        self._preserve_word_spacing = False
         self._frame_word: str | None = None  # this frame's share of the word
         self._overflow_word: str | None = None  # the next frame's share
         self._llm_consumed: str | None = None  # LLM text the word stands for
@@ -123,7 +124,9 @@ class WordCompletionTracker:
             tts_text, self._user_facing_text, llm_text, llm_markup=llm_markup
         )
 
-    def add_word_and_check_complete(self, word: str) -> bool:
+    def add_word_and_check_complete(
+        self, word: str, *, includes_inter_frame_spaces: bool = False
+    ) -> bool:
         """Record one word the TTS provider reported speaking.
 
         Three things can happen, in this order:
@@ -141,13 +144,15 @@ class WordCompletionTracker:
                 a plain word, a word carrying its own spacing or punctuation, or
                 a fragment of a still-open SSML tag -- matching is textual, so
                 none of those need special handling from the caller. Services
-                that report spaces and punctuation as separate tokens (e.g.
-                Inworld) must merge them into the preceding word first, via
-                ``merge_punct_tokens``.
+                such as Inworld use ``merge_punct_tokens`` to attach separately
+                reported punctuation to a word.
+            includes_inter_frame_spaces: Whether the token carries its own spacing
+                between frames. Its explicit whitespace belongs in the transcript.
 
         Returns:
             True once nothing is left for this frame to speak.
         """
+        self._preserve_word_spacing = includes_inter_frame_spaces and word != word.strip()
         self._frame_word = None
         self._overflow_word = None
         self._llm_consumed = None
@@ -323,7 +328,7 @@ class WordCompletionTracker:
         recorded from its spoken text as usual.
         """
         return self._segment_map.in_transformed_segment or (
-            self._llm_text is not None and not (self._llm_consumed or "").strip()
+            self._llm_text is not None and not self.get_llm_consumed()
         )
 
     def get_word_for_frame(self) -> str | None:
@@ -336,7 +341,7 @@ class WordCompletionTracker:
         force-complete this is the frame's unspoken remainder instead -- either
         way, nothing is missing from the turn.
         """
-        return self._frame_word.strip() if self._frame_word else self._frame_word
+        return self._trim_word_span(self._frame_word)
 
     def get_overflow_word(self) -> str | None:
         """Return the part of the last word that belongs to the *next* frame.
@@ -345,7 +350,7 @@ class WordCompletionTracker:
         Casing and punctuation are untouched so it still reads as a real word.
         None when the word fit entirely within this frame.
         """
-        return self._overflow_word.strip() if self._overflow_word else self._overflow_word
+        return self._trim_word_span(self._overflow_word)
 
     def get_llm_consumed(self) -> str | None:
         """Return the LLM's own text that the last word stands for.
@@ -358,9 +363,10 @@ class WordCompletionTracker:
         word is mid-rewrite, or ``llm_text`` is already exhausted (a trailing
         emoji it never carried).
         """
-        if not self._llm_consumed:
-            return None
-        return self._llm_consumed.strip() or None
+        return self._trim_word_span(self._llm_consumed) or None
+
+    def _trim_word_span(self, text: str | None) -> str | None:
+        return text if self._preserve_word_spacing or text is None else text.strip()
 
     def get_accumulated_user_facing_text(self) -> str:
         """Return the part of the frame spoken so far, as the user sees it.

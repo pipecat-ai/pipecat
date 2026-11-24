@@ -519,30 +519,26 @@ class CartesiaTTSService(WebsocketTTSService):
         """Convenience method to create a speed tag."""
         return f'<speed ratio="{speed}" />'
 
-    def _is_chinese_or_japanese_language(self, language: str) -> bool:
-        """Check if the given language is Chinese or Japanese.
-
-        Args:
-            language: The language code to check.
-
-        Returns:
-            True if the language is Chinese or Japanese.
-        """
-        base_lang = language.split("-")[0].lower()
-        return base_lang in {"zh", "ja"}
+    def _timestamp_language(self) -> str:
+        """Return the base language of the timestamp tokens."""
+        language = assert_given(self._settings.language)
+        return (language or "").split("-")[0].lower()
 
     _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
 
     def _strip_cartesia_tags(self, text: str) -> str:
         """Remove Cartesia SSML tags from a word-timestamp token.
 
-        A tag standing between two alphanumeric characters is replaced by a space,
+        Thai tokens retain their literal spacing around tags. For other languages,
+        a tag standing between two alphanumeric characters is replaced by a space,
         since it is the only thing separating two words (``"to<spell>1234"``).
         Anywhere else it is removed outright: a space there would not join anything,
         and it would split a word from its own punctuation
         (``"<spell>1234</spell>."`` must stay ``"1234."``, not ``"1234 ."``, or the
         token no longer matches the text that was sent for synthesis).
         """
+        if self._timestamp_language() == "th":
+            return self._CARTESIA_TAG_RE.sub("", text)
 
         def replace(match: re.Match) -> str:
             before = text[match.start() - 1] if match.start() else ""
@@ -585,8 +581,7 @@ class CartesiaTTSService(WebsocketTTSService):
 
     def _word_timestamps_include_inter_frame_spaces(self) -> bool:
         """Whether timestamp text should be treated as carrying its own spacing."""
-        current_language = assert_given(self._settings.language)
-        return bool(current_language and self._is_chinese_or_japanese_language(current_language))
+        return self._timestamp_language() in {"zh", "ja", "th"}
 
     def _build_msg(
         self,
@@ -790,12 +785,11 @@ class CartesiaTTSService(WebsocketTTSService):
                 # Cartesia reports Chinese and Japanese one character at a time, with
                 # each punctuation mark as its own token. Merging attaches the mark to
                 # the character before it ("す", "。" -> "す。").
-                cjk = self._word_timestamps_include_inter_frame_spaces()
                 await self.add_word_timestamps(
                     processed_timestamps,
                     ctx_id,
-                    includes_inter_frame_spaces=True if cjk else None,
-                    pre_merge_tokens=cjk,
+                    includes_inter_frame_spaces=self._word_timestamps_include_inter_frame_spaces(),
+                    pre_merge_tokens=self._timestamp_language() in {"zh", "ja"},
                 )
             elif msg["type"] == "chunk":
                 frame = TTSAudioRawFrame(

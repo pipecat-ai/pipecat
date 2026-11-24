@@ -17,9 +17,13 @@ from pipecat.expressive.expression import DeliveryScope
 from pipecat.frames.frames import (
     AggregatedTextFrame,
     AggregatedTextProgressFrame,
+    LLMAssistantPushAggregationFrame,
     TextType,
+    TTSStartedFrame,
     TTSTextFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMAssistantAggregator
 from pipecat.services.cartesia.tts import (
     CartesiaHttpTTSService,
     CartesiaTTSService,
@@ -28,6 +32,7 @@ from pipecat.services.cartesia.tts import (
     language_to_cartesia_language,
 )
 from pipecat.services.settings import TTSSettings
+from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
@@ -174,6 +179,89 @@ def test_word_timestamps_keep_their_ends():
         ["Hello", '<break time="1s"/>', "world"], [0.0, 0.4, 1.4], [0.4, 1.4, 1.8]
     ) == [("Hello", 0.0, 0.4), ("world", 1.4, 1.8)]
     assert service._normalize_word_timestamps(["Hello"], [0.0]) == [("Hello", 0.0)]
+
+
+async def _queued_word_timestamps(language, batches) -> list[WordTimestamp]:
+    service = _service(language)
+    service._websocket = MagicMock()
+    service._websocket.__aiter__.return_value = [
+        json.dumps({"type": "timestamps", "context_id": "ctx1", "word_timestamps": batch})
+        for batch in batches
+    ]
+    service.audio_context_available = MagicMock(return_value=True)
+    service.append_to_audio_context = AsyncMock()
+    await service._process_messages()
+
+    return [call.args[1] for call in service.append_to_audio_context.await_args_list]
+
+
+async def _assert_timestamp_transcript(
+    words: list[WordTimestamp], sentence: str
+) -> list[TTSTextFrame]:
+    seq = AggregatedFrameSequencer()
+    await seq.register_spoken(
+        AggregatedTextFrame(sentence, TextType.SENTENCE, raw_text=sentence),
+        "ctx1",
+        sentence,
+        append_to_context=True,
+    )
+    frames = [
+        frame
+        for w in words
+        for frame in seq.process_word(
+            w.word, int(w.timestamp * 1e9), w.context_id, w.includes_inter_frame_spaces
+        )
+        if isinstance(frame, TTSTextFrame)
+    ]
+    context = LLMContext()
+    await run_test(
+        LLMAssistantAggregator(context),
+        frames_to_send=[TTSStartedFrame(), *frames, LLMAssistantPushAggregationFrame()],
+    )
+    assert context.messages == [{"role": "assistant", "content": sentence}]
+    return frames
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("language", ["th", "th-TH"])
+async def test_thai_timestamps_preserve_spacing_and_marks_in_the_transcript(language):
+    batches = [
+        {
+            "words": ["ส", "ว", "ั", "ส<spell>ด</spell>", "ี"],
+            "start": [0, 1, 2, 3, 4],
+            "end": [1, 2, 3, 4, 5],
+        },
+        {
+            "words": ["  ", '<break time="80ms"/>', "ค", "่", "ะ\t"],
+            "start": [5, 6, 7, 8, 9],
+            "end": [6, 7, 8, 9, 10],
+        },
+        {"words": [" คุ", "ณ"], "start": [10, 11]},
+    ]
+    words = await _queued_word_timestamps(language, batches)
+    assert [w.word for w in words] == ["ส", "ว", "ั", "สด", "ี", "  ", "ค", "่", "ะ\t", " คุ", "ณ"]
+    assert [w.timestamp for w in words] == [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11]
+    assert [w.end for w in words] == [1, 2, 3, 4, 5, 6, 8, 9, 10, None, None]
+
+    sentence = "สวัสดี  ค่ะ\t คุณ"
+    frames = await _assert_timestamp_transcript(words, sentence)
+    assert "".join(frame.text for frame in frames) == sentence
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "language,batches,sentence",
+    [
+        ("en", [["Please", "spell"], ["<spell>1234</spell>."]], "Please spell 1234."),
+        ("ja", [["で", "す"], ["。"]], "です。"),
+        ("zh", [["你", "好"], ["。"]], "你好。"),
+    ],
+)
+async def test_timestamp_spacing_in_the_assistant_transcript(language, batches, sentence):
+    words = await _queued_word_timestamps(
+        language, [{"words": group, "start": [0.0] * len(group)} for group in batches]
+    )
+    await _assert_timestamp_transcript(words, sentence)
 
 
 def _concatenate_processed_timestamps(
@@ -475,27 +563,9 @@ class TestCartesiaCJKPunctuationTokens(unittest.IsolatedAsyncioTestCase):
     """
 
     async def _queued_words(self, batches: list[list[str]]) -> list[WordTimestamp]:
-        service = _service("ja")
-        queued: list[WordTimestamp] = []
-
-        async def messages():
-            for words in batches:
-                yield json.dumps(
-                    {
-                        "type": "timestamps",
-                        "context_id": "ctx1",
-                        "word_timestamps": {"words": words, "start": [0.0] * len(words)},
-                    }
-                )
-
-        async def append(context_id, frame):
-            queued.append(frame)
-
-        service._websocket = messages()
-        service.audio_context_available = lambda context_id: True
-        service.append_to_audio_context = append
-        await service._process_messages()
-        return queued
+        return await _queued_word_timestamps(
+            "ja", [{"words": words, "start": [0.0] * len(words)} for words in batches]
+        )
 
     async def test_marks_attach_to_the_preceding_character(self):
         queued = await self._queued_words([["で", "す", "。"], ["歯", "科"]])

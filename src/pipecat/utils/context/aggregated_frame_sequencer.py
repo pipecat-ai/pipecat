@@ -548,7 +548,9 @@ class AggregatedFrameSequencer:
                     )
                     return []
 
-            is_complete = active.tracker.add_word_and_check_complete(word)
+            is_complete = active.tracker.add_word_and_check_complete(
+                word, includes_inter_frame_spaces=includes_inter_frame_spaces
+            )
             raw_overflow_word = active.tracker.get_overflow_word()
         elif self._streaming and active is None:
             self._buffered_words.append(
@@ -591,7 +593,11 @@ class AggregatedFrameSequencer:
             frames.extend(self.flush(last_word_pts=pts))
             if raw_overflow_word:
                 logger.debug(f"{self._name} Emitting overflow word '{raw_overflow_word}'")
-                frames.extend(self.process_word(raw_overflow_word, pts, context_id))
+                frames.extend(
+                    self.process_word(
+                        raw_overflow_word, pts, context_id, includes_inter_frame_spaces
+                    )
+                )
 
         return frames
 
