@@ -172,6 +172,7 @@ websocket = [ "fastapi>=0.115.6,<1" ]
 whisper = [ "faster-whisper~=1.2.1" ]
 xai = []
 xtts = []
+yoob = []
 zoom-ai = [ "httpx[http2]>=0.27,<1" ]
 
 # CLI tooling for `pipecat init` (not a service). Optional so the runtime/base-image
