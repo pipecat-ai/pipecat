@@ -5,6 +5,7 @@
 #
 
 import json
+import re
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
@@ -312,6 +313,29 @@ def test_settings_fields_cannot_be_constructor_kwargs(service_cls, field, value)
     """``BaseObject`` drops unknown kwargs, so these would be ignored silently."""
     with pytest.raises(TypeError, match=rf"{field} must be passed via settings="):
         _construct(service_cls, **{field: value})
+
+
+@pytest.mark.parametrize("service_cls", [SarvamTTSService, SarvamHttpTTSService])
+@pytest.mark.parametrize(
+    ("kwargs", "names", "canonical"),
+    [
+        ({"speaker": "anushka"}, "speaker", "voice=..."),
+        ({"target_language_code": "hi-IN"}, "target_language_code", "language=..."),
+        (
+            {"speaker": "anushka", "target_language_code": "hi-IN"},
+            "speaker, target_language_code",
+            "voice=..., language=...",
+        ),
+    ],
+)
+def test_settings_aliases_cannot_be_constructor_kwargs(service_cls, kwargs, names, canonical):
+    """Sarvam's API names are ``Settings`` aliases, and would be dropped the same way."""
+    expected = (
+        f"{names} must be passed via settings={service_cls.__name__}.Settings({canonical}), "
+        "not as constructor kwargs"
+    )
+    with pytest.raises(TypeError, match=re.escape(expected)):
+        _construct(service_cls, **kwargs)
 
 
 @pytest.mark.parametrize("service_cls", [SarvamTTSService, SarvamHttpTTSService])
