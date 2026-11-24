@@ -148,16 +148,22 @@ class PredictiveDelegationRaceLLMExtension(BaseLLMExtension):
       at once; a "yes" that comes while it is still busy is held until it
       starts.
 
-    Early delegation makes the frame's calls, then cancels the frontend's
-    inference with ``FrameProcessor._cancel_frame_in_progress``, which keeps
-    the frontend's queue, including the acknowledgement run the call starts.
-    Downstream sees an ordinary response holding the call; any other output
-    the inference pushes before it's cancelled is dropped.
+    Early delegation makes the frame's calls (:meth:`run_function_calls`),
+    then cancels the frontend's inference
+    (:meth:`cancel_inference_in_progress`), which keeps the frontend's queue,
+    including the acknowledgement run the call starts. Downstream sees an
+    ordinary response holding the call; any other output the inference pushes
+    before it's cancelled is dropped.
 
     The frontend's inference is recognized by the task its frames and calls
     come from, the frontend's process task; everything else the frontend
     pushes is left alone. All checks are synchronous, so the frontend's first
     output and early delegation can't interleave.
+
+    NOT for an application to attach: on its own, the extension is half the
+    feature. A ``PredictiveDelegation`` starts each race and sends its
+    classifier's "yes", and ``LLMWithBackend(predictive_delegation=...)`` is
+    how an application turns predictive delegation on.
     """
 
     # The race reads what the frontend's inference pushes before any other
@@ -280,12 +286,11 @@ class PredictiveDelegationRaceLLMExtension(BaseLLMExtension):
         if self._state != _PredictiveDelegationRaceState.RACING:
             return
         if isinstance(frame, LLMFullResponseStartFrame):
-            frontend = self.attached_service
-            if self._held_early_delegation and frontend:
+            if self._held_early_delegation:
                 # Carried out on the frontend's input task, like any early
                 # delegation frame, once this start frame is downstream.
                 held, self._held_early_delegation = self._held_early_delegation, None
-                frontend.create_task(frontend.queue_frame(held))
+                self.create_task(self.queue_frame(held))
         elif not isinstance(frame, SystemFrame):
             self._state = _PredictiveDelegationRaceState.FRONTEND_WON
 
@@ -313,9 +318,7 @@ class PredictiveDelegationRaceLLMExtension(BaseLLMExtension):
         if self._state != _PredictiveDelegationRaceState.RACING:
             logger.debug("Predictive delegation: not delegating early (the race is decided)")
             return
-        frontend = self.attached_service
-        assert frontend is not None, "the race follows a frontend it is attached to"
         logger.debug("Predictive delegation: delegating early, cancelling the frontend's inference")
         self._state = _PredictiveDelegationRaceState.CLASSIFIER_WON
-        await frontend.run_function_calls(frame.function_calls)
-        await frontend._cancel_frame_in_progress(turn)
+        await self.run_function_calls(frame.function_calls)
+        await self.cancel_inference_in_progress(turn)
