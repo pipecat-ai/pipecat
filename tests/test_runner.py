@@ -234,6 +234,7 @@ class TestWorkerRunner(unittest.IsolatedAsyncioTestCase):
             return weakref.ref(runner), weakref.ref(task)
 
         runner_ref, task_ref = await run_once()
+        await asyncio.sleep(0)
         gc.collect()
         self.assertIsNone(runner_ref())
         self.assertIsNone(task_ref())
