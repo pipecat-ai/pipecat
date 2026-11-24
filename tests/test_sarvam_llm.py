@@ -1084,14 +1084,22 @@ def test_sarvam_llm_use_provider_thinking_default_sends_no_default():
     assert "runs at Sarvam's default" in mock_logger.debug.call_args.args[0]
 
 
-def test_sarvam_llm_v1_api_gets_no_default():
-    """Sarvam's /v1 API rejects "none", so the /v2 defaults aren't sent there."""
+def test_sarvam_llm_v1_api_turns_reasoning_off_with_null():
+    """Sarvam's /v1 API rejects "none"; an explicit null turns reasoning off there."""
     service = _thinking_service(base_url="https://api.sarvam.ai/v1", model="sarvam-105b")
     with patch("pipecat.services.llm_service.logger") as mock_logger:
         params = _thinking_params(service)
+    assert "reasoning_effort" in params["extra_body"]
+    assert params["extra_body"]["reasoning_effort"] is None
+    mock_logger.info.assert_called_once()
+    mock_logger.warning.assert_not_called()
+
+
+def test_sarvam_llm_v1_api_sends_no_v2_values():
+    """A /v2 default like glm5.3's "low" isn't sent to an explicit /v1 base_url."""
+    service = _thinking_service(base_url="https://api.sarvam.ai/v1/", model="glm5.3")
+    params = _thinking_params(service)
     assert "reasoning_effort" not in params.get("extra_body", {})
-    mock_logger.warning.assert_called_once()
-    assert "no thinking default for sarvam-105b" in mock_logger.warning.call_args.args[0]
 
 
 def test_sarvam_llm_model_without_reasoning_gets_no_default_and_no_log():

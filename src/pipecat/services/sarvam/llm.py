@@ -31,7 +31,11 @@ class SarvamLLMSettings(OpenAILLMSettings):
             on the models that allow it (``sarvam-105b``, ``gemma4`` and
             ``deepseekv4.1-flash``); ``glm5.3`` accepts ``"low"``, ``"high"`` and
             ``"max"``. Left unset, each of these models is sent its lowest
-            setting (see ``use_provider_thinking_default``).
+            setting (see ``use_provider_thinking_default``). Without reasoning,
+            ``sarvam-105b`` replies sooner but calls tools less reliably on
+            some Hindi and Hinglish requests, answering in text instead; a bot
+            that relies on tool calls in those languages may need reasoning on
+            (``"low"`` or higher).
     """
 
     wiki_grounding: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -43,12 +47,19 @@ class SarvamLLMSettings(OpenAILLMSettings):
 # The lowest reasoning setting each model takes on Sarvam's /v2 API, sent when
 # the caller configures no reasoning, keyed by model name. "none" turns
 # thinking off; glm5.3 always reasons, and rejects anything below "low".
+# Without reasoning, sarvam-105b skips some tool calls on Hindi and Hinglish
+# requests, a trade-off the `reasoning_effort` docstring states.
 _THINKING_DEFAULTS: dict[str, str] = {
     "deepseekv4.1-flash": "none",
     "gemma4": "none",
     "glm5.3": "low",
     "sarvam-105b": "none",
 }
+
+
+# Sarvam's /v1 API takes only "low", "medium" and "high", and turns reasoning
+# off with an explicit JSON null, which these models are sent by default there.
+_V1_REASONING_OFF_MODELS = frozenset({"sarvam-105b"})
 
 
 class SarvamLLMService(OpenAILLMService):
@@ -123,8 +134,7 @@ class SarvamLLMService(OpenAILLMService):
             default_headers=default_headers,
             **kwargs,
         )
-        # Sarvam's /v1 API takes only low, medium and high, and turns reasoning
-        # on by default; the /v2 defaults don't apply there.
+        # The /v2 defaults don't apply on /v1; see `_V1_REASONING_OFF_MODELS`.
         self._uses_v1_api = base_url.rstrip("/").endswith("/v1")
 
     def create_client(
@@ -254,9 +264,11 @@ class SarvamLLMService(OpenAILLMService):
         Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one. A
         request that already sets ``reasoning_effort``, from the settings or from
         ``extra``, is left as it is. So is every request when
-        ``use_provider_thinking_default`` is set, and every request to Sarvam's
-        ``/v1`` API, which doesn't take these values. The first request for each
-        model logs the setting sent, or that the model runs at Sarvam's default.
+        ``use_provider_thinking_default`` is set. Sarvam's ``/v1`` API rejects
+        ``"none"`` and turns reasoning off with an explicit JSON null instead, so
+        there a model in ``_V1_REASONING_OFF_MODELS`` is sent null. The first
+        request for each model logs the setting sent, or that the model runs at
+        Sarvam's default.
 
         Args:
             params: The chat completion params dict (modified in place).
@@ -264,11 +276,16 @@ class SarvamLLMService(OpenAILLMService):
         if "reasoning_effort" in params or "reasoning_effort" in params.get("extra_body", {}):
             return
         model = assert_given(self._settings.model) or ""
-        effort = None if self._uses_v1_api else _THINKING_DEFAULTS.get(model)
+        default: dict[str, dict[str, Any]] | None = None
+        if self._uses_v1_api:
+            if model in _V1_REASONING_OFF_MODELS:
+                default = {"extra_body": {"reasoning_effort": None}}
+        elif (effort := _THINKING_DEFAULTS.get(model)) is not None:
+            default = {"extra_body": {"reasoning_effort": effort}}
         self._apply_thinking_default(
             params,
             model,
-            {"extra_body": {"reasoning_effort": effort}} if effort is not None else None,
+            default,
             can_think=model in self._REASONING_MODELS,
             provider="Sarvam",
             settings_fields="`reasoning_effort`",
