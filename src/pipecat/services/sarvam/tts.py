@@ -287,6 +287,9 @@ class SarvamHttpTTSSettings(TTSSettings):
         dict_id: ID of a pronunciation dictionary to apply during synthesis. Create
             dictionaries with Sarvam's ``/text-to-speech/pronunciation-dictionary``
             endpoints. Defaults to None (no dictionary).
+            **Note:** Supported by bulbul:v3 and bulbul:v4-flash. An unknown ID fails
+            the utterance with ``SarvamHttpTTSService``; with ``SarvamTTSService`` it
+            is reported as an error and synthesis continues without the dictionary.
     """
 
     _aliases: ClassVar[dict[str, str]] = {
