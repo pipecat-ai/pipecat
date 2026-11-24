@@ -1077,17 +1077,24 @@ class SarvamRealtimeSTTSettings(STTSettings):
 def _error_event_category(message: dict[str, Any]) -> ErrorCategory | None:
     """Categorize a Sarvam realtime `error` event.
 
-    The event's HTTP-style ``status_code`` decides when present (401 for a bad
-    key, 403 for a model the account can't use, 400 for a rejected setting,
-    429, 402); otherwise its ``code`` does. Events with neither, such as a
-    non-fatal ``transcriber_error``, are left for ``push_error`` to classify.
+    Only a fatal event (``is_fatal: true``), which Sarvam sends before closing
+    the connection, is categorized: a non-fatal one, such as an
+    ``invalid_config`` reply to a rejected ``config.update``, leaves the session
+    running and must not cost the service its usability. For a fatal event the
+    HTTP-style ``status_code`` decides when present (401 for a bad key, 403 for
+    a model the account can't use, 400 for a rejected setting, 429, 402);
+    otherwise its ``code`` does. Anything else is left for ``push_error`` to
+    classify.
     """
+    if message.get("is_fatal") is not True:
+        return None
     status_code = message.get("status_code")
-    if isinstance(status_code, int):
+    if isinstance(status_code, int) and not isinstance(status_code, bool):
         category = classify_http_status_code(status_code)
         if category is not ErrorCategory.UNKNOWN:
             return category
-    return _ERROR_CODE_CATEGORIES.get(message.get("code"))
+    code = message.get("code")
+    return _ERROR_CODE_CATEGORIES.get(code) if isinstance(code, str) else None
 
 
 class SarvamRealtimeSTTService(WebsocketSTTService):

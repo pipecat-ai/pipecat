@@ -1610,11 +1610,18 @@ async def test_transient_error_event_is_retried(code, status_code, category):
 @pytest.mark.parametrize(
     "message,category",
     [
-        ({"code": "invalid_subscription_key"}, ErrorCategory.AUTHENTICATION),
-        ({"code": "invalid_subscription_key", "status_code": 401}, ErrorCategory.AUTHENTICATION),
-        ({"code": "model_unavailable", "status_code": 503}, ErrorCategory.SERVER),
-        ({"code": "session_time_limit_exceeded", "status_code": 408}, None),
+        ({"code": "invalid_subscription_key", "is_fatal": True}, ErrorCategory.AUTHENTICATION),
+        (
+            {"code": "invalid_subscription_key", "status_code": 401, "is_fatal": True},
+            ErrorCategory.AUTHENTICATION,
+        ),
+        ({"code": "model_unavailable", "status_code": 503, "is_fatal": True}, ErrorCategory.SERVER),
+        ({"code": "session_time_limit_exceeded", "status_code": 408, "is_fatal": True}, None),
         ({"code": "transcriber_error", "is_fatal": False}, None),
+        # A rejected config.update: the session carries on, so it stays uncategorized.
+        ({"code": "invalid_config", "status_code": 400, "is_fatal": False}, None),
+        ({"code": "invalid_subscription_key", "status_code": 401}, None),
+        ({"code": 401, "status_code": True, "is_fatal": True}, None),
     ],
 )
 def test_error_event_category(message, category):
