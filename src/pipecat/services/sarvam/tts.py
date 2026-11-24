@@ -11,7 +11,7 @@ Indian languages:
 
 **Model Variants:**
 
-- **bulbul:v3**: Sarvam's current TTS model, with temperature control
+- **bulbul:v3**: Sarvam's previous default TTS model, with temperature control
     - Does NOT support: pitch, loudness
     - Supports: pace (0.5-2.0), temperature (0.01-1.0)
     - Default sample rate: 24000 Hz
@@ -20,13 +20,13 @@ Indian languages:
       simran, kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa,
       kabir, aayan, ashutosh, advait
 
-- **bulbul:v4-flash** (default): Low-latency TTS model
+- **bulbul:v4-flash** (default): The TTS model Sarvam recommends
     - Supports: pitch, loudness, pace (0.5-2.0)
     - Does NOT support: temperature
     - Default sample rate: 24000 Hz
     - Preprocessing is always enabled
-    - Speakers: its own catalogue, listed in Sarvam's docs; the bulbul:v3 names
-      are not accepted
+    - Speakers: shubh_en_narration_gentle (default), and the rest of its own
+      catalogue, listed in Sarvam's docs; the bulbul:v3 names are not accepted
 
 - **bulbul:v2** (deprecated): Sarvam's previous TTS model. Sarvam's API answers a
   request for it with "Model 'bulbul:v2' has been deprecated. Please use
@@ -230,6 +230,37 @@ def get_speakers_for_model(model: str) -> list[str]:
     return list(TTS_MODEL_CONFIGS["bulbul:v3"].speakers)
 
 
+# bulbul:v4-flash shares no voice name with bulbul:v3 and refuses every v3 voice.
+_BULBUL_V3_SPEAKERS = frozenset(s.value for s in SarvamTTSSpeakerV3)
+
+
+def _default_model_for_voice(voice: Any) -> str:
+    """Pick the model for a service built without one.
+
+    bulbul:v4-flash is the default, but it refuses a bulbul:v3 voice, so an app
+    that set only a v3 voice (as before v4-flash became the default) stays on
+    bulbul:v3 rather than failing at its first sentence.
+    """
+    if voice in _BULBUL_V3_SPEAKERS:
+        logger.warning(
+            f"Voice '{voice}' is a bulbul:v3 voice and no model was set, so using "
+            f"bulbul:v3 rather than the default bulbul:v4-flash, which refuses it. "
+            f'Set Settings(model="bulbul:v3") to silence this warning, or pick a '
+            f"bulbul:v4-flash voice to move to bulbul:v4-flash."
+        )
+        return SarvamTTSModel.BULBUL_V3.value
+    return SarvamTTSModel.BULBUL_V4_FLASH.value
+
+
+def _warn_if_v3_voice_on_v4_flash(model: Any, voice: Any):
+    """Warn about a runtime update that leaves a bulbul:v3 voice on bulbul:v4-flash."""
+    if model == SarvamTTSModel.BULBUL_V4_FLASH and voice in _BULBUL_V3_SPEAKERS:
+        logger.warning(
+            f"Voice '{voice}' is a bulbul:v3 voice, which bulbul:v4-flash refuses. "
+            f'Set model="bulbul:v3" in the same settings update to use it.'
+        )
+
+
 def language_to_sarvam_language(language: Language) -> str:
     """Convert Pipecat Language enum to Sarvam AI language codes.
 
@@ -338,8 +369,8 @@ class SarvamHttpTTSService(TTSService):
         - Does NOT support: temperature (will be ignored)
         - Default sample rate: 24000 Hz
         - Preprocessing is always enabled
-        - Speakers: its own catalogue, listed in Sarvam's docs; the bulbul:v3
-          names are not accepted
+        - Speakers: shubh_en_narration_gentle (default), and the rest of its own
+          catalogue, listed in Sarvam's docs; the bulbul:v3 names are not accepted
 
     The previous model, bulbul:v2, is deprecated: Sarvam's API rejects it.
 
@@ -443,8 +474,9 @@ class SarvamHttpTTSService(TTSService):
                     Use ``settings=SarvamHttpTTSService.Settings(voice=...)`` instead.
                     Will be removed in 2.0.0.
 
-            model: TTS model to use. Defaults to "bulbul:v4-flash", Sarvam's
-                low-latency model; use "bulbul:v3" for the extension languages
+            model: TTS model to use. Defaults to "bulbul:v4-flash", the model
+                Sarvam recommends, or to "bulbul:v3" when the voice is a
+                bulbul:v3 voice. Use "bulbul:v3" for the extension languages
                 v4-flash doesn't serve.
 
                 .. deprecated:: 0.0.105
@@ -452,9 +484,9 @@ class SarvamHttpTTSService(TTSService):
                     Will be removed in 2.0.0.
 
             base_url: Sarvam AI API base URL. Defaults to "https://api.sarvam.ai".
-            sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000, and,
-                for bulbul:v3, 32000, 44100, 48000). If None, uses model-specific
-                default.
+            sample_rate: Audio sample rate in Hz: 8000, 16000, 22050, 24000, 32000,
+                44100 or 48000, on both bulbul:v3 and bulbul:v4-flash. If None, uses
+                model-specific default.
             params: Additional voice and preprocessing parameters. If None, uses defaults.
 
                 .. deprecated:: 0.0.105
@@ -505,6 +537,10 @@ class SarvamHttpTTSService(TTSService):
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
+
+        # With no model set, a bulbul:v3 voice keeps bulbul:v3 (`params` has no model)
+        if model is None and (settings is None or not is_given(settings.model)):
+            default_settings.model = _default_model_for_voice(default_settings.voice)
 
         # Get model configuration (validates model exists)
         resolved_model = assert_given(default_settings.model)
@@ -599,6 +635,9 @@ class SarvamHttpTTSService(TTSService):
                 self._config = config
                 if "voice" not in changed:
                     self._settings.voice = config.default_speaker
+
+        if "voice" in changed or "model" in changed:
+            _warn_if_v3_voice_on_v4_flash(self._settings.model, self._settings.voice)
 
         return changed
 
@@ -706,8 +745,8 @@ class SarvamTTSService(InterruptibleTTSService):
         - Does NOT support: temperature (will be ignored)
         - Default sample rate: 24000 Hz
         - Preprocessing is always enabled
-        - Speakers: its own catalogue, listed in Sarvam's docs; the bulbul:v3
-          names are not accepted
+        - Speakers: shubh_en_narration_gentle (default), and the rest of its own
+          catalogue, listed in Sarvam's docs; the bulbul:v3 names are not accepted
 
     The previous model, bulbul:v2, is deprecated: Sarvam's API rejects it.
 
@@ -848,8 +887,9 @@ class SarvamTTSService(InterruptibleTTSService):
 
         Args:
             api_key: Sarvam API key for authenticating TTS requests.
-            model: TTS model to use. Defaults to "bulbul:v4-flash", Sarvam's
-                low-latency model; use "bulbul:v3" for the extension languages
+            model: TTS model to use. Defaults to "bulbul:v4-flash", the model
+                Sarvam recommends, or to "bulbul:v3" when the voice is a
+                bulbul:v3 voice. Use "bulbul:v3" for the extension languages
                 v4-flash doesn't serve.
 
                 .. deprecated:: 0.0.105
@@ -938,6 +978,10 @@ class SarvamTTSService(InterruptibleTTSService):
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
             default_settings.apply_update(settings)
+
+        # With no model set, a bulbul:v3 voice keeps bulbul:v3 (`params` has no model)
+        if model is None and (settings is None or not is_given(settings.model)):
+            default_settings.model = _default_model_for_voice(default_settings.voice)
 
         # Get model configuration (validates model exists)
         resolved_model = assert_given(default_settings.model)
@@ -1067,6 +1111,7 @@ class SarvamTTSService(InterruptibleTTSService):
                 self._config = config
                 if "voice" not in changed:
                     self._settings.voice = config.default_speaker
+                _warn_if_v3_voice_on_v4_flash(self._settings.model, self._settings.voice)
                 # The model is a URL query parameter, so a new model needs a new connection.
                 self._websocket_url = (
                     f"{self._url}?model={self._settings.model}&send_completion_event=true"
@@ -1074,6 +1119,9 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._disconnect()
                 await self._connect()
                 return changed
+
+        if "voice" in changed:
+            _warn_if_v3_voice_on_v4_flash(self._settings.model, self._settings.voice)
 
         if changed:
             await self._send_config()
