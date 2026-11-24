@@ -75,6 +75,15 @@ U3_PRO_MODEL_PREFIXES = (
     "assemblyai-stt-3-7-realtime-agent",
 )
 
+# Model-name prefixes of the speech models that accept ``mode="manual"``, where
+# the client ends every turn with ForceEndpoint. The server rejects manual mode
+# for any other model with error 3006.
+MANUAL_MODE_MODEL_PREFIXES = ("assemblyai-stt-3-7-realtime-agent",)
+
+# Shortest audio chunk AssemblyAI accepts. A shorter one closes the session with
+# error 3007.
+MIN_AUDIO_CHUNK_MS = 20
+
 # Settings AssemblyAI accepts in an ``UpdateConfiguration`` message, so changing
 # them applies to the live session. Every other setting is a connect-time query
 # parameter and only takes effect on a new connection.
@@ -112,6 +121,19 @@ def is_u3_pro_model(model: str | None | NotGiven) -> bool:
         True if ``model`` is a U3 Pro family model.
     """
     return isinstance(model, str) and model.startswith(U3_PRO_MODEL_PREFIXES)
+
+
+def is_manual_mode_model(model: str | None | NotGiven) -> bool:
+    """Return whether a model name accepts ``mode="manual"``.
+
+    Args:
+        model: The model identifier. Anything that is not a matching string
+            returns False.
+
+    Returns:
+        True if ``model`` supports manual turn detection.
+    """
+    return isinstance(model, str) and model.startswith(MANUAL_MODE_MODEL_PREFIXES)
 
 
 def map_language_from_assemblyai(language_code: str) -> Language:
@@ -313,6 +335,21 @@ class AssemblyAISTTSettings(STTSettings):
             "max_accuracy". Only applicable to U3 Pro models; the server defaults
             to "balanced" and rejects this parameter for other models. Defaults
             to None (not sent).
+
+            "manual" turns AssemblyAI's turn detection off so Pipecat decides
+            where each turn ends: at every VAD stop the service sends its buffered
+            audio and a ``ForceEndpoint``, and AssemblyAI answers with exactly one
+            final for the turn, empty when nothing was said since the last one.
+            Pauses shorter than the VAD's ``stop_secs`` don't end the turn,
+            so entities such as phone numbers stay in one final. Without a
+            ``ForceEndpoint``, the server ends a turn only after
+            ``max_turn_silence`` of silence (10000 ms by default in this mode) or
+            60 seconds of speech; ``min_turn_silence`` ends no turns, so leave it
+            unset. Requires ``vad_force_turn_endpoint=True`` and the
+            assemblyai-stt-3-7-realtime-agent model, and doesn't support
+            ``speaker_labels`` yet. Set at construction: an update that switches
+            into or out of "manual" is ignored. See
+            https://www.assemblyai.com/docs/streaming/turn-detection#manual-mode.
     """
 
     formatted_finals: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -344,7 +381,7 @@ class AssemblyAISTTSettings(STTSettings):
         default_factory=lambda: NOT_GIVEN
     )
     voice_focus_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    mode: Literal["min_latency", "balanced", "max_accuracy"] | None | NotGiven = field(
+    mode: Literal["min_latency", "balanced", "max_accuracy", "manual"] | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -413,6 +450,9 @@ class AssemblyAISTTService(WebsocketSTTService):
                 - max_turn_silence is ALWAYS set equal to min_turn_silence
                 - VAD stop sends ForceEndpoint as ceiling
                 - No UserStarted/StoppedSpeakingFrame emitted from STT
+                With ``mode="manual"``, AssemblyAI ends no turns on its own: each VAD
+                stop's ForceEndpoint ends the turn, and the turn silence values are
+                left to the server.
                 When False (AssemblyAI turn detection mode, U3 Pro models only): AssemblyAI's model
                 controls turn endings using built-in turn detection.
                 - Uses AssemblyAI API defaults for all parameters (unless user explicitly sets them)
@@ -570,6 +610,25 @@ class AssemblyAISTTService(WebsocketSTTService):
                 "(to 'near-field' or 'far-field')."
             )
 
+        if default_settings.mode == "manual":
+            if not is_manual_mode_model(default_settings.model):
+                raise ValueError(
+                    f"mode='manual' is only supported with the "
+                    f"{', '.join(MANUAL_MODE_MODEL_PREFIXES)} model, not "
+                    f"'{default_settings.model}'."
+                )
+            if not vad_force_turn_endpoint:
+                # Nothing would send ForceEndpoint, so turns would only end after
+                # max_turn_silence.
+                raise ValueError(
+                    "mode='manual' requires vad_force_turn_endpoint=True: Pipecat's VAD "
+                    "ends each turn with a ForceEndpoint."
+                )
+            if default_settings.speaker_labels:
+                # The server applies its speaker-label turn defaults instead of
+                # manual mode.
+                raise ValueError("mode='manual' can't be combined with speaker_labels yet.")
+
         # mode (latency/accuracy preset) is U3 Pro-only; the server rejects it
         # for other models.
         if not is_u3_pro and default_settings.mode is not None:
@@ -674,10 +733,19 @@ class AssemblyAISTTService(WebsocketSTTService):
         - min_turn_silence=160
         - max_turn_silence: not set (API default)
 
+        mode="manual":
+        - Settings are left as given. The VAD stop's ForceEndpoint ends every
+          turn, and max_turn_silence is the server's only turn end, a fallback
+          for when no ForceEndpoint arrives, so the server default (10 s) applies
+          unless it is set.
+
         Args:
             settings: The settings to configure in place.
             is_u3_pro: Whether using a U3 Pro model.
         """
+        if settings.mode == "manual":
+            return
+
         if is_u3_pro:
             # U3 Pro: Synchronize max_turn_silence with min_turn_silence
             min_silence = settings.min_turn_silence
@@ -750,6 +818,21 @@ class AssemblyAISTTService(WebsocketSTTService):
                 # later reconnect too. Drop the field and leave steering as-is.
                 logger.warning(f"{self} ignoring language_codes update: {e}")
                 delta = replace(delta, language_codes=NOT_GIVEN)
+
+        # Manual mode decides how turn silence is configured at construction, and
+        # its constructor checks would be skipped here.
+        manual = self._settings.mode == "manual"
+        if is_given(delta.mode) and (delta.mode == "manual") != manual:
+            logger.warning(
+                f"{self} ignoring mode update: switching into or out of 'manual' is only "
+                "supported at construction."
+            )
+            delta = replace(delta, mode=NOT_GIVEN)
+        if manual and delta.speaker_labels:
+            logger.warning(
+                f"{self} ignoring speaker_labels update: mode='manual' doesn't support it yet."
+            )
+            delta = replace(delta, speaker_labels=NOT_GIVEN)
 
         changed = await super()._update_settings(delta)
 
@@ -848,6 +931,26 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         yield None
 
+    def _min_audio_chunk_bytes(self) -> int:
+        """Return the size of the shortest audio chunk AssemblyAI accepts."""
+        return int(MIN_AUDIO_CHUNK_MS * self.sample_rate * 2 / 1000)
+
+    async def _send_audio_tail(self, websocket):
+        """Send the audio buffered since the last full chunk.
+
+        A tail shorter than the shortest chunk AssemblyAI accepts stays buffered
+        and starts the next chunk. Padding it would insert audio and shift the
+        timestamp of every later word.
+
+        Args:
+            websocket: The open websocket to send on.
+        """
+        if not self._audio_buffer or len(self._audio_buffer) < self._min_audio_chunk_bytes():
+            return
+        tail = bytes(self._audio_buffer)
+        self._audio_buffer.clear()
+        await websocket.send(tail)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Forward a Pipecat-detected turn end to AssemblyAI as a ForceEndpoint.
 
@@ -857,13 +960,12 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
         if isinstance(frame, VADUserStoppedSpeakingFrame):
-            if (
-                self._vad_force_turn_endpoint
-                and self._websocket
-                and self._websocket.state is State.OPEN
-            ):
+            websocket = self._websocket
+            if self._vad_force_turn_endpoint and websocket and websocket.state is State.OPEN:
                 self.request_finalize()
-                await self._websocket.send(json.dumps({"type": "ForceEndpoint"}))
+                # The final covers only the audio sent before the ForceEndpoint.
+                await self._send_audio_tail(websocket)
+                await websocket.send(json.dumps({"type": "ForceEndpoint"}))
 
     @traced_stt
     async def _trace_transcription(self, transcript: str, is_final: bool, language: Language):
@@ -1048,7 +1150,11 @@ class AssemblyAISTTService(WebsocketSTTService):
         if self._websocket and self._websocket.state is State.OPEN:
             try:
                 if self._audio_buffer:
-                    await self._websocket.send(bytes(self._audio_buffer))
+                    # No audio follows the last tail, so a short one is padded
+                    # with silence up to the shortest chunk AssemblyAI accepts.
+                    silence = b"\xff" if self._encoding == "pcm_mulaw" else b"\x00"
+                    tail = bytes(self._audio_buffer).ljust(self._min_audio_chunk_bytes(), silence)
+                    await self._websocket.send(tail)
                     self._audio_buffer.clear()
 
                 # The receive loop sets the event on the acknowledgment, so it
@@ -1210,7 +1316,18 @@ class AssemblyAISTTService(WebsocketSTTService):
             - end_of_turn → TranscriptionFrame + UserStoppedSpeakingFrame
             - else → InterimTranscriptionFrame
         """
+        # Determine if this is a final turn from AssemblyAI
+        is_final_turn = message.end_of_turn and (
+            not self._settings.format_turns or message.turn_is_formatted
+        )
+
         if not message.transcript:
+            # A ForceEndpoint gets a final even when nothing was said since the
+            # last one. It still confirms the finalize, so the user turn doesn't
+            # wait out the STT timeout for a transcript that isn't coming.
+            if self._vad_force_turn_endpoint and is_final_turn:
+                self.confirm_finalize()
+                await self._push_transcription_finalized()
             return
 
         # Use detected language if available with sufficient confidence
@@ -1223,11 +1340,6 @@ class AssemblyAISTTService(WebsocketSTTService):
                     f"Low language detection confidence ({message.language_confidence:.2f}) "
                     f"for language '{message.language_code}', falling back to English"
                 )
-
-        # Determine if this is a final turn from AssemblyAI
-        is_final_turn = message.end_of_turn and (
-            not self._settings.format_turns or message.turn_is_formatted
-        )
 
         # Only final turns carry speakers, so only they are split and formatted.
         runs = self._turn_runs(message) if is_final_turn else []
