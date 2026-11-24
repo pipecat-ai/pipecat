@@ -163,6 +163,8 @@ class GradiumTTSService(WebsocketTTSService):
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta and reconnect if voice changed.
 
+        A model change applies to the next context, whose setup message names it.
+
         Args:
             delta: A :class:`TTSSettings` (or ``GradiumTTSService.Settings``) delta.
 
@@ -174,7 +176,7 @@ class GradiumTTSService(WebsocketTTSService):
             await self._disconnect()
             await self._connect()
         else:
-            self._warn_unhandled_updated_settings(changed)
+            self._warn_unhandled_updated_settings(changed.keys() - {"model"})
         return changed
 
     def _build_setup_msg(self, context_id: str) -> dict:
@@ -185,6 +187,7 @@ class GradiumTTSService(WebsocketTTSService):
         """
         setup_msg: dict[str, Any] = {
             "type": "setup",
+            "model_name": self._settings.model,
             "output_format": "pcm",
             "voice_id": self._settings.voice,
             "close_ws_on_eos": False,
