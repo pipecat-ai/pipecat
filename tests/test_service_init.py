@@ -35,6 +35,7 @@ import importlib
 import inspect
 import pkgutil
 from dataclasses import fields
+from unittest.mock import patch
 
 import pytest
 
@@ -110,6 +111,10 @@ def _try_instantiate(cls):
             continue
         # Required parameter — pass a dummy string
         kwargs[name] = "test"
+    if cls.__module__ == "pipecat.services.moondream.vision":
+        # Keep settings validation independent of model weights.
+        with patch(f"{cls.__module__}.load_model", return_value=object()):
+            return cls(**kwargs)
     return cls(**kwargs)
 
 
