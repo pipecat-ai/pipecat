@@ -1500,3 +1500,111 @@ async def test_a_finished_stream_cannot_be_reconnected(monkeypatch):
     await service._receive_messages()
 
     assert service._reconnect_tracker is None
+
+
+@pytest.mark.asyncio
+async def test_audio_and_keepalives_are_tracked_for_resend():
+    service, websocket = _service_with_reconnect_offer()
+
+    async for _ in service.run_stt(b"audio"):
+        pass
+    await service._send_keepalive(b"")
+
+    assert _sent_payloads(websocket) == [b"audio", '{"type": "keepalive"}']
+    assert service._reconnect_tracker.unacknowledged_after(0) == [
+        (1, b"audio"),
+        (2, '{"type": "keepalive"}'),
+    ]
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.asyncio
+async def test_connect_runs_the_ping_task_only_when_reconnect_is_enabled(monkeypatch, enabled):
+    service, _ = _connected_service(settings=SonioxSTTService.Settings(enable_reconnect=enabled))
+    service._task_manager = service._setup.task_manager
+    monkeypatch.setattr(service, "_connect_websocket", AsyncMock())
+    monkeypatch.setattr(service, "_receive_task_handler", AsyncMock())
+
+    await service._connect()
+    assert (service._ping_task is not None) is enabled
+
+    await service._disconnect()
+    assert service._ping_task is None
+
+
+async def _run_ping_task(service, monkeypatch):
+    """Run a few rounds of the ping task with no wait between them."""
+    monkeypatch.setattr("pipecat.services.soniox.stt.PING_INTERVAL_S", 0)
+    task = asyncio.create_task(service._ping_task_handler())
+    for _ in range(3):
+        await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+class _Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.mark.asyncio
+async def test_ping_task_pings_an_open_connection(monkeypatch):
+    service, websocket = _service_with_reconnect_offer()
+
+    await _run_ping_task(service, monkeypatch)
+
+    pings = [json.loads(payload) for payload in _sent_payloads(websocket)]
+    assert pings and all(ping["type"] == "ping" for ping in pings)
+    websocket.transport.abort.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ping_task_aborts_the_connection_when_a_pong_is_overdue(monkeypatch):
+    service, websocket = _service_with_reconnect_offer()
+    clock = _Clock()
+    service._reconnect_tracker = SonioxReconnectTracker(clock=clock)
+    service._reconnect_tracker.handle_server_message(_RECONNECT_OFFER)
+    service._reconnect_tracker.create_ping()
+    clock.now = 10
+
+    await _run_ping_task(service, monkeypatch)
+
+    websocket.transport.abort.assert_called()
+    assert _sent_payloads(websocket) == []
+
+
+@pytest.mark.asyncio
+async def test_ping_task_waits_while_disconnected(monkeypatch):
+    service, websocket = _service_with_reconnect_offer()
+    service._websocket = None
+
+    await _run_ping_task(service, monkeypatch)
+
+    assert _sent_payloads(websocket) == []
+
+
+@pytest.mark.asyncio
+async def test_ping_task_keeps_running_when_a_ping_send_fails(monkeypatch):
+    service, websocket = _service_with_reconnect_offer()
+    websocket.send = AsyncMock(side_effect=ConnectionResetError("send failed"))
+
+    await _run_ping_task(service, monkeypatch)
+
+    assert websocket.send.await_count > 1
+
+
+@pytest.mark.asyncio
+async def test_a_replaced_connection_is_ignored_without_ending_the_stream(monkeypatch):
+    service, _ = _service_with_reconnect_offer()
+    replaced = {"tokens": [], "error_code": 400, "error_type": "connection_replaced"}
+    service._websocket = _FakeWebsocket([json.dumps(replaced)])
+    monkeypatch.setattr(service, "push_error", AsyncMock())
+
+    await service._receive_messages()
+
+    service.push_error.assert_not_awaited()
+    assert service._reconnect_tracker.can_reconnect
