@@ -206,7 +206,8 @@ class BaseDeepgramSTTSettings(STTSettings):
         punctuate: Add punctuation to transcripts.
         redact: Redact sensitive information (str or list of redaction types).
         redact_usage: Store ``keyterm``, ``keywords``, ``replace``, ``search``
-            and ``extra`` as ``[REDACTED]`` in Deepgram's usage records.
+            and ``extra`` as ``[REDACTED]`` in Deepgram's usage records, plus
+            ``custom_topic`` and ``custom_intent`` on pre-recorded requests.
             Transcription and the response are unaffected.
         replace: Word replacement rules (str or list).
         search: Search terms to highlight (str or list of str).
