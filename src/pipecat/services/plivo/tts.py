@@ -454,7 +454,6 @@ class PlivoTTSService(WebsocketTTSService):
                     word_times.append((word.group(), start, end))
                 await self.add_word_timestamps(word_times, context_id)
             elif event["type"] == "done":
-                logger.debug(f"{self}: Plivo done: {event}")
                 await self.remove_audio_context(context_id)
             elif event["type"] == "error":
                 await self.stop_all_metrics()

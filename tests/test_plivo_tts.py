@@ -400,7 +400,6 @@ async def test_protocol_roundtrip(plivo, logged, client_ref, headers):
     authorization = "Basic " + b64encode(b"MA_TEST:secret").decode()
     assert plivo.connects == [(url, {"Authorization": authorization} | headers)]
     assert any(f"Plivo API ID {plivo.api_id}" in line for line in logged)
-    assert any("Plivo done" in line for line in logged)
     played = (TTSStartedFrame, TTSAudioRawFrame, TTSStoppedFrame)
     started, audio, stopped = [frame for frame in down if isinstance(frame, played)]
     assert (audio.audio, audio.sample_rate, audio.num_channels) == (AUDIO, 16000, 1)
