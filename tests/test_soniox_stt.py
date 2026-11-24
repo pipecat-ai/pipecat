@@ -33,6 +33,7 @@ from pipecat.observers.bot_speech_observer import BotSpeechObserver
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
+from pipecat.services.soniox.stream_reconnect import SonioxStreamReconnect
 from pipecat.services.soniox.stt import (
     DEFAULT_AGENT_TEXT_LEAD_MS,
     END_TOKEN,
@@ -52,11 +53,13 @@ from tests.frame_processor_helpers import frame_processor_setup
 
 
 class _FakeWebsocket:
-    def __init__(self, messages, *, state=State.OPEN, send_side_effect=None):
+    def __init__(self, messages, *, state=State.OPEN, send_side_effect=None, replies=()):
         self._messages = messages
         self.state = state
         self.closed = False
         self.send = AsyncMock(side_effect=send_side_effect)
+        self.recv = AsyncMock(side_effect=[json.dumps(reply) for reply in replies])
+        self.transport = MagicMock()
 
     async def close(self):
         self.closed = True
@@ -1348,3 +1351,152 @@ async def test_setup_does_not_observe_the_pipeline_for_a_model_without_agent_tex
     await service.setup(frame_processor_setup(TaskManager(), pipeline_worker=worker))
 
     assert not worker.add_observer.called
+
+
+_RECONNECT_OFFER = {
+    "type": "reconnect",
+    "reconnect_url": "wss://soniox/reconnect",
+    "reconnect_token": "t1",
+}
+
+
+def _resumable_service(**kwargs):
+    """A connected service whose stream Soniox has offered to resume."""
+    service, websocket = _connected_service(
+        settings=SonioxSTTService.Settings(enable_reconnect=True), **kwargs
+    )
+    service._stream = SonioxStreamReconnect()
+    service._stream.handle_message(_RECONNECT_OFFER)
+    return service, websocket
+
+
+def _fake_connections(monkeypatch, *websockets):
+    """Hand out the given sockets, one per connect, recording each URL."""
+    urls = []
+    remaining = list(websockets)
+
+    async def fake_websocket_connect(url, **kwargs):
+        urls.append(url)
+        return remaining.pop(0)
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    return urls
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.asyncio
+async def test_connect_config_requests_reconnect_only_when_enabled(monkeypatch, enabled):
+    settings = SonioxSTTService.Settings(enable_reconnect=enabled)
+
+    config = await _connect_config(monkeypatch, settings=settings)
+
+    assert config.get("enable_reconnect") is (True if enabled else None)
+
+
+@pytest.mark.asyncio
+async def test_messages_sent_while_the_connection_is_down_are_held_for_the_next():
+    service, _ = _resumable_service()
+    service._websocket = None
+
+    await service._send(b"audio")
+    await service._send_stop_recording()
+
+    assert service._stream.held_after(0) == [(1, b"audio"), (2, "")]
+
+
+@pytest.mark.asyncio
+async def test_a_lost_connection_is_left_without_ending_the_stream():
+    service, websocket = _resumable_service()
+
+    await service._disconnect_websocket()
+
+    # A close, with status 1000, would end the stream.
+    assert not websocket.closed
+    assert service._websocket is None
+    assert service._stream.resumable
+
+
+@pytest.mark.asyncio
+async def test_disconnecting_ends_the_stream():
+    service, websocket = _resumable_service()
+
+    await service._disconnect()
+
+    assert websocket.closed
+    assert service._stream is None
+
+
+@pytest.mark.asyncio
+async def test_connect_resumes_the_stream_and_resends_what_soniox_lacks(monkeypatch):
+    service, _ = _resumable_service()
+    for message in (b"a", b"b", b"c"):
+        await service._send(message)
+    service._websocket = None
+    reconnected = {"type": "reconnected", "reconnect_token": "t2", "last_request": 1}
+    websocket = _FakeWebsocket([], replies=[reconnected])
+    urls = _fake_connections(monkeypatch, websocket)
+
+    await service._connect_websocket()
+
+    assert urls == ["wss://soniox/reconnect"]
+    request, *resent = _sent_payloads(websocket)
+    assert json.loads(request) == {"type": "reconnect", "reconnect_token": "t1", "last_seq": 0}
+    assert resent == [b"b", b"c"]
+    assert service._websocket is websocket
+
+
+@pytest.mark.asyncio
+async def test_a_refused_reconnect_starts_a_new_stream(monkeypatch):
+    service, _ = _resumable_service()
+    service._websocket = None
+    refused = {"tokens": [], "error_code": 400, "error_type": "reconnect_failed"}
+    refusing, fresh = _FakeWebsocket([], replies=[refused]), _FakeWebsocket([])
+    urls = _fake_connections(monkeypatch, refusing, fresh)
+
+    await service._connect_websocket()
+
+    assert urls == ["wss://soniox/reconnect", service._url]
+    refusing.transport.abort.assert_called_once()
+    assert json.loads(_sent_payloads(fresh)[0])["enable_reconnect"] is True
+    assert service._websocket is fresh
+    assert not service._stream.resumable
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_stream_ends_the_transcript_begun_before_the_drop(monkeypatch):
+    service, _ = _resumable_service()
+    service._final_transcription_buffer = [{"text": "Hello", "is_final": True}]
+    end = {"text": END_TOKEN, "is_final": True}
+    service._websocket = _FakeWebsocket(
+        [
+            json.dumps({"type": "pong", "id": 1}),
+            json.dumps({"tokens": [{"text": " there", "is_final": True}, end], "seq": 4}),
+        ]
+    )
+
+    transcripts = []
+
+    async def fake_push_frame(frame, direction=None):
+        if isinstance(frame, TranscriptionFrame):
+            transcripts.append(frame.text)
+
+    monkeypatch.setattr(service, "push_frame", fake_push_frame)
+    monkeypatch.setattr(service, "_handle_transcription", AsyncMock())
+    monkeypatch.setattr(service, "emit_stt_usage_metrics", AsyncMock())
+
+    await service._receive_messages()
+
+    assert transcripts == ["Hello there"]
+    assert json.loads(service._stream.reconnect_request())["last_seq"] == 4
+
+
+@pytest.mark.asyncio
+async def test_soniox_ending_the_stream_stops_it_being_resumed(monkeypatch):
+    service, _ = _resumable_service()
+    service._websocket = _FakeWebsocket([json.dumps({"tokens": [], "finished": True, "seq": 1})])
+
+    await service._receive_messages()
+
+    assert service._stream is None
