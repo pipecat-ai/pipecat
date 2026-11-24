@@ -733,6 +733,37 @@ class TestJudgeExplainerPrompts(unittest.IsolatedAsyncioTestCase):
         await judge.evaluate("describes the weather")
         self.assertEqual(llm.calls[0]["max_tokens"], 64)
 
+    async def _explain_run(self, **kwargs) -> int:
+        """The ``max_tokens`` a run with three verdicts to explain asks the explainer with."""
+        llm = _FakeLLMService(
+            ['{"goal": "never booked", "turns": {"polite": {"1": "curt", "2": "curt"}}}']
+        )
+        judge, _ = _judge(
+            lambda state, questions: (
+                {"answer": YesNoResult(probability=0.1)}
+                if "latest_bot_reply" not in state
+                else {name: _turn(0.1) for name in questions}
+            ),
+            explainer=llm,
+            **kwargs,
+        )
+        judge.add_user_message("Book a table at six.")
+        judge.add_assistant_message("No.")
+        judge.add_user_message("Please?")
+        judge.add_assistant_message("Still no.")
+        verdicts = await judge.evaluate_run({"polite": "is polite"}, "a table is booked")
+        self.assertEqual(verdicts.goal.reason, "never booked")
+        self.assertEqual([v.reason for v in verdicts.turns["polite"]], ["curt", "curt"])
+        self.assertEqual(len(llm.calls), 1)
+        return llm.calls[0]["max_tokens"]
+
+    async def test_max_tokens_raises_the_cap_on_a_run(self):
+        self.assertEqual(await self._explain_run(max_tokens=2000), 2000)
+
+    async def test_a_run_keeps_room_for_its_reasons_under_a_small_max_tokens(self):
+        self.assertEqual(await self._explain_run(max_tokens=64), 300)
+        self.assertEqual(await self._explain_run(), 300)
+
 
 class TestJudgeConfig(unittest.IsolatedAsyncioTestCase):
     def test_the_default_judge_classifies_and_explains_with_one_llm(self):
