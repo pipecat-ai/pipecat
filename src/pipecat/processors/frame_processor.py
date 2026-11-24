@@ -1202,9 +1202,18 @@ class FrameProcessor(BaseObject):
 
         Returns:
             Whether ``frame`` was in progress and its processing was cancelled.
+
+        Raises:
+            RuntimeError: If called from the processing of ``frame`` itself,
+                which can't cancel itself.
         """
         if self.__process_current_frame is not frame or not self.__process_frame_task:
             return False
+        if asyncio.current_task() is self.__process_frame_task:
+            raise RuntimeError(
+                f"{self}: {frame} can't be cancelled from its own processing; cancel it "
+                "while processing a system frame"
+            )
         await self.__cancel_process_task()
         self.__process_frame_task = self.create_task(self.__process_frame_task_handler())
         return True

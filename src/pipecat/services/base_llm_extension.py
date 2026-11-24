@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
-from pipecat.frames.frames import Frame, FunctionCallFromLLM
+from pipecat.frames.frames import Frame, FunctionCallFromLLM, LLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.utils.base_object import BaseObject
 
@@ -55,7 +55,9 @@ class BaseLLMExtension(BaseObject):
     An LLM extension is a pluggable feature or behavior of an
     :class:`~pipecat.services.llm_service.LLMService`. It can add to the
     service's system instruction, watch the frames the service processes,
-    filter what the service pushes, and push frames of its own.
+    filter what the service pushes, and push frames of its own. It can also
+    have the service act: run function calls, process a frame, or cancel its
+    inference in progress.
 
     Extensions wrap the service the way middleware wraps a handler: as the
     layers of an onion, with the service at the center. :attr:`order` places
@@ -109,7 +111,10 @@ class BaseLLMExtension(BaseObject):
       :meth:`filter_function_calls`, which can drop some;
     - sends the frames it pushes with :meth:`push_frame` and
       :meth:`broadcast_frame` through the extensions "farther" from the
-      service than it, then out of the service.
+      service than it, then out of the service;
+    - acts when it asks: runs function calls (:meth:`run_function_calls`),
+      processes a frame (:meth:`queue_frame`), or cancels its inference in
+      progress (:meth:`cancel_inference_in_progress`).
 
     A service holds one extension of each class, which
     :meth:`~pipecat.services.llm_service.LLMService.get_extension` finds. If a
@@ -120,6 +125,10 @@ class BaseLLMExtension(BaseObject):
 
       - `on_push_frame`: Indicates the extension wants to push a frame.
       - `on_broadcast_frame`: Indicates the extension wants to broadcast a frame.
+      - `on_run_function_calls`: Indicates the extension wants function calls run.
+      - `on_queue_frame`: Indicates the extension wants the service to process a frame.
+      - `on_cancel_inference_in_progress`: Indicates the extension wants the
+        service's inference for a context frame cancelled.
     """
 
     order: int = 0
@@ -144,6 +153,9 @@ class BaseLLMExtension(BaseObject):
         super().__init__(**kwargs)
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
+        self._register_event_handler("on_run_function_calls", sync=True)
+        self._register_event_handler("on_queue_frame", sync=True)
+        self._register_event_handler("on_cancel_inference_in_progress", sync=True)
 
     @property
     def attached_service(self) -> LLMService | None:
@@ -264,3 +276,45 @@ class BaseLLMExtension(BaseObject):
             **kwargs: Keyword arguments passed to the frame's constructor.
         """
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
+
+    async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
+        """Run function calls of the extension's own, as the service runs its LLM's.
+
+        The calls go through the :meth:`filter_function_calls` of each
+        extension "farther" from the service than this one, then run.
+
+        Args:
+            function_calls: The function calls to run.
+        """
+        await self._call_event_handler("on_run_function_calls", function_calls)
+
+    async def queue_frame(
+        self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
+    ):
+        """Queue a frame for the service to process, as if it came from the pipeline.
+
+        The frame goes through every extension's :meth:`process_frame`, this
+        one's included, then the service handles it.
+
+        Args:
+            frame: The frame to queue.
+            direction: The direction of frame processing.
+        """
+        await self._call_event_handler("on_queue_frame", frame, direction)
+
+    async def cancel_inference_in_progress(self, context_frame: LLMContextFrame):
+        """Cancel the service's inference for a context frame, if it is the one in progress.
+
+        The response ends there: what the inference already pushed stays, and
+        the frames queued behind the context frame are processed next. If the
+        service is processing any other frame, nothing happens.
+
+        Call it while processing a system frame, which the service handles
+        apart from its inference. A call from the inference itself (from
+        :meth:`filter_push_frame` or :meth:`filter_function_calls` on what the
+        inference outputs) is refused.
+
+        Args:
+            context_frame: The context frame whose inference to cancel.
+        """
+        await self._call_event_handler("on_cancel_inference_in_progress", context_frame)
