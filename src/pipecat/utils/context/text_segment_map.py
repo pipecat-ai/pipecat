@@ -225,6 +225,8 @@ class TextSegmentMap:
         original_text: str,
         llm_text: str | None = None,
         llm_markup: re.Pattern[str] | None = None,
+        *,
+        literal_word_timestamps: bool = False,
     ):
         """Line the three texts up against each other.
 
@@ -241,8 +243,11 @@ class TextSegmentMap:
                 than being diffed. Defaults to *original_text*.
             llm_markup: Tags only *llm_text* carries, beyond ``<...>`` markup,
                 which its cursor passes over without counting their letters.
+            literal_word_timestamps: Whether spaces, punctuation and combining
+                marks can each arrive as their own timestamp.
         """
         self._tts_text = tts_text
+        self._literal_word_timestamps = literal_word_timestamps
         self._original_text = original_text
         self._llm_text = llm_text if llm_text is not None else original_text
         # The LLM text as its cursor reads it: the extra tags blanked to ``<...>``
@@ -690,7 +695,7 @@ class TextSegmentMap:
             # event will ever name. Take it now so the segment can finish.
             # Unchanged segments are not given this: a trailing emoji there is
             # real output, and its own event is still coming.
-            if not has_alnum(seg.tts[new_pos:]):
+            if not self._has_timestamp_text(seg.tts[new_pos:]):
                 new_pos = len(seg.tts)
         else:
             self._keep_derived_cursors_in_pace(seg, new_pos)
@@ -746,6 +751,9 @@ class TextSegmentMap:
         crossed it.
         """
         self._llm_spoken_pos = advance_by_chars(self._llm_scan, self._llm_spoken_pos, len(crossed))
+        if self._literal_word_timestamps:
+            self._llm_pos = self._llm_spoken_pos
+            return
         self._llm_pos = max(
             advance_by_alnums(self._llm_scan, self._llm_pos, n_alnum), self._llm_spoken_pos
         )
@@ -843,7 +851,8 @@ class TextSegmentMap:
         self._last_leading_duplicate = 0
 
         if word:
-            self._last_leading_duplicate = self._leading_duplicate_len(word)
+            if not self._literal_word_timestamps:
+                self._last_leading_duplicate = self._leading_duplicate_len(word)
             self._consume_word(word)
 
     def _leading_duplicate_len(self, word: str) -> int:
@@ -996,9 +1005,10 @@ class TextSegmentMap:
 
     @property
     def is_complete(self) -> bool:
-        """True once every letter and digit in the text has been spoken.
+        """True once every character the provider timestamps has been spoken.
 
-        This is not the same as the cursor reaching the end. If all that is left
+        With literal timestamps a space or combining mark can still arrive on
+        its own. For word-based timestamps, if all that is left
         is punctuation or tags, the text counts as finished even though those
         characters have not been walked over, because no word event is coming
         for them.
@@ -1012,11 +1022,16 @@ class TextSegmentMap:
         if self._seg_idx >= len(self._segments):
             return True
         seg = self._segments[self._seg_idx]
-        if has_alnum(seg.tts[self._seg_raw_pos :]):
+        if self._has_timestamp_text(seg.tts[self._seg_raw_pos :]):
             return False
         if self._pending_separated_punctuation(seg.tts[self._seg_raw_pos :]):
             return False
-        return all(not has_alnum(s.tts) for s in self._segments[self._seg_idx + 1 :])
+        return all(not self._has_timestamp_text(s.tts) for s in self._segments[self._seg_idx + 1 :])
+
+    def _has_timestamp_text(self, text: str) -> bool:
+        if self._literal_word_timestamps:
+            return bool(text and (text[0] != "<" or strip_complete_markup(text)))
+        return has_alnum(text)
 
     @staticmethod
     def _pending_separated_punctuation(remaining: str) -> bool:

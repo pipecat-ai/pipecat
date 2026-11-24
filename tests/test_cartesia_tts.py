@@ -32,6 +32,7 @@ from pipecat.services.cartesia.tts import (
     language_to_cartesia_language,
 )
 from pipecat.services.settings import TTSSettings
+from pipecat.services.tts_service import TextAggregationMode, TTSContext
 from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 from pipecat.utils.context.aggregated_frame_sequencer import AggregatedFrameSequencer
@@ -196,15 +197,22 @@ async def _queued_word_timestamps(language, batches) -> list[WordTimestamp]:
 
 
 async def _assert_timestamp_transcript(
-    words: list[WordTimestamp], sentence: str
+    language: str, words: list[WordTimestamp], sentence: str, *, streaming: bool = False
 ) -> list[TTSTextFrame]:
-    seq = AggregatedFrameSequencer()
-    await seq.register_spoken(
-        AggregatedTextFrame(sentence, TextType.SENTENCE, raw_text=sentence),
-        "ctx1",
-        sentence,
-        append_to_context=True,
+    service = CartesiaTTSService(
+        api_key="test",
+        settings=CartesiaTTSService.Settings(voice="voice", language=language),
+        text_aggregation_mode=TextAggregationMode.TOKEN
+        if streaming
+        else TextAggregationMode.SENTENCE,
     )
+    service._tts_contexts["ctx1"] = TTSContext()
+    service._push_sequencer_frames = AsyncMock()
+    seq = service._aggregated_frame_sequencer
+    for text in list(sentence) if streaming else [sentence]:
+        frame = AggregatedTextFrame(text, TextType.TOKEN if streaming else TextType.SENTENCE)
+        await service._register_spoken_text(frame, text, "ctx1")
+    await seq.finalize("ctx1")
     frames = [
         frame
         for w in words
@@ -213,6 +221,7 @@ async def _assert_timestamp_transcript(
         )
         if isinstance(frame, TTSTextFrame)
     ]
+    frames.extend(f for f in seq.force_complete("ctx1", 0) if isinstance(f, TTSTextFrame))
     context = LLMContext()
     await run_test(
         LLMAssistantAggregator(context),
@@ -244,7 +253,7 @@ async def test_thai_timestamps_preserve_spacing_and_marks_in_the_transcript(lang
     assert [w.end for w in words] == [1, 2, 3, 4, 5, 6, 8, 9, 10, None, None]
 
     sentence = "สวัสดี  ค่ะ\t คุณ"
-    frames = await _assert_timestamp_transcript(words, sentence)
+    frames = await _assert_timestamp_transcript(language, words, sentence)
     assert "".join(frame.text for frame in frames) == sentence
 
 
@@ -261,7 +270,26 @@ async def test_timestamp_spacing_in_the_assistant_transcript(language, batches, 
     words = await _queued_word_timestamps(
         language, [{"words": group, "start": [0.0] * len(group)} for group in batches]
     )
-    await _assert_timestamp_transcript(words, sentence)
+    await _assert_timestamp_transcript(language, words, sentence)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_thai_tokens_can_split_a_mark_or_cross_a_sentence_boundary(streaming):
+    tokens = ["สวัสด", "ี ค่ะ", "! ขอที่อย", "ู่"]
+    words = await _queued_word_timestamps(
+        "th", [{"words": [token], "start": [i]} for i, token in enumerate(tokens)]
+    )
+    sentence = "".join(tokens)
+    frames = await _assert_timestamp_transcript("th", words, sentence, streaming=streaming)
+    assert "".join(frame.text for frame in frames) == sentence
+
+
+def test_final_thai_mark_precedes_an_unspoken_synthesis_tag():
+    tracker = WordCompletionTracker("สวัสดี<break/>", llm_text="สวัสดี", literal_word_timestamps=True)
+    assert not tracker.add_word_and_check_complete("สวัสด")
+    assert tracker.add_word_and_check_complete("ี")
+    assert tracker.get_llm_consumed() == "สวัสดี"
 
 
 def _concatenate_processed_timestamps(

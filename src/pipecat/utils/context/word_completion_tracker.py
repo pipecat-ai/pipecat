@@ -71,6 +71,8 @@ class WordCompletionTracker:
         llm_text: str | None = None,
         user_facing_text: str | None = None,
         llm_markup: re.Pattern[str] | None = None,
+        *,
+        literal_word_timestamps: bool = False,
     ):
         """Initialize the tracker with the frame's three texts.
 
@@ -88,6 +90,8 @@ class WordCompletionTracker:
                 Defaults to ``tts_text`` with markup stripped.
             llm_markup: Tags only ``llm_text`` carries, beyond ``<...>`` markup,
                 which word tracking passes over in it.
+            literal_word_timestamps: Whether the provider can timestamp individual
+                spaces, punctuation and combining marks.
         """
         # --- The three texts ---
         self._tts_text = tts_text
@@ -98,6 +102,7 @@ class WordCompletionTracker:
             user_facing_text if user_facing_text is not None else strip_complete_markup(tts_text)
         )
         self._llm_text = llm_text
+        self._literal_word_timestamps = literal_word_timestamps
 
         # --- Cursors into two of them ---
         # The map owns the authoritative positions; these mirror it, and only
@@ -111,7 +116,6 @@ class WordCompletionTracker:
         # --- Answers about the most recent word ---
         # Rewritten by every add_word_and_check_complete call and read back
         # through the get_* accessors.
-        self._preserve_word_spacing = False
         self._frame_word: str | None = None  # this frame's share of the word
         self._overflow_word: str | None = None  # the next frame's share
         self._llm_consumed: str | None = None  # LLM text the word stands for
@@ -121,12 +125,14 @@ class WordCompletionTracker:
         self._force_completed = False
 
         self._segment_map = TextSegmentMap(
-            tts_text, self._user_facing_text, llm_text, llm_markup=llm_markup
+            tts_text,
+            self._user_facing_text,
+            llm_text,
+            llm_markup=llm_markup,
+            literal_word_timestamps=literal_word_timestamps,
         )
 
-    def add_word_and_check_complete(
-        self, word: str, *, includes_inter_frame_spaces: bool = False
-    ) -> bool:
+    def add_word_and_check_complete(self, word: str) -> bool:
         """Record one word the TTS provider reported speaking.
 
         Three things can happen, in this order:
@@ -146,13 +152,10 @@ class WordCompletionTracker:
                 none of those need special handling from the caller. Services
                 such as Inworld use ``merge_punct_tokens`` to attach separately
                 reported punctuation to a word.
-            includes_inter_frame_spaces: Whether the token carries its own spacing
-                between frames. Its explicit whitespace belongs in the transcript.
 
         Returns:
             True once nothing is left for this frame to speak.
         """
-        self._preserve_word_spacing = includes_inter_frame_spaces and word != word.strip()
         self._frame_word = None
         self._overflow_word = None
         self._llm_consumed = None
@@ -366,7 +369,7 @@ class WordCompletionTracker:
         return self._trim_word_span(self._llm_consumed) or None
 
     def _trim_word_span(self, text: str | None) -> str | None:
-        return text if self._preserve_word_spacing or text is None else text.strip()
+        return text if self._literal_word_timestamps or text is None else text.strip()
 
     def get_accumulated_user_facing_text(self) -> str:
         """Return the part of the frame spoken so far, as the user sees it.
@@ -405,18 +408,19 @@ class WordCompletionTracker:
             return None
         return self._llm_text[: self._llm_spoken_pos]
 
-    def get_remaining_tts_text(self, strip: bool = True) -> str:
+    def get_remaining_tts_text(self, strip: bool | None = None) -> str:
         """Return what this frame still has left to speak.
 
         Callers ending a frame early emit this, so text the provider never
         reported still reaches the conversation context.
 
         Args:
-            strip: Whether to trim surrounding whitespace. Pass False to keep the
-                leading space, so accumulated + remaining reproduces ``tts_text``
-                exactly.
+            strip: Whether to trim surrounding whitespace. By default literal
+                timestamps keep it and word-based timestamps trim it.
         """
         remaining = self._tts_text[self._segment_map.raw_pos :]
+        if strip is None:
+            strip = not self._literal_word_timestamps
         return remaining.strip() if strip else remaining
 
     def get_remaining_llm_text(self) -> str | None:
@@ -428,16 +432,15 @@ class WordCompletionTracker:
         """
         if self._llm_text is None:
             return None
-        remaining = self._llm_text[self._llm_spoken_pos :].strip()
-        return remaining if remaining else None
+        return self._trim_word_span(self._llm_text[self._llm_spoken_pos :]) or None
 
     @property
     def is_complete(self) -> bool:
         """True when this frame has nothing left to speak.
 
-        Alphanumeric content is what counts, so a frame whose remainder is only
-        punctuation or a closing tag is already finished -- no word will ever
-        arrive for those.
+        Word-based timestamps finish with the last letter or digit. Literal
+        timestamps can still report trailing punctuation, spaces or combining
+        marks. A closing synthesis tag needs no timestamp.
         """
         return self._force_completed or self._segment_map.is_complete
 

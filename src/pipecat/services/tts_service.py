@@ -480,6 +480,11 @@ class TTSService(AIService):
         return self._text_aggregator.language
 
     @property
+    def _literal_word_timestamps(self) -> bool:
+        """Whether timestamp tokens can report every character, including spaces and marks."""
+        return False
+
+    @property
     def supports_processing_metrics(self) -> bool:
         """Whether this service has a meaningful processing-time metric.
 
@@ -1958,6 +1963,7 @@ class TTSService(AIService):
                 append_to_context=self._tts_contexts[context_id].append_to_context,
                 build_tracker=not self._push_text_frames,
                 language=self.text_aggregation_language,
+                literal_word_timestamps=self._literal_word_timestamps,
             ),
             context_id,
         )

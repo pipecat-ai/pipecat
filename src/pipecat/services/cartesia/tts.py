@@ -524,6 +524,10 @@ class CartesiaTTSService(WebsocketTTSService):
         language = assert_given(self._settings.language)
         return (language or "").split("-")[0].lower()
 
+    @property
+    def _literal_word_timestamps(self) -> bool:
+        return self._timestamp_language() == "th"
+
     _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
 
     def _strip_cartesia_tags(self, text: str) -> str:
@@ -537,7 +541,7 @@ class CartesiaTTSService(WebsocketTTSService):
         (``"<spell>1234</spell>."`` must stay ``"1234."``, not ``"1234 ."``, or the
         token no longer matches the text that was sent for synthesis).
         """
-        if self._timestamp_language() == "th":
+        if self._literal_word_timestamps:
             return self._CARTESIA_TAG_RE.sub("", text)
 
         def replace(match: re.Match) -> str:

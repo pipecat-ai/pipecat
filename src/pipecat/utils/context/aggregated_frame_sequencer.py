@@ -229,12 +229,15 @@ class _StreamingContext:
         text_type: The text type of a promoted sentence: ``SENTENCE`` for
             streamed tokens, or the type the context's text was given with, such
             as a ``TTSSpeakFrame``'s.
+        literal_word_timestamps: Whether the provider timestamps individual
+            spaces and marks as well as words.
     """
 
     aggregator: "_ParallelSentenceAggregator"
     append_to_context: bool
     build_tracker: bool
     text_type: TextType | str = TextType.SENTENCE
+    literal_word_timestamps: bool = False
 
 
 class AggregatedFrameSequencer:
@@ -319,6 +322,7 @@ class AggregatedFrameSequencer:
         includes_inter_frame_spaces: bool = False,
         *,
         language: str | None = None,
+        literal_word_timestamps: bool = False,
     ) -> list[Frame]:
         """Register a spoken AggregatedTextFrame slot.
 
@@ -341,6 +345,8 @@ class AggregatedFrameSequencer:
             frame: The AggregatedTextFrame being spoken (one token when streaming).
             language: Sentence tokenizer for this text and subsequent boundary
                 checks on the context's pending sentence.
+            literal_word_timestamps: Whether each character can arrive in its
+                own timestamp, including spaces, punctuation and combining marks.
             context_id: The TTS context ID assigned to this frame.
             tts_text: The text actually sent to the TTS for this call (may differ
                 from ``frame.text`` after filters/transforms).
@@ -369,6 +375,7 @@ class AggregatedFrameSequencer:
                     llm_text=frame.raw_text or frame.text,
                     user_facing_text=frame.text,
                     llm_markup=self.llm_markup,
+                    literal_word_timestamps=literal_word_timestamps,
                 )
                 if build_tracker
                 else None,
@@ -383,6 +390,7 @@ class AggregatedFrameSequencer:
                 append_to_context,
                 build_tracker,
                 TextType.SENTENCE if frame.text_type == TextType.TOKEN else frame.text_type,
+                literal_word_timestamps,
             )
         sc = self._streaming_contexts[context_id]
         sc.aggregator.set_language(language)
@@ -548,9 +556,7 @@ class AggregatedFrameSequencer:
                     )
                     return []
 
-            is_complete = active.tracker.add_word_and_check_complete(
-                word, includes_inter_frame_spaces=includes_inter_frame_spaces
-            )
+            is_complete = active.tracker.add_word_and_check_complete(word)
             raw_overflow_word = active.tracker.get_overflow_word()
         elif self._streaming and active is None:
             self._buffered_words.append(
@@ -854,6 +860,7 @@ class AggregatedFrameSequencer:
                 llm_text=agg.llm_text or None,
                 user_facing_text=agg.user_facing_text,
                 llm_markup=self.llm_markup,
+                literal_word_timestamps=sc.literal_word_timestamps,
             )
             if sc.build_tracker
             else None
