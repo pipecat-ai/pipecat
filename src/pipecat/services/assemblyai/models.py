@@ -139,9 +139,28 @@ class SpeakerRevisionMessage(BaseMessage):
     revisions: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ErrorMessage(BaseMessage):
+    """Message sent by AssemblyAI when a server error occurs before session closure.
+
+    Parameters:
+        type: Always "Error" for this message type.
+        error_code: Error code identifier (e.g., 1008, 3005).
+        error: Descriptive error message from AssemblyAI.
+    """
+
+    type: Literal["Error"] = "Error"
+    error_code: int | None = None
+    error: str = ""
+
+
 # Union type for all possible message types
 AnyMessage = (
-    BeginMessage | TurnMessage | SpeechStartedMessage | TerminationMessage | SpeakerRevisionMessage
+    BeginMessage
+    | TurnMessage
+    | SpeechStartedMessage
+    | TerminationMessage
+    | SpeakerRevisionMessage
+    | ErrorMessage
 )
 
 

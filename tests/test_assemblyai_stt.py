@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.assemblyai.models import (
     AssemblyAIConnectionParams,
+    ErrorMessage,
     TerminationMessage,
     TurnMessage,
     Word,
@@ -32,6 +33,7 @@ from pipecat.services.assemblyai.stt import AssemblyAISTTService, is_u3_pro_mode
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.utils.errors import ErrorCategory
 from tests.frame_processor_helpers import frame_processor_setup
 
 
@@ -1495,3 +1497,104 @@ def test_disconnect_terminates_an_open_session_before_closing():
     ]
     assert service._receive_task is None
     assert service._websocket is None
+
+
+def test_error_message_parsing_and_handling():
+    service = AssemblyAISTTService(api_key="test-key")
+    pushed_errors = []
+
+    async def fake_push_error(*args, **kwargs):
+        pushed_errors.append((args, kwargs))
+
+    service.push_error = fake_push_error
+
+    raw = {
+        "type": "Error",
+        "error_code": 3005,
+        "error": "Session duration exceeded",
+    }
+
+    parsed = service._parse_message(raw)
+    assert isinstance(parsed, ErrorMessage)
+    assert parsed.error_code == 3005
+    assert parsed.error == "Session duration exceeded"
+
+    asyncio.run(service._handle_message(raw))
+
+    assert len(pushed_errors) == 1
+    _, kwargs = pushed_errors[0]
+    assert kwargs["error_msg"] == "AssemblyAI STT error [3005]: Session duration exceeded"
+    assert kwargs["category"] == ErrorCategory.SERVER
+
+
+def test_error_message_authentication_category():
+    service = AssemblyAISTTService(api_key="test-key")
+    pushed_errors = []
+
+    async def fake_push_error(*args, **kwargs):
+        pushed_errors.append((args, kwargs))
+
+    service.push_error = fake_push_error
+
+    raw = {
+        "type": "Error",
+        "error_code": 1008,
+        "error": "Authentication failed",
+    }
+
+    asyncio.run(service._handle_message(raw))
+
+    assert len(pushed_errors) == 1
+    _, kwargs = pushed_errors[0]
+    assert kwargs["error_msg"] == "AssemblyAI STT error [1008]: Authentication failed"
+    assert kwargs["category"] == ErrorCategory.AUTHENTICATION
+
+
+def test_error_message_rate_limit_category():
+    service = AssemblyAISTTService(api_key="test-key")
+    pushed_errors = []
+
+    async def fake_push_error(*args, **kwargs):
+        pushed_errors.append((args, kwargs))
+
+    service.push_error = fake_push_error
+
+    raw = {
+        "type": "Error",
+        "error_code": 3009,
+        "error": "Rate limit exceeded",
+    }
+
+    asyncio.run(service._handle_message(raw))
+
+    assert len(pushed_errors) == 1
+    _, kwargs = pushed_errors[0]
+    assert kwargs["error_msg"] == "AssemblyAI STT error [3009]: Rate limit exceeded"
+    assert kwargs["category"] == ErrorCategory.RATE_LIMIT
+
+
+def test_error_message_without_error_code():
+    service = AssemblyAISTTService(api_key="test-key")
+    pushed_errors = []
+
+    async def fake_push_error(*args, **kwargs):
+        pushed_errors.append((args, kwargs))
+
+    service.push_error = fake_push_error
+
+    raw = {
+        "type": "Error",
+        "error": "Generic connection problem",
+    }
+
+    parsed = service._parse_message(raw)
+    assert isinstance(parsed, ErrorMessage)
+    assert parsed.error_code is None
+    assert parsed.error == "Generic connection problem"
+
+    asyncio.run(service._handle_message(raw))
+
+    assert len(pushed_errors) == 1
+    _, kwargs = pushed_errors[0]
+    assert kwargs["error_msg"] == "AssemblyAI STT error: Generic connection problem"
+    assert kwargs["category"] == ErrorCategory.UNKNOWN

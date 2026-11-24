@@ -44,6 +44,7 @@ from pipecat.services.stt_latency import ASSEMBLYAI_SYNC_TTFS_P99, ASSEMBLYAI_TT
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
@@ -52,6 +53,7 @@ from .models import (
     AssemblyAIConnectionParams,
     BaseMessage,
     BeginMessage,
+    ErrorMessage,
     SpeakerRevisionMessage,
     SpeechStartedMessage,
     TerminationMessage,
@@ -1144,6 +1146,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             return TerminationMessage.model_validate(message)
         elif msg_type == "SpeakerRevision":
             return SpeakerRevisionMessage.model_validate(message)
+        elif msg_type == "Error":
+            return ErrorMessage.model_validate(message)
         else:
             raise ValueError(f"Unknown message type: {msg_type}")
 
@@ -1167,8 +1171,27 @@ class AssemblyAISTTService(WebsocketSTTService):
                 # labels they were sent with.
                 turns = [revision.get("turn_order") for revision in parsed_message.revisions]
                 logger.debug(f"{self} speaker labels revised for turns {turns}")
+            elif isinstance(parsed_message, ErrorMessage):
+                await self._handle_error(parsed_message)
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+
+    async def _handle_error(self, message: ErrorMessage):
+        """Handle Error message from AssemblyAI WebSocket."""
+        code = message.error_code
+        label = f" [{code}]" if code is not None else ""
+        error_text = f"AssemblyAI STT error{label}: {message.error}"
+        logger.error(f"{self} {error_text}")
+
+        category = ErrorCategory.UNKNOWN
+        if code in (1008, 4001):
+            category = ErrorCategory.AUTHENTICATION
+        elif code in (3009, 4029):
+            category = ErrorCategory.RATE_LIMIT
+        elif code is not None and 3000 <= code <= 3999:
+            category = ErrorCategory.SERVER
+
+        await self.push_error(error_msg=error_text, category=category)
 
     async def _handle_speech_started(self, message: SpeechStartedMessage):
         """Handle SpeechStarted event — fast barge-in for AssemblyAI turn detection.
