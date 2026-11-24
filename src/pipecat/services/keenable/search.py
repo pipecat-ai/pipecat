@@ -6,9 +6,10 @@
 
 """Free, low-latency web search for Pipecat agents.
 
-Exposes the tools of Keenable's hosted MCP server — ``search_web_pages`` and
+Exposes two tools of Keenable's hosted MCP server — ``search_web_pages`` and
 ``fetch_page_content`` — so voice agents can look up current information and
-read specific pages. Drop them into an
+read specific pages. Other tools the server lists (with a key it also offers
+web monitors, which can create and delete stored data) are not exposed. Drop them into an
 :class:`~pipecat.processors.aggregators.llm_context.LLMContext` and the LLM
 auto-registers their handlers:
 
@@ -52,6 +53,10 @@ _SERVER_URL = "https://api.keenable.ai/mcp"
 # The search tool on Keenable's MCP server, whose mode this wrapper pins.
 _SERVER_SEARCH_TOOL = "search_web_pages"
 
+# The only tools this wrapper exposes. The server lists more for keyed requests
+# (web monitors, including an irreversible delete), which are not web search.
+_SERVER_TOOLS = [_SERVER_SEARCH_TOOL, "fetch_page_content"]
+
 
 class KeenableWebSearch:
     """Zero-config web search tool for voice agents.
@@ -93,6 +98,7 @@ class KeenableWebSearch:
                 url=_SERVER_URL,
                 headers=self._build_headers(),
             ),
+            tools_filter=_SERVER_TOOLS,
             tools_arguments={_SERVER_SEARCH_TOOL: {"mode": self._mode}},
         )
 
@@ -103,7 +109,7 @@ class KeenableWebSearch:
         ``LLMContext`` and the LLM auto-registers the handlers.
 
         Returns:
-            A ToolsSchema containing every tool the server advertises.
+            A ToolsSchema containing ``search_web_pages`` and ``fetch_page_content``.
         """
         return await self._mcp.tools()
 
