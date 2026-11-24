@@ -35,6 +35,7 @@ class FonadaSTTService(SegmentedSTTService):
         base_url: str = "https://api.fonada.ai/v3/asr/transcribe",
         aiohttp_session: aiohttp.ClientSession | None = None,
         request_timeout: float = 90.0,
+        max_retries: int = 2,
         **kwargs,
     ):
         """Initialize Fonada ASR settings and the HTTP session."""
@@ -45,6 +46,7 @@ class FonadaSTTService(SegmentedSTTService):
             raise ValueError("FONADALABS_API_KEY must be provided")
         self._base_url = base_url
         self._timeout = aiohttp.ClientTimeout(total=request_timeout)
+        self._max_retries = max(0, max_retries)
         self._session = aiohttp_session
         self._owns_session = aiohttp_session is None
 
@@ -75,16 +77,24 @@ class FonadaSTTService(SegmentedSTTService):
         headers = {"Authorization": f"Bearer {self._api_key}"}
         session = await self._get_session()
         try:
-            async with session.post(self._base_url, data=form, headers=headers) as response:
-                body = await response.text()
-                if response.status != 200:
-                    yield ErrorFrame(error=f"Fonada ASR error ({response.status}): {body[:500]}")
-                    return
-                try:
-                    payload = json.loads(body)
-                except json.JSONDecodeError:
-                    yield ErrorFrame(error="Fonada ASR returned invalid JSON")
-                    return
+            for attempt in range(self._max_retries + 1):
+                async with session.post(self._base_url, data=form, headers=headers) as response:
+                    body = await response.text()
+                    if response.status in {429, 502, 503, 504} and attempt < self._max_retries:
+                        delay = float(response.headers.get("Retry-After", 2**attempt))
+                        await asyncio.sleep(min(delay, 30.0))
+                        continue
+                    if response.status != 200:
+                        yield ErrorFrame(
+                            error=f"Fonada ASR error ({response.status}): {body[:500]}"
+                        )
+                        return
+                    try:
+                        payload = json.loads(body)
+                    except json.JSONDecodeError:
+                        yield ErrorFrame(error="Fonada ASR returned invalid JSON")
+                        return
+                    break
             text = str(payload.get("text", "")).strip() if isinstance(payload, dict) else ""
             if text:
                 yield TranscriptionFrame(

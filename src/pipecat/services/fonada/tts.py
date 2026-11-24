@@ -38,6 +38,7 @@ class FonadaTTSService(InterruptibleTTSService):
         aiohttp_session: aiohttp.ClientSession | None = None,
         base_url: str = "https://api.fonada.ai/v1/voice-clone/stream",
         request_timeout: float = 120.0,
+        max_retries: int = 2,
         **kwargs,
     ):
         """Initialize Fonada streaming TTS settings and the HTTP session."""
@@ -48,6 +49,7 @@ class FonadaTTSService(InterruptibleTTSService):
             raise ValueError("FONADALABS_API_KEY must be provided")
         self._base_url = base_url
         self._timeout = aiohttp.ClientTimeout(total=request_timeout)
+        self._max_retries = max(0, max_retries)
         self._session = aiohttp_session
         self._owns_session = aiohttp_session is None
 
@@ -85,20 +87,26 @@ class FonadaTTSService(InterruptibleTTSService):
             data["instruct"] = self._settings.instruct
         session = await self._get_session()
         try:
-            async with session.post(
-                self._base_url,
-                data=data,
-                headers={"Authorization": f"Bearer {self._api_key}"},
-            ) as response:
-                if response.status != 200:
-                    body = (await response.text())[:500]
-                    yield ErrorFrame(error=f"Fonada TTS error ({response.status}): {body}")
-                    yield TTSStoppedFrame(context_id=context_id)
-                    return
-                await self.start_tts_usage_metrics(text)
-                async for chunk in response.content.iter_chunked(self.chunk_size):
-                    if chunk:
-                        yield TTSAudioRawFrame(chunk, 24000, 1, context_id=context_id)
+            for attempt in range(self._max_retries + 1):
+                async with session.post(
+                    self._base_url,
+                    data=data,
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                ) as response:
+                    if response.status in {429, 502, 503, 504} and attempt < self._max_retries:
+                        delay = float(response.headers.get("Retry-After", 2**attempt))
+                        await asyncio.sleep(min(delay, 30.0))
+                        continue
+                    if response.status != 200:
+                        body = (await response.text())[:500]
+                        yield ErrorFrame(error=f"Fonada TTS error ({response.status}): {body}")
+                        yield TTSStoppedFrame(context_id=context_id)
+                        return
+                    await self.start_tts_usage_metrics(text)
+                    async for chunk in response.content.iter_chunked(self.chunk_size):
+                        if chunk:
+                            yield TTSAudioRawFrame(chunk, 24000, 1, context_id=context_id)
+                    break
         except asyncio.CancelledError:
             raise
         except Exception as exc:
