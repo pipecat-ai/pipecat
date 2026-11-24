@@ -649,6 +649,30 @@ class TestServiceSwitcherMetadata(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(self.service2.metadata_push_count, 1)
         # Only one MockMetadataFrame should have left (from service1)
 
+    async def test_metadata_from_outside_reaches_every_service(self):
+        """Metadata from a service outside the switcher reaches the inactive services too.
+
+        A member that reads another service's metadata then has it when it
+        becomes active. It arrives once at each member, and travels on once,
+        from the active member, as it would through that service alone.
+        """
+        for direction in (FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM):
+            services = [MockFrameProcessor("service1"), MockFrameProcessor("service2")]
+            switcher = ServiceSwitcher(services)
+            passed_on = [MockMetadataFrame]
+
+            await run_test(
+                switcher,
+                frames_to_send=[MockMetadataFrame(service_name="tts")],
+                frames_to_send_direction=direction,
+                expected_down_frames=passed_on if direction == FrameDirection.DOWNSTREAM else [],
+                expected_up_frames=passed_on if direction == FrameDirection.UPSTREAM else [],
+            )
+
+            for service in services:
+                metadata = [f for f in service.processed_frames if isinstance(f, MockMetadataFrame)]
+                self.assertEqual([f.service_name for f in metadata], ["tts"])
+
 
 class TestServiceSwitcherSettingsUpdates(unittest.IsolatedAsyncioTestCase):
     """Test cases for ServiceUpdateSettingsFrame handling in ServiceSwitcher."""

@@ -35,7 +35,7 @@ from typing import Any
 import pytest
 from dotenv import dotenv_values
 
-from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.llm.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.frames.frames import ErrorFrame, LLMContextFrame, MetricsFrame
 from pipecat.metrics.metrics import LLMTokenUsage, LLMUsageMetricsData
 from pipecat.pipeline.worker import PipelineParams
@@ -197,6 +197,17 @@ def _google(model: str) -> Callable[[], LLMService]:
     return make
 
 
+def _google_interactions():
+    from pipecat.services.google.interactions.llm import GoogleInteractionsLLMService
+
+    return GoogleInteractionsLLMService(
+        api_key=os.environ["GOOGLE_API_KEY"],
+        settings=GoogleInteractionsLLMService.Settings(
+            thinking=GoogleInteractionsLLMService.ThinkingConfig(thinking_level="low"),
+        ),
+    )
+
+
 def _gemini_live():
     from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 
@@ -235,6 +246,7 @@ _COMPAT_CLASSES = {
     "qwen": "QwenLLMService",
     "sambanova": "SambaNovaLLMService",
     "sarvam": "SarvamLLMService",
+    "smallest": "SmallestLLMService",
     "together": "TogetherLLMService",
 }
 
@@ -281,6 +293,12 @@ CASES = [
         prompt=CODE_EXECUTION_PROMPT,
         tools={AdapterType.GEMINI: [{"code_execution": {}}]},
         checks_provider_total=True,
+    ),
+    _Case(
+        "google_interactions",
+        ("GOOGLE_API_KEY",),
+        _google_interactions,
+        expects_reasoning=True,
     ),
     _Case(
         "gemini_live",

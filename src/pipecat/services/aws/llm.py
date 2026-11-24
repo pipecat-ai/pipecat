@@ -20,8 +20,8 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.services.bedrock_adapter import (
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.services.bedrock_adapter import (
     AWSBedrockLLMAdapter,
     AWSBedrockLLMInvocationParams,
 )
@@ -32,15 +32,23 @@ from pipecat.frames.frames import (
     LLMEnablePromptCachingFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.utils import resolve_credentials
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import LLMSettings, ToolCallPolicy
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.text.tagged_llm_text_parser import (
+    TaggedLLMTextParsedOutputChunk,
+    TaggedLLMTextParsedOutputChunkKind,
+    TaggedLLMTextParser,
+)
 from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
@@ -196,7 +204,6 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
             effort=None,
             enable_prompt_caching=False,
             additional_model_request_fields={},
-            tool_call_text_policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -238,7 +245,8 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
         self._aws_session = aiobotocore.session.get_session()
 
-        # Resolve credentials using the shared chain (explicit → env → botocore).
+        # Explicit or environment keys. Without them, each client takes its
+        # credentials from the session's default chain, which renews them.
         resolved = resolve_credentials(
             aws_access_key_id=aws_access_key,
             aws_secret_access_key=aws_secret_key,
@@ -460,6 +468,15 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         use_completion_tokens_estimate = False
 
         using_noop_tool = False
+        tool_call_detected = False
+        # Amazon Nova (v1) models write their reasoning into a text block,
+        # wrapped in <thinking> tags, ahead of a tool call. A response can hold
+        # several such blocks, so each text block is parsed on its own.
+        thinking_parser = TaggedLLMTextParser("<thinking>", "</thinking>")
+        text_index: int | None = None
+        # The content block of the reasoning in progress, and its signature.
+        reasoning_index: int | None = None
+        reasoning_signature: str | None = None
 
         try:
             await self.push_frame(LLMFullResponseStartFrame())
@@ -577,10 +594,13 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                         block = event["contentBlockDelta"]
                         delta = block["delta"]
                         if "text" in delta:
+                            text_index = block["contentBlockIndex"]
+                            await self._push_thinking_chunks(
+                                thinking_parser.parse_next_chunk(delta["text"]), tool_call_detected
+                            )
                             completion_tokens_estimate += self._estimate_tokens(delta["text"])
-                            await self._push_llm_text(delta["text"])
                         elif "toolUse" in delta and "input" in delta["toolUse"]:
-                            self._note_tool_call_detected()
+                            tool_call_detected = not using_noop_tool
                             # Handle partial JSON for tool use
                             index = block["contentBlockIndex"]
                             json_accumulators[index] = (
@@ -589,17 +609,36 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                             completion_tokens_estimate += self._estimate_tokens(
                                 delta["toolUse"]["input"]
                             )
+                        elif "reasoningContent" in delta:
+                            reasoning = delta["reasoningContent"]
+                            if reasoning_index is None and (
+                                "text" in reasoning or "signature" in reasoning
+                            ):
+                                reasoning_index = block["contentBlockIndex"]
+                                await self.push_frame(
+                                    LLMThoughtStartFrame(
+                                        append_to_context=True,
+                                        llm=self.get_llm_adapter().id_for_llm_specific_messages,
+                                    )
+                                )
+                            if "text" in reasoning:
+                                await self.push_frame(LLMThoughtTextFrame(reasoning["text"]))
+                                completion_tokens_estimate += self._estimate_tokens(
+                                    reasoning["text"]
+                                )
+                            elif "signature" in reasoning:
+                                reasoning_signature = reasoning["signature"]
 
                     # Handle tool use start
                     elif "contentBlockStart" in event:
                         block = event["contentBlockStart"]
                         content_block_start = block["start"]
                         if "toolUse" in content_block_start:
+                            tool_call_detected = not using_noop_tool
                             # A turn that only calls tools produces no answer text,
                             # so the call itself is what the caller gets and TTFAT
                             # ends here rather than going unmeasured.
                             await self.stop_ttfat_metrics()
-                            self._note_tool_call_detected()
                             index = block["contentBlockIndex"]
                             tool_use_blocks[index] = {
                                 "id": content_block_start["toolUse"].get("toolUseId", ""),
@@ -610,6 +649,15 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                     # Handle tool use completion
                     elif "contentBlockStop" in event:
                         index = event["contentBlockStop"]["contentBlockIndex"]
+                        if index == text_index:
+                            await self._push_thinking_chunks(
+                                thinking_parser.flush(), tool_call_detected
+                            )
+                            text_index = None
+                        if index == reasoning_index:
+                            await self.push_frame(LLMThoughtEndFrame(signature=reasoning_signature))
+                            reasoning_index = None
+                            reasoning_signature = None
                         tool_use_block = tool_use_blocks.pop(index, None)
                         if tool_use_block:
                             json_accumulator = json_accumulators.pop(index, "")
@@ -638,6 +686,8 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
                         completion_tokens += usage.get("outputTokens", 0)
                         cache_read_input_tokens += usage.get("cacheReadInputTokens", 0)
                         cache_creation_input_tokens += usage.get("cacheWriteInputTokens", 0)
+
+                await self._push_thinking_chunks(thinking_parser.flush(), tool_call_detected)
 
             await self.run_function_calls(function_calls)
         except asyncio.CancelledError:
@@ -685,6 +735,10 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
+            # Closes a thought left open by an interrupted or failed stream.
+            await self._push_thinking_chunks(thinking_parser.reset())
+            if reasoning_index is not None:
+                await self.push_frame(LLMThoughtEndFrame())
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
             comp_tokens = (
@@ -718,6 +772,21 @@ class AWSBedrockLLMService(LLMService[AWSBedrockLLMAdapter]):
 
     def _estimate_tokens(self, text: str) -> int:
         return int(len(re.split(r"[^\w]+", text)) * 1.3)
+
+    async def _push_thinking_chunks(
+        self, chunks: list[TaggedLLMTextParsedOutputChunk], tool_call_detected: bool = False
+    ):
+        """Push text as LLM text and leading ``<thinking>`` content as thoughts."""
+        for chunk in chunks:
+            if chunk.kind == TaggedLLMTextParsedOutputChunkKind.TEXT:
+                if not self._should_suppress_tool_call_text(tool_call_detected):
+                    await self._push_llm_text(chunk.text)
+            elif chunk.kind == TaggedLLMTextParsedOutputChunkKind.THOUGHT_START:
+                await self.push_frame(LLMThoughtStartFrame())
+            elif chunk.kind == TaggedLLMTextParsedOutputChunkKind.THOUGHT_TEXT:
+                await self.push_frame(LLMThoughtTextFrame(chunk.text))
+            elif chunk.kind == TaggedLLMTextParsedOutputChunkKind.THOUGHT_END:
+                await self.push_frame(LLMThoughtEndFrame())
 
     async def _report_usage_metrics(
         self,

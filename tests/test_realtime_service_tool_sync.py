@@ -26,9 +26,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from pipecat.adapters.schemas.direct_function import tool_options
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.services.llm_service import FunctionCallParams
 
@@ -102,7 +102,7 @@ class TestRealtimeSessionTools(unittest.IsolatedAsyncioTestCase):
     """The tool set a realtime adapter settles for a session."""
 
     async def test_the_contexts_own_tools_win_and_built_ins_ride_along(self):
-        mod = pytest.importorskip("pipecat.adapters.services.open_ai_realtime_adapter")
+        mod = pytest.importorskip("pipecat.adapters.llm.services.open_ai_realtime_adapter")
         adapter = mod.OpenAIRealtimeLLMAdapter()
         adapter.builtin_tools["delegate"] = FunctionSchema(
             name="delegate", description="Delegate.", properties={}, required=[]

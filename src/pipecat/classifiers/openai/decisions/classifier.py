@@ -24,6 +24,7 @@ from pipecat.classifiers.base_classifier import (
     ChoiceResult,
     ClassifierError,
     ClassifierImage,
+    ClassifierInput,
     ClassifierQuestion,
     ClassifierResult,
     ScoreLevel,
@@ -138,9 +139,10 @@ class OpenAIDecisionsClassifier(BaseClassifier):
         self,
         state: str | dict[str, Any] | list[Any],
         questions: Mapping[str, ClassifierQuestion],
-        images: Sequence[ClassifierImage] = (),
+        inputs: Sequence[ClassifierInput] = (),
     ) -> tuple[dict[str, ClassifierResult], LLMTokenUsage]:
         """Answer the questions in one request."""
+        images = [item for item in inputs if isinstance(item, ClassifierImage)]
         if len(images) > OPENAI_DECISIONS_MAX_IMAGES:
             raise ClassifierError(
                 f"OpenAI Decisions takes at most {OPENAI_DECISIONS_MAX_IMAGES} images, "

@@ -16,7 +16,8 @@ It masks three things:
 - The value of any ``name=value`` or ``name: value`` pair, quoted or not,
   whose name marks a credential (``api_key``, ``Authorization``,
   ``X-Amz-Signature``, ``apiKey``...). This covers query strings, printed
-  header dicts and plain prose alike.
+  header dicts and plain prose alike. An exception class name followed by
+  its message (``KeyError: ...``) is not a credential name.
 - A URL's password (``scheme://user:password@host``).
 - Tokens recognizable by their format alone: provider key prefixes, AWS
   access key IDs and JWTs.
@@ -52,18 +53,22 @@ _CREDENTIAL_WORDS = frozenset(
     }
 )
 
-# `name=value` or `name: value` (or `:=`, `=>`), the name optionally quoted as
-# in a printed dict, the value quoted or running to the next delimiter. A
-# quoted value cut short before its closing quote, as a truncated repr leaves
-# it, runs to the next delimiter instead. An auth scheme (`Bearer`, `Basic`...)
-# ahead of the value is kept. A value already redacted is matched whole, so
-# text redacted twice reads the same as text redacted once.
-_PAIR = re.compile(
+# The start of a `name=value` or `name: value` pair (or `:=`, `=>`), the name
+# optionally quoted as in a printed dict. An auth scheme (`Bearer`, `Basic`...)
+# ahead of the value is kept.
+_PAIR_START = re.compile(
     r"""(?P<name>(?<![\w.-])(?P<nq>["']?)[A-Za-z][\w.-]*(?P=nq))"""
     r"""(?P<sep>\s*(?::=|=>|[:=])\s*)"""
     r"""(?P<scheme>(?:Bearer|Basic|Token|Api-Token|Key|Digest|AWS4-HMAC-SHA256)\s+)?"""
-    r"""(?:(?P<vq>["'])(?P<quoted>.*?)(?P=vq)"""
-    r"""|(?P<oq>["']?)(?P<bare>(?:\[REDACTED\]|[^\s,;&"'}\])\[])+))"""
+)
+
+# A pair's value, quoted or running to the next delimiter. A quoted value cut
+# short before its closing quote, as a truncated repr leaves it, runs to the
+# next delimiter instead. A value already redacted is matched whole, so text
+# redacted twice reads the same as text redacted once.
+_VALUE = re.compile(
+    r"""(?P<vq>["'])(?P<quoted>.*?)(?P=vq)"""
+    r"""|(?P<oq>["']?)(?P<bare>(?:\[REDACTED\]|[^\s,;&"'}\])\[])+)"""
 )
 
 _URL_PASSWORD = re.compile(r"(?P<prefix>\b[a-z][a-z0-9+.-]*://[^\s:/@]+:)[^\s/@]+(?=@)", re.I)
@@ -93,6 +98,11 @@ _KNOWN_TOKENS = re.compile(
     r"""(?:[\s\S]*?-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----|[\s\S]*)"""
 )
 
+# An exception or warning class name, optionally module-qualified (`KeyError`,
+# `jwt.exceptions.InvalidTokenError`). It names what went wrong, so the text
+# after it is the explanation, not a credential.
+_EXCEPTION_NAME = re.compile(r"(?:[a-z_][a-z0-9_]*\.)*[A-Z][A-Za-z0-9]*(?:Error|Exception|Warning)")
+
 
 def _is_credential_name(name: str) -> bool:
     words = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name.strip("\"'")).lower()
@@ -100,15 +110,39 @@ def _is_credential_name(name: str) -> bool:
     return "".join(parts) in _CREDENTIAL_WORDS or any(p in _CREDENTIAL_WORDS for p in parts)
 
 
-def _redact_pair(match: re.Match) -> str:
-    quote = match["vq"] or ""
-    if _is_credential_name(match["name"]):
-        value = REDACTED
-    else:
-        # The value may itself hold pairs, as `URL: https://...?token=...` does.
-        value = _PAIR.sub(_redact_pair, match["quoted"] or match["bare"] or "")
-    opening = match["oq"] or ""
-    return f"{match['name']}{match['sep']}{match['scheme'] or ''}{quote or opening}{value}{quote}"
+def _is_exception_name(match: re.Match) -> bool:
+    return (
+        not match["nq"]
+        and not match["scheme"]
+        and match["sep"].strip() == ":"
+        and _EXCEPTION_NAME.fullmatch(match["name"]) is not None
+    )
+
+
+def _masks_value(start: re.Match) -> bool:
+    return _is_credential_name(start["name"]) and not _is_exception_name(start)
+
+
+def _redact_pairs(text: str) -> str:
+    # Only a credential's value is taken whole. Any other pair's value is read on
+    # as ordinary text, so the pairs it holds (`URL: https://...?token=...`,
+    # `error: Authorization: Bearer ...`) are found in place.
+    out = []
+    pos = 0
+    while start := _PAIR_START.search(text, pos):
+        value = _VALUE.match(text, start.end()) if _masks_value(start) else None
+        # A credential's value that is only the next credential's name, as
+        # `token:` is in `api_key: token: abc`, gives way to that credential.
+        following = value and _PAIR_START.match(text, start.end())
+        if not value or (following and _masks_value(following) and following.end() > value.end()):
+            out.append(text[pos : start.end()])
+            pos = start.end()
+            continue
+        quote = value["vq"] or ""
+        out.append(f"{text[pos : start.end()]}{quote or value['oq']}{REDACTED}{quote}")
+        pos = value.end()
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def redact_secrets(text: str) -> str:
@@ -123,5 +157,5 @@ def redact_secrets(text: str) -> str:
     # Known formats go first: a PEM key spans lines, and masking its first line
     # as a pair's value would leave the rest unrecognizable.
     text = _KNOWN_TOKENS.sub(REDACTED, text)
-    text = _PAIR.sub(_redact_pair, text)
+    text = _redact_pairs(text)
     return _URL_PASSWORD.sub(rf"\g<prefix>{REDACTED}", text)

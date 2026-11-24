@@ -6,7 +6,7 @@
 
 """Decorator for marking methods as LLM tools."""
 
-from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.utils.deprecation import warn_deprecated
 
 

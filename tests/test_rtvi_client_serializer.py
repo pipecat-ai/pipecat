@@ -12,19 +12,9 @@ import unittest
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
-    FunctionCallInProgressFrame,
-    InterimTranscriptionFrame,
-    InterruptionFrame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
-    LLMMarkerResponseFrame,
-    LLMTextFrame,
+    InputTransportMessageFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
-    TranscriptionFrame,
-    TTSTextFrame,
 )
 from pipecat.serializers.rtvi_client import RTVIClientSerializer
 
@@ -37,82 +27,73 @@ class TestRTVIClientDeserialize(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.s = RTVIClientSerializer()
 
-    async def test_llm_lifecycle(self):
-        self.assertIsInstance(
-            await self.s.deserialize(_server("bot-llm-started")), LLMFullResponseStartFrame
-        )
-        frame = await self.s.deserialize(_server("bot-llm-text", {"text": "Paris"}))
-        self.assertIsInstance(frame, LLMTextFrame)
-        self.assertEqual(frame.text, "Paris")
-        self.assertIsInstance(
-            await self.s.deserialize(_server("bot-llm-stopped")), LLMFullResponseEndFrame
-        )
+    async def test_llm_reports_stay_raw_messages(self):
+        # Reports about the bot's own LLM: this pipeline's LLM frames would be
+        # about its own.
+        for msg_type, data in (
+            ("bot-llm-started", None),
+            ("bot-llm-text", {"text": "Paris"}),
+            ("bot-llm-marker", {"text": "◐", "kind": "short", "raw": "◐ wait"}),
+            ("bot-llm-stopped", None),
+        ):
+            frame = await self.s.deserialize(_server(msg_type, data))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["type"], msg_type)
+            self.assertEqual(frame.message["data"], data)
 
-    async def test_llm_marker(self):
-        frame = await self.s.deserialize(
-            _server(
-                "bot-llm-marker",
-                {"text": "◐", "kind": "short", "raw": "◐ wait", "markers": ["●", "◐", "○"]},
-            )
-        )
-        self.assertIsInstance(frame, LLMMarkerResponseFrame)
-        self.assertEqual((frame.marker, frame.kind, frame.raw), ("◐", "short", "◐ wait"))
-        self.assertEqual(frame.markers, ["●", "◐", "○"])
-        # A response that carried no marker reports an empty text.
-        frame = await self.s.deserialize(_server("bot-llm-marker", {"text": "", "raw": "Hi"}))
-        self.assertEqual((frame.marker, frame.kind, frame.raw), (None, None, "Hi"))
-
-    async def test_tts_text(self):
+    async def test_tts_text_stays_a_raw_message(self):
         frame = await self.s.deserialize(_server("bot-tts-text", {"text": "Hello there!"}))
-        self.assertIsInstance(frame, TTSTextFrame)
-        self.assertEqual(frame.text, "Hello there!")
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["data"]["text"], "Hello there!")
 
-    async def test_speaking_and_interruption(self):
-        self.assertIsInstance(
-            await self.s.deserialize(_server("bot-started-speaking")), BotStartedSpeakingFrame
-        )
-        self.assertIsInstance(
-            await self.s.deserialize(_server("bot-stopped-speaking")), BotStoppedSpeakingFrame
-        )
-        self.assertIsInstance(
-            await self.s.deserialize(_server("bot-interrupted")), InterruptionFrame
-        )
+    async def test_speaking_and_interruption_stay_raw_messages(self):
+        # Reports about the bot's own output: this pipeline's speaking frames and
+        # interruptions would be about its own.
+        for msg_type in ("bot-started-speaking", "bot-stopped-speaking", "bot-interrupted"):
+            frame = await self.s.deserialize(_server(msg_type))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["type"], msg_type)
 
-    async def test_user_transcription_final_vs_interim(self):
-        final = await self.s.deserialize(
-            _server(
-                "user-transcription",
-                {"text": "hello", "user_id": "u", "timestamp": "t", "final": True},
-            )
-        )
-        self.assertIsInstance(final, TranscriptionFrame)
-        self.assertEqual(final.text, "hello")
-        self.assertEqual(final.user_id, "u")
+    async def test_user_transcription_stays_a_raw_message(self):
+        # The bot's transcription of this pipeline's speech: a TranscriptionFrame
+        # would pass it off as this pipeline's own.
+        for data in (
+            {"text": "hello", "user_id": "u", "timestamp": "t", "final": True},
+            {"text": "hel", "final": False},
+        ):
+            frame = await self.s.deserialize(_server("user-transcription", data))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["data"], data)
 
-        interim = await self.s.deserialize(
-            _server("user-transcription", {"text": "hel", "final": False})
-        )
-        self.assertIsInstance(interim, InterimTranscriptionFrame)
-        self.assertEqual(interim.text, "hel")
-
-    async def test_function_call(self):
-        frame = await self.s.deserialize(
-            _server(
+    async def test_function_calls_stay_raw_messages(self):
+        # Reports about the bot's own function calls: this pipeline's function
+        # call frames would be about its own.
+        for msg_type, data in (
+            (
                 "llm-function-call-in-progress",
                 {
                     "function_name": "get_weather",
                     "tool_call_id": "c1",
                     "arguments": {"city": "Paris"},
                 },
-            )
-        )
-        self.assertIsInstance(frame, FunctionCallInProgressFrame)
-        self.assertEqual(frame.function_name, "get_weather")
-        self.assertEqual(frame.arguments, {"city": "Paris"})
+            ),
+            (
+                "llm-function-call-stopped",
+                {"function_name": "get_weather", "tool_call_id": "c1", "cancelled": True},
+            ),
+        ):
+            frame = await self.s.deserialize(_server(msg_type, data))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["type"], msg_type)
+            self.assertEqual(frame.message["data"], data)
 
-    async def test_unknown_and_non_rtvi_dropped(self):
-        self.assertIsNone(await self.s.deserialize(_server("bot-ready", {"version": "2.0.0"})))
-        self.assertIsNone(await self.s.deserialize(_server("metrics", {})))
+    async def test_every_rtvi_message_stays_raw(self):
+        for msg_type in ("bot-ready", "metrics", "server-message"):
+            frame = await self.s.deserialize(_server(msg_type, {}))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["type"], msg_type)
+
+    async def test_non_rtvi_dropped(self):
         self.assertIsNone(
             await self.s.deserialize(json.dumps({"type": "bot-llm-text"}))
         )  # no label

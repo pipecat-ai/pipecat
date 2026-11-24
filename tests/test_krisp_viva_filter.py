@@ -87,6 +87,13 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         )
         self.sample_rates_patch.start()
 
+        # krisp_instance keeps the krisp_audio module from whichever test file
+        # imported it first, which may be another file's mock without a version.
+        self.krisp_instance_patch = patch(
+            "pipecat.audio.krisp_instance.krisp_audio", self.mock_krisp_audio
+        )
+        self.krisp_instance_patch.start()
+
         # Patch KrispVivaSDKManager
         self.sdk_manager_patcher = patch(
             "pipecat.audio.filters.krisp_viva_filter.KrispVivaSDKManager"
@@ -99,6 +106,7 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         """Clean up test fixtures after each test method."""
         # Stop all patchers
         self.sample_rates_patch.stop()
+        self.krisp_instance_patch.stop()
         self.sdk_manager_patcher.stop()
 
         # Remove temporary model file

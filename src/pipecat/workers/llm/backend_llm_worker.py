@@ -28,8 +28,9 @@ A request is text, so how a frontend words one is its own business.
 transcript, which is what a frontend hands over when its model signals a
 handoff without wording a request; a frontend whose model does word one sends
 that instead. :class:`~pipecat.services.openai.live.llm.OpenAILiveLLMService`'s
-client delegation and :class:`~pipecat.pipeline.llm_with_backend.LLMWithBackend`
-both drive the worker this way.
+client delegation and
+:class:`~pipecat.pipeline.llm_with_backend.llm_with_backend.LLMWithBackend` both
+drive the worker this way.
 """
 
 import asyncio
@@ -115,7 +116,7 @@ ERROR_UPDATE_TYPE = "error"
 #: writes a note paragraph and then a marked one, so a mark at the start of a
 #: later line splits the message, a note before it and a spoken message from
 #: it on, rather than losing the result. The turn-completion markers are
-#: read the same way (``user_turn_completion_mixin``).
+#: read the same way (``user_turn_completion``).
 SPOKEN_MARK = ">>"
 
 #: Where a message's spoken part starts: the first line that begins with the mark.
@@ -126,6 +127,7 @@ _SPOKEN_MARK_LINE = re.compile(rf"(?m)^[ \t]*{re.escape(SPOKEN_MARK)}[ \t]*")
 #: takes requests. The backend's own system instruction says what it does;
 #: this says how what it writes reaches the user.
 #: ``BackendLLMWorker(pairing_instruction=...)`` replaces it.
+#: Before changing it, see scripts/llm-with-backend/tuning/README.md.
 BACKEND_PAIRING_INSTRUCTION = (
     "You are the backend of a voice assistant. The assistant talks with the user and sends "
     "you requests: the conversation it is having, or a request it worded for you. Do the "
@@ -319,6 +321,7 @@ class BackendOutputTransform(Protocol):
 
 
 #: What :func:`_render_transcript_request` tells the backend to do with a transcript.
+#: Before changing it, see scripts/llm-with-backend/tuning/README.md.
 TRANSCRIPT_REQUEST_INSTRUCTION = (
     "Act on the user's most recent request in the conversation above. If it asks for "
     "something, tell the user the result as soon as you have it, before going on with other "
@@ -328,6 +331,7 @@ TRANSCRIPT_REQUEST_INSTRUCTION = (
 
 #: Appended to a request the frontend worded itself, so the backend tells the
 #: user its result on its own rather than with whatever else it is doing.
+#: Before changing it, see scripts/llm-with-backend/tuning/README.md.
 EXPLICIT_REQUEST_INSTRUCTION = (
     "If this request asks for something, tell the user the result as soon as you have it, "
     f"before going on with other work, in a message that begins with {SPOKEN_MARK}. If it "
@@ -496,6 +500,7 @@ class BackendLLMWorker(LLMContextWorker):
         pairing_instruction: str = BACKEND_PAIRING_INSTRUCTION,
         user_params: LLMUserAggregatorParams | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
+        **kwargs: Any,
     ):
         """Initialize the backend worker.
 
@@ -523,6 +528,9 @@ class BackendLLMWorker(LLMContextWorker):
                 default VAD and turn-analysis strategies (and the model the
                 latter loads) have nothing to do here.
             assistant_params: Optional parameters for the assistant aggregator.
+            **kwargs: Additional arguments forwarded to :class:`LLMContextWorker`
+                and on to ``PipelineWorker``, such as ``enable_tracing`` or
+                ``observers``.
 
         Raises:
             ValueError: If the LLM service declines the role.
@@ -539,6 +547,7 @@ class BackendLLMWorker(LLMContextWorker):
             context=context,
             user_params=user_params,
             assistant_params=assistant_params,
+            **kwargs,
         )
         self._attached: _AttachedFrontend | None = None
         self._transform_output = transform_output

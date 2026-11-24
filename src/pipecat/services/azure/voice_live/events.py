@@ -21,9 +21,9 @@ from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from pipecat.adapters.schemas.direct_function import DirectFunction
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.direct_function import DirectFunction
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 Modality: TypeAlias = Literal["text", "audio"]
@@ -898,6 +898,17 @@ class ResponseAudioTranscriptDelta(ServerEvent):
     delta: str = ""
 
 
+class ResponseFunctionCallArgumentsDelta(ServerEvent):
+    """A fragment of a client function's arguments."""
+
+    type: Literal["response.function_call_arguments.delta"]
+    response_id: str | None = None
+    item_id: str | None = None
+    output_index: int = 0
+    call_id: str | None = None
+    delta: str = ""
+
+
 class ResponseFunctionCallArgumentsDone(ServerEvent):
     """Event carrying a function call's finished arguments.
 
@@ -953,6 +964,7 @@ _server_event_types = {
     "response.audio.delta": ResponseAudioDelta,
     "response.audio.done": ResponseAudioDone,
     "response.audio_transcript.delta": ResponseAudioTranscriptDelta,
+    "response.function_call_arguments.delta": ResponseFunctionCallArgumentsDelta,
     "response.function_call_arguments.done": ResponseFunctionCallArgumentsDone,
 }
 

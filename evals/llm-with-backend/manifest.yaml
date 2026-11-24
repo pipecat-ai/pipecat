@@ -28,6 +28,11 @@ suite:
       - text/progress_inquiry
       - text/aside_while_waiting
       - text/accepted_offer
+      - text/wait_reassurance
+      - text/wait_reassurance_repeats
+      - text/wait_reassurance_detail_requested
+      - text/wait_reassurance_declined
+      - text/wait_reassurance_declined_upfront
       - audio/frontend_only
       - audio/delegate_ack
       - audio/delegate_with_aside
@@ -41,6 +46,11 @@ suite:
       - audio/aside_while_waiting
       - audio/result_during_interruption
       - audio/accepted_offer
+      - audio/wait_reassurance
+      - audio/wait_reassurance_repeats
+      - audio/wait_reassurance_detail_requested
+      - audio/wait_reassurance_declined
+      - audio/wait_reassurance_declined_upfront
   - bot: google-frontend.py
     scenarios:
       - text/frontend_only
@@ -55,6 +65,11 @@ suite:
       - text/progress_inquiry
       - text/aside_while_waiting
       - text/accepted_offer
+      - text/wait_reassurance
+      - text/wait_reassurance_repeats
+      - text/wait_reassurance_detail_requested
+      - text/wait_reassurance_declined
+      - text/wait_reassurance_declined_upfront
       - audio/frontend_only
       - audio/delegate_ack
       - audio/delegate_with_aside
@@ -68,6 +83,11 @@ suite:
       - audio/aside_while_waiting
       - audio/result_during_interruption
       - audio/accepted_offer
+      - audio/wait_reassurance
+      - audio/wait_reassurance_repeats
+      - audio/wait_reassurance_detail_requested
+      - audio/wait_reassurance_declined
+      - audio/wait_reassurance_declined_upfront
   - bot: anthropic-frontend.py
     scenarios:
       - text/frontend_only
@@ -82,6 +102,11 @@ suite:
       - text/progress_inquiry
       - text/aside_while_waiting
       - text/accepted_offer
+      - text/wait_reassurance
+      - text/wait_reassurance_repeats
+      - text/wait_reassurance_detail_requested
+      - text/wait_reassurance_declined
+      - text/wait_reassurance_declined_upfront
       - audio/frontend_only
       - audio/delegate_ack
       - audio/delegate_with_aside
@@ -95,6 +120,35 @@ suite:
       - audio/aside_while_waiting
       - audio/result_during_interruption
       - audio/accepted_offer
+      - audio/wait_reassurance
+      - audio/wait_reassurance_repeats
+      - audio/wait_reassurance_detail_requested
+      - audio/wait_reassurance_declined
+      - audio/wait_reassurance_declined_upfront
+  - bot: openai-responses-frontend-predictive-delegation.py
+    scenarios:
+      - text/frontend_only
+      - text/delegate_ack
+      - text/delegate_with_aside
+      - text/concurrent_delegations
+      - text/superseding_delegation
+      - text/cancel_delegation
+      - text/cancel_and_replace
+      - text/implicit_cancel
+      - text/partial_cancel
+      - text/progress_inquiry
+      - text/aside_while_waiting
+      - text/accepted_offer
+      - text/wait_reassurance
+      - text/wait_reassurance_repeats
+      - text/wait_reassurance_detail_requested
+      - text/wait_reassurance_declined
+      - text/wait_reassurance_declined_upfront
+  - bot: openai-responses-frontend-filter-incomplete-turns.py
+    scenarios:
+      - text/frontend_only
+      - text/wait_reassurance
+      - text/wait_reassurance_declined_upfront
   - bot: openai-realtime-frontend.py
     scenarios:
       - audio/frontend_only

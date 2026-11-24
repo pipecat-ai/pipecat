@@ -10,13 +10,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
-from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiVertexLLMAdapter
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
-from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
-from pipecat.adapters.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.services.anthropic_adapter import AnthropicLLMAdapter
+from pipecat.adapters.llm.services.bedrock_adapter import AWSBedrockLLMAdapter
+from pipecat.adapters.llm.services.gemini_adapter import GeminiLLMAdapter, GeminiVertexLLMAdapter
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.llm.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
+from pipecat.adapters.llm.services.open_ai_responses_adapter import OpenAIResponsesLLMAdapter
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.utils.file_resolver import FileResolver, FileResolverError
 from pipecat.utils.file_storage import LocalFileStorage

@@ -1,0 +1,10 @@
+{
+  "2.3.0": {
+    "contract_sha256": "5e9c63c2ff7dca6259bb2daa0a6d92dcb7143224bd9f3e8a50ff7b08cca40564",
+    "pipecat": "1.15.0"
+  },
+  "2.4.0": {
+    "contract_sha256": "ecd98fb4055320fbe11f57e8afbe87029c3594b125727f326d38be36e5517f91",
+    "pipecat": "1.17.0"
+  }
+}

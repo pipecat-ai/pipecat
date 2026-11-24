@@ -16,6 +16,9 @@ import pytest
 import websockets
 from loguru import logger
 from websockets.asyncio.server import serve
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -440,6 +443,7 @@ async def test_flux_tts_query_params():
                 voice="flux-thalia-en",
                 speed=1.05,
                 expressivity=-1,
+                normalize_volume=False,
             ),
         )
 
@@ -452,13 +456,14 @@ async def test_flux_tts_query_params():
     assert query["sample_rate"] == ["8000"]
     assert query["speed"] == ["1.05"]
     assert query["expressivity"] == ["-1"]
+    assert query["normalize_volume"] == ["false"]
     assert query["mip_opt_out"] == ["true"]
     assert query["tag"] == ["tag-a", "tag-b"]
 
 
 @pytest.mark.asyncio
 async def test_flux_tts_unset_voice_controls_are_omitted():
-    """Speed and expressivity are left out of the query string when unset."""
+    """Speed, expressivity and normalize_volume are left out of the query string when unset."""
     captured: dict = {"messages": []}
 
     async with serve(_flux_server_handler(captured), "127.0.0.1", 0) as server:
@@ -475,6 +480,7 @@ async def test_flux_tts_unset_voice_controls_are_omitted():
     query = parse_qs(urlparse(captured["request_path"]).query)
     assert "speed" not in query
     assert "expressivity" not in query
+    assert "normalize_volume" not in query
 
 
 def _connected_service(**kwargs) -> tuple[DeepgramFluxTTSService, AsyncMock]:
@@ -554,6 +560,55 @@ async def test_flux_tts_unsupported_sample_rate_warns():
     assert any("22050" in str(call.args[0]) for call in warning_spy.call_args_list)
     query = parse_qs(urlparse(captured["request_path"]).query)
     assert query["sample_rate"] == ["22050"]
+
+
+def _websocket_rejection(status_code: int, reason: str | None = None) -> InvalidStatus:
+    """Build the exception `websockets` raises when a handshake is rejected."""
+    headers = Headers({"dg-error": reason}) if reason else Headers()
+    return InvalidStatus(Response(status_code, "", headers))
+
+
+@pytest.mark.asyncio
+async def test_flux_tts_refused_setting_makes_the_service_unusable(monkeypatch):
+    """A setting Deepgram refuses won't be accepted on a retry, so the service gives up."""
+    reason = "'expressivity' must be between -2 and 2. Got: 99."
+
+    async def fake_websocket_connect(*args, **kwargs):
+        raise _websocket_rejection(400, reason)
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+
+    service = DeepgramFluxTTSService(api_key="test-key", sample_rate=24000)
+    connection_errors = []
+
+    @service.event_handler("on_connection_error")
+    async def on_connection_error(service, error):
+        connection_errors.append(error)
+
+    await service._connect_websocket()
+    # Event handlers run as background tasks; let it finish.
+    await asyncio.sleep(0)
+
+    assert not service.is_usable
+    assert connection_errors == [f"Deepgram refused the connection (HTTP 400): {reason}"]
+
+
+@pytest.mark.asyncio
+async def test_flux_tts_server_error_leaves_the_service_usable(monkeypatch):
+    async def fake_websocket_connect(*args, **kwargs):
+        raise _websocket_rejection(503)
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+
+    service = DeepgramFluxTTSService(api_key="test-key", sample_rate=24000)
+
+    await service._connect_websocket()
+
+    assert service.is_usable
 
 
 if __name__ == "__main__":

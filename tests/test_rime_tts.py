@@ -11,6 +11,7 @@ from pipecat.services.rime.tts import (
     RimeNonJsonTTSService,
     RimeTTSService,
 )
+from pipecat.transcriptions.language import Language
 
 
 def test_coda_sampling_params_are_included_in_websocket_params():
@@ -34,6 +35,26 @@ def test_coda_sampling_params_are_included_in_websocket_params():
     assert params["temperature"] == 0.5
     assert params["top_p"] == 0.9
     assert params["timeScaleFactor"] == 1.2
+
+
+def test_inline_speed_lists_one_speed_per_bracketed_span():
+    service = RimeTTSService(api_key="test-api-key")
+
+    text = f"{service.INLINE_SPEED('slow', 0.5)} and {service.INLINE_SPEED('fast', 1.5)}"
+    msg = service._build_msg(text)
+
+    assert msg["text"] == "[slow] and [fast]"
+    assert msg["inlineSpeedAlpha"] == "0.5,1.5"
+
+
+def test_pronounce_wraps_the_phoneme_in_braces():
+    service = RimeTTSService(api_key="test-api-key")
+
+    text = service.PRONOUNCE("Say hello", "hello", "h'El0")
+    msg = service._build_msg(text)
+
+    assert msg["text"] == "Say {h'El0}"
+    assert msg["phonemizeBetweenBrackets"] is True
 
 
 def test_non_json_service_defaults_to_coda_without_a_voice():
@@ -116,3 +137,12 @@ async def test_mist_text_settings_are_included_in_http_payload():
     assert session.payload["pauseBetweenBrackets"] is True
     assert session.payload["phonemizeBetweenBrackets"] is True
     assert session.payload["noTextNormalization"] is True
+
+
+def test_spell_tag_aggregator_keeps_the_settings_language():
+    service = RimeTTSService(
+        api_key="test-api-key",
+        settings=RimeTTSService.Settings(voice="voice", language=Language.FR),
+    )
+
+    assert service._text_aggregator.language == "fr"

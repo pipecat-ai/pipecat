@@ -145,11 +145,19 @@ class LocalFileStorage(FileStorage):
         return suffix
 
     def _trim(self):
-        """Keep only the most recent `max_files` files; delete oldest by mtime."""
+        """Keep only the most recent `max_files` uploads; delete oldest by mtime.
+
+        Only files named like uploads count, so other files in the folder are
+        never trimmed.
+        """
         if self._max_files <= 0:
             return
         try:
-            files = [p for p in self._folder.iterdir() if p.is_file()]
+            files = [
+                p
+                for p in self._folder.iterdir()
+                if p.is_file() and self._URL_SUFFIX_PATTERN.fullmatch(p.name)
+            ]
             if len(files) <= self._max_files:
                 return
             by_mtime = sorted(files, key=lambda p: p.stat().st_mtime)

@@ -23,8 +23,8 @@ from loguru import logger
 from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.grok_realtime_adapter import GrokRealtimeLLMAdapter
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -64,9 +64,11 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.openai.realtime._response_tools import RealtimeResponseTools
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
@@ -183,6 +185,7 @@ class GrokRealtimeLLMSettings(LLMSettings):
         return instance
 
 
+@traced_realtime_llm
 class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
     """Grok Realtime Voice Agent LLM service providing real-time audio and text communication.
 
@@ -264,7 +267,6 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            tool_call_text_policy=None,
             session_properties=events.SessionProperties(),
         )
 
@@ -658,7 +660,11 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         answers the call, unless a reconnect has left the API without the id to
         answer, in which case it goes in as a message too.
         """
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
         is_final = frame.properties.is_final if frame.properties else True
 
         if not is_final:
@@ -715,6 +721,9 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         :meth:`_handle_context`). Before the session's conversation is set up,
         nothing is sent: the setup sends the context, which the aggregator
         records the messages in.
+
+        The messages are taken from this frame, not read from the context.
+        ``LLMUserAggregator._realtime_handle_messages_append`` explains why.
         """
         if not self._api_session_ready or self._llm_needs_conversation_setup:
             return
@@ -855,6 +864,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         """Handle incoming WebSocket messages."""
         assert self._websocket is not None
 
+        response_tools = RealtimeResponseTools()
         async for message in self._websocket:
             try:
                 evt = events.parse_server_event(message)
@@ -862,6 +872,7 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
                 logger.warning(f"Failed to parse server event: {e}")
                 continue
 
+            response_tools.observe(evt)
             if evt.type == "ping":
                 # Ignore ping events (keep-alive)
                 pass
@@ -912,7 +923,8 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
             elif evt.type == "response.output_audio_transcript.done":
                 pass
             elif evt.type in ("response.output_text.delta", "response.text.delta"):
-                await self._handle_evt_text_delta(evt)
+                if not self._should_suppress_tool_call_text(response_tools.has_tool_call(evt)):
+                    await self._handle_evt_text_delta(evt)
             elif evt.type == "response.function_call_arguments.delta":
                 # Function call arguments streaming - we wait for the .done event
                 pass

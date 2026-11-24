@@ -25,8 +25,8 @@ from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -38,7 +38,6 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
@@ -60,9 +59,11 @@ from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMe
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.azure.common import AzureTokenProvider
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.openai.realtime._response_tools import RealtimeResponseTools
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
@@ -211,6 +212,7 @@ _EXPECTED_ERROR_CODES = {
 }
 
 
+@traced_realtime_llm
 class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     """Azure Voice Live LLM service for real-time audio and text communication.
 
@@ -337,7 +339,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            tool_call_text_policy=None,
             session_properties=events.SessionProperties(
                 modalities=["text", "audio"],
                 voice=default_voice,
@@ -672,8 +673,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             await self._handle_bot_stopped_speaking()
         elif isinstance(frame, SpeechControlParamsFrame):
             self._handle_speech_control_params(frame)
-        elif isinstance(frame, LLMMessagesAppendFrame):
-            await self._handle_messages_append(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             # Continuous session: no fresh context frame per turn, so sync the
             # registered tool handlers to the new tool set here (the base service
@@ -742,10 +741,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                         )
                         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
                         await self._create_response()
-
-    async def _handle_messages_append(self, frame):
-        """Handle a request to append messages to the conversation."""
-        logger.warning(f"{self}: LLMMessagesAppendFrame is not yet supported by Voice Live")
 
     #
     # WebSocket communication
@@ -937,6 +932,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         """Handle incoming WebSocket messages."""
         assert self._websocket is not None
 
+        response_tools = RealtimeResponseTools()
         async for message in self._websocket:
             try:
                 evt = events.parse_server_event(message)
@@ -948,6 +944,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             if evt is None:
                 continue
 
+            response_tools.observe(evt)
             if evt.type == "session.created":
                 await self._handle_evt_session_created(evt)
             elif evt.type == "session.updated":
@@ -975,7 +972,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             elif evt.type == "response.audio_transcript.delta":
                 await self._handle_evt_audio_transcript_delta(evt)
             elif evt.type == "response.text.delta":
-                await self._handle_evt_text_delta(evt)
+                await self._handle_evt_text_delta(evt, response_tools.has_tool_call(evt))
             elif evt.type == "response.function_call_arguments.done":
                 await self._handle_evt_function_call_arguments_done(evt)
             elif evt.type == "error":
@@ -1109,10 +1106,15 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         """Handle response.done event."""
         usage = evt.usage
         if usage and usage.total_tokens:
+            input_details = usage.input_token_details
+            output_details = usage.output_token_details
             tokens = LLMTokenUsage(
                 prompt_tokens=usage.input_tokens or 0,
                 completion_tokens=usage.output_tokens or 0,
                 total_tokens=usage.total_tokens or 0,
+                cache_read_input_tokens=input_details.cached_tokens if input_details else None,
+                input_audio_tokens=input_details.audio_tokens if input_details else None,
+                output_audio_tokens=output_details.audio_tokens if output_details else None,
             )
             await self.start_llm_usage_metrics(tokens)
 
@@ -1148,7 +1150,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             self._run_llm_when_response_done = False
             await self._create_response()
 
-    async def _handle_evt_text_delta(self, evt):
+    async def _handle_evt_text_delta(self, evt, after_tool: bool = False):
         """Handle a text delta, which carries the response when "text" is the only modality.
 
         A session that also responds with audio reports its text through
@@ -1157,7 +1159,7 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         if self._is_from_interrupted_response(evt.response_id):
             return
         await self.stop_ttfb_metrics()
-        if evt.delta:
+        if evt.delta and not self._should_suppress_tool_call_text(after_tool):
             await self.push_frame(LLMTextFrame(evt.delta))
 
     async def _handle_evt_audio_transcript_delta(self, evt):

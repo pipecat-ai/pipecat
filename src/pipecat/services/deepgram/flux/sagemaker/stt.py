@@ -64,6 +64,9 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
     ``STTMetadataFrame`` it broadcasts); pass your own ``user_turn_strategies`` only to
     override that.
 
+    With ``vad_force_turn_endpoint=True`` the service requests none, leaving
+    turns to the pipeline's user turn strategies.
+
     Requirements:
 
     - AWS credentials configured (via environment variables, AWS CLI, or instance metadata)
@@ -79,6 +82,10 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
     - on_eager_end_of_turn: Deepgram Flux predicted end of turn
     - on_turn_resumed: User resumed speaking after EagerEndOfTurn
     - on_update: Interim transcript update during a turn
+
+    The turn events follow Flux's turns. With ``vad_force_turn_endpoint=True``
+    those aren't the pipeline's turns: ``on_end_of_turn`` fires on every Flux
+    finalization, so possibly several times per user turn.
 
     Example::
 
@@ -106,6 +113,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         mip_opt_out: bool | None = None,
         tag: list | None = None,
         should_interrupt: bool = True,
+        vad_force_turn_endpoint: bool = False,
         watchdog_min_timeout: float = 0.5,
         enable_eager_end_of_turn: bool = False,
         settings: Settings | None = None,
@@ -127,6 +135,11 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
                 this service recommends, which own the interruption; a
                 user-supplied ``user_turn_strategies`` overrides the
                 recommendation and this setting with it. Defaults to True.
+                Ignored with ``vad_force_turn_endpoint=True``.
+            vad_force_turn_endpoint: Whether the pipeline's user turn strategies
+                decide when user turns end, instead of Flux. Each
+                ``VADUserStoppedSpeakingFrame`` then asks Flux to finalize the
+                audio sent so far. Defaults to False.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
                 sends silence to prevent dangling turns. Defaults to 0.5.
             enable_eager_end_of_turn: Whether to answer Flux's predicted end
@@ -140,6 +153,10 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
                 prediction without it.
             settings: Runtime-updatable settings.
             **kwargs: Additional arguments passed to the parent STTService.
+
+        Raises:
+            ValueError: If ``enable_eager_end_of_turn`` and
+                ``vad_force_turn_endpoint`` are both set.
         """
         # Initialize default settings
         default_settings = self.Settings(
@@ -154,6 +171,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             numerals=None,
             profanity_filter=None,
             redact=None,
+            redact_usage=None,
         )
 
         # Apply settings delta
@@ -165,6 +183,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             mip_opt_out=mip_opt_out,
             tag=tag,
             should_interrupt=should_interrupt,
+            vad_force_turn_endpoint=vad_force_turn_endpoint,
             watchdog_min_timeout=watchdog_min_timeout,
             enable_eager_end_of_turn=enable_eager_end_of_turn,
             settings=default_settings,
@@ -177,6 +196,9 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
 
         self._client: SageMakerBidiClient | None = None
         self._response_task: asyncio.Task | None = None
+        # Set while the service is stopping, so the session it closes doesn't
+        # end the turn in progress.
+        self._disconnecting = False
 
     # ------------------------------------------------------------------
     # Transport interface implementation
@@ -215,6 +237,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
         """
         logger.debug("Connecting to Deepgram Flux on SageMaker...")
 
+        self._disconnecting = False
         self._connection_established_event.clear()
 
         self._client = SageMakerBidiClient(
@@ -273,6 +296,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
 
     async def _disconnect(self):
         """Disconnect from the SageMaker endpoint."""
+        self._disconnecting = True
         self._connection_established_event.clear()
         # Discard any in-flight/pending Configure — the connection is going
         # away, so it can no longer be acked or sent.
@@ -346,3 +370,7 @@ class DeepgramFluxSageMakerSTTService(DeepgramFluxSTTBase):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             logger.debug("Response processor stopped")
+            # A turn lives in one session, so it ends when the session does,
+            # unless the service is stopping.
+            if not self._disconnecting:
+                await self._end_turn_cut_short()

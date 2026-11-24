@@ -10,7 +10,6 @@ This module provides integration with Google's AI models via Vertex AI,
 extending the GoogleLLMService with Vertex AI authentication.
 """
 
-import json
 import os
 from dataclasses import dataclass
 
@@ -20,16 +19,13 @@ os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from loguru import logger
 
-from pipecat.adapters.services.gemini_adapter import GeminiVertexLLMAdapter
+from pipecat.adapters.llm.services.gemini_adapter import GeminiVertexLLMAdapter
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.utils import _vertex_credentials
 
 try:
-    from google.auth import default
-    from google.auth.exceptions import GoogleAuthError
-    from google.auth.transport.requests import Request
     from google.genai import Client
     from google.genai.types import HttpOptions
-    from google.oauth2 import service_account
 
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -84,7 +80,7 @@ class GoogleVertexLLMService(GoogleLLMService):
         Args:
             credentials: JSON string of service account credentials.
             credentials_path: Path to the service account JSON file.
-            model: Model identifier (e.g., "gemini-3.6-flash").
+            model: Model identifier (e.g., "gemini-3.8-flash").
 
                 .. deprecated:: 0.0.105
                     Use ``settings=GoogleVertexLLMService.Settings(model=...)`` instead.
@@ -133,7 +129,7 @@ class GoogleVertexLLMService(GoogleLLMService):
 
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="gemini-3.6-flash",
+            model="gemini-3.8-flash",
             system_instruction=None,
             max_tokens=4096,
             temperature=None,
@@ -213,31 +209,4 @@ class GoogleVertexLLMService(GoogleLLMService):
         Raises:
             ValueError: If no valid credentials are provided or found.
         """
-        creds: service_account.Credentials | None = None
-
-        if credentials:
-            # Parse and load credentials from JSON string
-            creds = service_account.Credentials.from_service_account_info(
-                json.loads(credentials),
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-        elif credentials_path:
-            # Load credentials from JSON file
-            creds = service_account.Credentials.from_service_account_file(
-                credentials_path,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-        else:
-            try:
-                creds, project_id = default(
-                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
-                )
-            except GoogleAuthError:
-                pass
-
-        if not creds:
-            raise ValueError("No valid credentials provided.")
-
-        creds.refresh(Request())  # Ensure token is up-to-date, lifetime is 1 hour.
-
-        return creds
+        return _vertex_credentials(credentials, credentials_path)

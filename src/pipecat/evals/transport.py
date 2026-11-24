@@ -80,6 +80,8 @@ class EvalInputTransport(SingleClientWebsocketServerInputTransport):
 
     A vision bot asks for the user's camera image; under eval there is no
     camera, so the image the harness registered for the turn is served instead.
+    With no image registered, the request is answered with an error, so the
+    function call that made it still finishes.
     """
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -94,9 +96,9 @@ class EvalInputTransport(SingleClientWebsocketServerInputTransport):
         if isinstance(serializer, EvalSerializer):
             image = await serializer.user_image_frame(request)
         if image is None:
-            logger.warning(f"{self}: UserImageRequestFrame but no eval image registered")
-            return
-        await self.push_frame(image)
+            await self._answer_image_requests([request], "No user image is registered.")
+        else:
+            await self.push_frame(image)
 
 
 class EvalOutputTransport(SingleClientWebsocketServerOutputTransport):

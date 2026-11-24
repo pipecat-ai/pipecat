@@ -5,17 +5,21 @@
 #
 
 from .base_user_turn_stop_strategy import BaseUserTurnStopStrategy, UserTurnStoppedParams
+from .classifier_user_turn_stop_strategy import ClassifierUserTurnStopStrategy
 from .deferred_user_turn_stop_strategy import DeferredUserTurnStopStrategy, deferred
 from .eager_match_policy import EagerMatchPolicy, ExactMatch, NormalizedMatch
 from .eager_user_turn_stop_strategy import EagerUserTurnStopStrategy
 from .external_user_turn_completion_stop_strategy import ExternalUserTurnCompletionStopStrategy
 from .external_user_turn_stop_strategy import ExternalUserTurnStopStrategy
-from .llm_turn_completion_user_turn_stop_strategy import LLMTurnCompletionUserTurnStopStrategy
+from .llm_turn_completion.llm_turn_completion_user_turn_stop_strategy import (
+    LLMTurnCompletionUserTurnStopStrategy,
+)
 from .speech_timeout_user_turn_stop_strategy import SpeechTimeoutUserTurnStopStrategy
 from .turn_analyzer_user_turn_stop_strategy import TurnAnalyzerUserTurnStopStrategy
 
 __all__ = [
     "BaseUserTurnStopStrategy",
+    "ClassifierUserTurnStopStrategy",
     "DeferredUserTurnStopStrategy",
     "EagerMatchPolicy",
     "EagerUserTurnStopStrategy",

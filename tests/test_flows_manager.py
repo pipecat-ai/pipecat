@@ -18,6 +18,7 @@ The tests use unittest.IsolatedAsyncioTestCase for async support and
 include mocked dependencies for PipelineTask and LLM services.
 """
 
+import threading
 import unittest
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
@@ -29,6 +30,7 @@ from pipecat.flows.types import (
     FlowArgs,
     FlowResult,
     FlowsFunctionSchema,
+    NodeEntered,
     flows_tool_options,
 )
 from pipecat.frames.frames import (
@@ -37,6 +39,7 @@ from pipecat.frames.frames import (
     LLMSetToolsFrame,
     LLMUpdateSettingsFrame,
 )
+from pipecat.processors.frameworks.rtvi.frames import RTVIFlowNodeEnteredFrame
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from tests.flows_test_helpers import (
@@ -168,6 +171,73 @@ class TestFlowManager(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(mock_function.called)  # Shouldn't be called until function is used
         self.assertEqual(flow_manager._current_node, "test")
+
+    async def test_function_schema_metadata(self):
+        """Metadata is the schema's last field and stays out of the LLM's schema."""
+        handler = AsyncMock(return_value={"status": "success"})
+
+        positional = FlowsFunctionSchema("n", "d", {}, [], handler)
+        self.assertIs(positional.handler, handler)
+        self.assertIsNone(positional.metadata)
+
+        with_options = FlowsFunctionSchema("n", "d", {}, [], handler, True, 5.0)
+        self.assertTrue(with_options.cancel_on_interruption)
+        self.assertEqual(with_options.timeout_secs, 5.0)
+        self.assertIsNone(with_options.metadata)
+
+        schema = FlowsFunctionSchema(
+            name="n",
+            description="d",
+            properties={"size": {"type": "string"}},
+            required=["size"],
+            handler=handler,
+            metadata={"x": 1},
+        )
+        self.assertEqual(schema.metadata, {"x": 1})
+        function_schema = schema.to_function_schema()
+        self.assertFalse(hasattr(function_schema, "metadata"))
+        self.assertEqual(
+            function_schema.to_default_dict(),
+            {
+                "name": "n",
+                "description": "d",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"size": {"type": "string"}},
+                    "required": ["size"],
+                },
+            },
+        )
+
+    async def test_node_metadata_passes_through(self):
+        """A node with metadata is set as any other, and its tools are advertised without it."""
+        flow_manager = FlowManager(
+            worker=self.mock_worker,
+            llm=self.mock_llm,
+            context_aggregator=self.mock_context_aggregator,
+        )
+        node: NodeConfig = {
+            "name": "tagged",
+            "metadata": {"graph_node": "n1"},
+            "task_messages": [{"role": "developer", "content": "Test message"}],
+            "functions": [
+                FlowsFunctionSchema(
+                    name="test_function",
+                    description="Test function",
+                    properties={},
+                    required=[],
+                    handler=AsyncMock(return_value={"status": "success"}),
+                    metadata={"exit": "done"},
+                ),
+            ],
+        }
+
+        await flow_manager.initialize(node)
+
+        self.assertEqual(flow_manager.current_node, "tagged")
+        (tool,) = get_advertised_tools(self.mock_worker).standard_tools
+        self.assertEqual(tool.name, "test_function")
+        self.assertFalse(hasattr(tool, "metadata"))
 
     async def test_node_validation(self):
         """Test node configuration validation."""
@@ -1445,3 +1515,347 @@ class TestFlowManager(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(messages[1], {"role": "developer", "content": "Be concise."})
         self.assertEqual(messages[2], {"role": "developer", "content": "Do the task."})
+
+
+class TestNodeEnteredEvent(unittest.IsolatedAsyncioTestCase):
+    """The ``on_node_entered`` event."""
+
+    async def asyncSetUp(self):
+        self.mock_worker = make_mock_worker()
+        self.llm = OpenAILLMService(api_key="test-key")
+        assistant = MagicMock()
+        type(assistant).has_function_calls_in_progress = PropertyMock(return_value=False)
+        self.context_aggregator = MagicMock()
+        self.context_aggregator.user = MagicMock(return_value=MagicMock())
+        self.context_aggregator.assistant = MagicMock(return_value=assistant)
+
+    def make_manager(self, worker=None, **kwargs) -> tuple[FlowManager, list[NodeEntered]]:
+        """A manager, and the list its ``on_node_entered`` handler appends to."""
+        flow_manager = FlowManager(
+            worker=worker or self.mock_worker,
+            llm=self.llm,
+            context_aggregator=self.context_aggregator,
+            **kwargs,
+        )
+        entered: list[NodeEntered] = []
+
+        @flow_manager.event_handler("on_node_entered")
+        async def on_node_entered(flow_manager, event):
+            entered.append(event)
+
+        return flow_manager, entered
+
+    @staticmethod
+    def node(name: str, *functions: FlowsFunctionSchema, **extras) -> NodeConfig:
+        return {
+            "name": name,
+            "task_messages": [{"role": "developer", "content": name}],
+            "functions": list(functions),
+            **extras,
+        }
+
+    @staticmethod
+    def edge(name: str, next_node: NodeConfig, **kwargs) -> FlowsFunctionSchema:
+        """A function that moves the flow to ``next_node``."""
+
+        async def handler(args, flow_manager):
+            return None, next_node
+
+        return FlowsFunctionSchema(
+            name=name, description=name, properties={}, required=[], handler=handler, **kwargs
+        )
+
+    async def invoke(self, name: str, worker=None):
+        """Call an advertised tool the way the LLM service would, then let the
+        context-updated callback fire so a pending transition executes."""
+        handler = get_advertised_tool_handlers(worker or self.mock_worker)[name]
+
+        async def result_callback(result, *, properties=None):
+            if properties is not None and properties.on_context_updated is not None:
+                await properties.on_context_updated()
+
+        await handler(
+            FunctionCallParams(
+                function_name=name,
+                tool_call_id="t1",
+                arguments={},
+                llm=self.llm,
+                pipeline_worker=worker or self.mock_worker,
+                context=None,
+                result_callback=result_callback,
+            )
+        )
+
+    @staticmethod
+    def queued_frame_types(worker) -> list[str]:
+        return [
+            type(frame).__name__
+            for call in worker.queue_frames.call_args_list
+            for frame in call.args[0]
+        ]
+
+    @staticmethod
+    def rtvi_messages(worker) -> list[dict]:
+        """The data of every flow-node-entered message queued on the worker, as sent."""
+        return [
+            call.args[0].data.model_dump(exclude_none=True)
+            for call in worker.queue_frame.call_args_list
+            if isinstance(call.args[0], RTVIFlowNodeEnteredFrame)
+        ]
+
+    async def test_rtvi_client_is_told_about_each_node(self):
+        booking = self.node("booking", metadata={"step": 2})
+        start = self.node("start", self.edge("begin", booking, metadata={"exit": "begun"}))
+        flow_manager = FlowManager(
+            worker=self.mock_worker, llm=self.llm, context_aggregator=self.context_aggregator
+        )
+
+        await flow_manager.initialize(start)
+        self.assertEqual(
+            self.rtvi_messages(self.mock_worker),
+            [{"node": "start"}],
+        )
+
+        await self.invoke("begin")
+        self.assertEqual(
+            self.rtvi_messages(self.mock_worker)[1],
+            {
+                "node": "booking",
+                "previous_node": "start",
+                "function": "begin",
+                "metadata": {"step": 2},
+                "function_metadata": {"exit": "begun"},
+            },
+        )
+
+    async def test_parent_of_a_subflow_node(self):
+        flow_manager, entered = self.make_manager()
+        await flow_manager.initialize(self.node("start"))
+        await flow_manager.set_node_from_config(self.node("verify.ask", parent="verify"))
+
+        self.assertIsNone(entered[0].parent)
+        self.assertEqual(entered[1].parent, "verify")
+        self.assertEqual(
+            self.rtvi_messages(self.mock_worker),
+            [
+                {"node": "start"},
+                {
+                    "node": "verify.ask",
+                    "previous_node": "start",
+                    "parent": "verify",
+                },
+            ],
+        )
+
+    async def test_metadata_that_is_not_json_is_left_out_of_the_rtvi_message(self):
+        lock = threading.Lock()
+        booking = self.node("booking", metadata={"lock": lock})
+        start = self.node("start", self.edge("begin", booking, metadata={"handle": object()}))
+        flow_manager, entered = self.make_manager()
+
+        with patch("pipecat.flows.manager.logger") as mock_logger:
+            await flow_manager.initialize(start)
+            await self.invoke("begin")
+
+        # The node is entered, and handlers get the metadata as the application wrote it.
+        self.assertEqual(flow_manager.current_node, "booking")
+        self.assertEqual(self.queued_frame_types(self.mock_worker)[-1], "LLMRunFrame")
+        self.assertIs(entered[1].metadata["lock"], lock)
+        self.assertEqual(
+            self.rtvi_messages(self.mock_worker)[1],
+            {"node": "booking", "previous_node": "start", "function": "begin"},
+        )
+        self.assertEqual(mock_logger.warning.call_count, 2)
+
+    async def test_metadata_keys_reach_the_client_as_json_strings(self):
+        flow_manager, entered = self.make_manager()
+        await flow_manager.initialize(self.node("start", metadata={1: "one"}))
+
+        self.assertEqual(entered[0].metadata, {1: "one"})
+        self.assertEqual(
+            self.rtvi_messages(self.mock_worker), [{"node": "start", "metadata": {"1": "one"}}]
+        )
+
+    async def test_rtvi_message_follows_the_handlers_and_precedes_the_llm_run(self):
+        calls = MagicMock()
+        self.mock_worker.queue_frame.side_effect = lambda frame: calls.frame(type(frame).__name__)
+        self.mock_worker.queue_frames.side_effect = lambda frames: [
+            calls.frame(type(frame).__name__) for frame in frames
+        ]
+        flow_manager = FlowManager(
+            worker=self.mock_worker, llm=self.llm, context_aggregator=self.context_aggregator
+        )
+
+        @flow_manager.event_handler("on_node_entered")
+        async def on_node_entered(flow_manager, event):
+            calls.handler()
+
+        await flow_manager.initialize(self.node("start"))
+
+        order = [c[0] if c[0] == "handler" else c.args[0] for c in calls.mock_calls]
+        self.assertEqual(order[-3:], ["handler", "RTVIFlowNodeEnteredFrame", "LLMRunFrame"])
+
+    async def test_initialize_enters_the_first_node(self):
+        flow_manager, entered = self.make_manager()
+        await flow_manager.initialize(self.node("start"))
+
+        self.assertEqual(entered, [NodeEntered(node="start")])
+        self.assertIsNone(entered[0].previous_node)
+        self.assertIsNone(entered[0].function)
+
+    async def test_initialize_without_a_node_enters_nothing(self):
+        flow_manager, entered = self.make_manager()
+        await flow_manager.initialize()
+        self.assertEqual(entered, [])
+
+    async def test_edge_function_transition(self):
+        booking = self.node("booking", metadata={"step": 2})
+        start = self.node(
+            "start",
+            self.edge("begin", booking, metadata={"exit": "begun"}),
+            self.edge("skip", booking),
+        )
+        flow_manager, entered = self.make_manager()
+        await flow_manager.initialize(start)
+
+        await self.invoke("begin")
+
+        self.assertEqual(
+            entered[1],
+            NodeEntered(
+                node="booking",
+                previous_node="start",
+                function="begin",
+                metadata={"step": 2},
+                function_metadata={"exit": "begun"},
+            ),
+        )
+
+    async def test_function_without_metadata(self):
+        start = self.node("start", self.edge("skip", self.node("booking")))
+        flow_manager, entered = self.make_manager()
+        await flow_manager.initialize(start)
+
+        await self.invoke("skip")
+
+        self.assertEqual(
+            entered[1], NodeEntered(node="booking", previous_node="start", function="skip")
+        )
+
+    async def test_global_function_transition(self):
+        help_desk = self.node("help_desk")
+        flow_manager, entered = self.make_manager(
+            global_functions=[self.edge("get_help", help_desk, metadata={"exit": "help"})]
+        )
+        await flow_manager.initialize(self.node("start"))
+
+        await self.invoke("get_help")
+
+        self.assertEqual(entered[1].function, "get_help")
+        self.assertEqual(entered[1].function_metadata, {"exit": "help"})
+
+    async def test_function_metadata_comes_from_the_node_being_left(self):
+        end = self.node("end")
+        middle = self.node("middle", self.edge("go", end, metadata={"from": "middle"}))
+        start = self.node("start", self.edge("go", middle, metadata={"from": "start"}))
+        flow_manager, entered = self.make_manager()
+        await flow_manager.initialize(start)
+
+        await self.invoke("go")
+        await self.invoke("go")
+
+        self.assertEqual([e.node for e in entered], ["start", "middle", "end"])
+        self.assertEqual(entered[1].function_metadata, {"from": "start"})
+        self.assertEqual(entered[2].function_metadata, {"from": "middle"})
+
+    async def test_set_node_from_config(self):
+        flow_manager, entered = self.make_manager()
+        await flow_manager.initialize(self.node("start", metadata={"step": 1}))
+        await flow_manager.set_node_from_config(self.node("other"))
+
+        self.assertEqual(entered[0].metadata, {"step": 1})
+        self.assertEqual(entered[1], NodeEntered(node="other", previous_node="start"))
+
+    async def test_reentering_a_node_fires_again(self):
+        flow_manager, entered = self.make_manager()
+        await flow_manager.initialize(self.node("start"))
+        await flow_manager.set_node_from_config(self.node("start"))
+
+        self.assertEqual(
+            entered, [NodeEntered(node="start"), NodeEntered(node="start", previous_node="start")]
+        )
+
+    async def test_handler_runs_after_the_node_is_set_and_before_the_llm_runs(self):
+        flow_manager = FlowManager(
+            worker=self.mock_worker, llm=self.llm, context_aggregator=self.context_aggregator
+        )
+        seen = []
+
+        @flow_manager.event_handler("on_node_entered")
+        async def on_node_entered(flow_manager, event):
+            seen.append((flow_manager.current_node, self.queued_frame_types(self.mock_worker)))
+
+        await flow_manager.initialize(self.node("start"))
+
+        ((current_node, frames_before),) = seen
+        self.assertEqual(current_node, "start")
+        self.assertIn("LLMSetToolsFrame", frames_before)
+        self.assertNotIn("LLMRunFrame", frames_before)
+        self.assertEqual(self.queued_frame_types(self.mock_worker)[-1], "LLMRunFrame")
+
+    async def test_sync_handler(self):
+        flow_manager = FlowManager(
+            worker=self.mock_worker, llm=self.llm, context_aggregator=self.context_aggregator
+        )
+        entered = []
+        flow_manager.add_event_handler("on_node_entered", lambda fm, event: entered.append(event))
+
+        await flow_manager.initialize(self.node("start"))
+
+        self.assertEqual(entered, [NodeEntered(node="start")])
+
+    async def test_failing_handler_does_not_stop_the_transition(self):
+        flow_manager = FlowManager(
+            worker=self.mock_worker, llm=self.llm, context_aggregator=self.context_aggregator
+        )
+        later = []
+
+        @flow_manager.event_handler("on_node_entered")
+        async def failing(flow_manager, event):
+            raise RuntimeError("handler failed")
+
+        @flow_manager.event_handler("on_node_entered")
+        async def after(flow_manager, event):
+            later.append(event.node)
+
+        await flow_manager.initialize(self.node("start", self.edge("go", self.node("next"))))
+        await self.invoke("go")
+
+        self.assertEqual(flow_manager.current_node, "next")
+        self.assertEqual(later, ["start", "next"])
+        self.assertEqual(self.queued_frame_types(self.mock_worker).count("LLMRunFrame"), 2)
+
+    async def test_frames_are_the_same_with_and_without_a_handler(self):
+        def flow() -> NodeConfig:
+            return self.node("start", self.edge("go", self.node("next", metadata={"step": 2})))
+
+        with_handler = make_mock_worker()
+        flow_manager, entered = self.make_manager(worker=with_handler)
+        await flow_manager.initialize(flow())
+        await self.invoke("go", worker=with_handler)
+
+        without_handler = make_mock_worker()
+        flow_manager = FlowManager(
+            worker=without_handler, llm=self.llm, context_aggregator=self.context_aggregator
+        )
+        await flow_manager.initialize(flow())
+        await self.invoke("go", worker=without_handler)
+
+        self.assertEqual(len(entered), 2)
+        self.assertEqual(flow_manager.current_node, "next")
+        self.assertEqual(
+            self.queued_frame_types(with_handler), self.queued_frame_types(without_handler)
+        )
+        self.assertEqual(
+            with_handler.queue_frame.call_count, without_handler.queue_frame.call_count
+        )

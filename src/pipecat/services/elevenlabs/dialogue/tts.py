@@ -14,11 +14,12 @@ import base64
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Union
+from typing import Any, ClassVar, Literal, Union
 
 from loguru import logger
 from websockets.protocol import State
 
+from pipecat.adapters.tts.services.elevenlabs_adapter import ElevenLabsAudioTagExpressionAdapter
 from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
@@ -29,7 +30,6 @@ from pipecat.services.elevenlabs.tts_base import (
     _select_alignment,
     _strip_utterance_leading_spaces,
     _word_timestamps_include_inter_frame_spaces,
-    calculate_word_times,
     elevenlabs_language_code,
 )
 from pipecat.services.settings import TTSSettings
@@ -48,23 +48,44 @@ class ElevenLabsDialogueTTSSettings(ElevenLabsTTSSettingsBase):
     """Settings for ElevenLabsDialogueTTSService.
 
     Parameters:
-        stability: Voice stability control (0.0 to 1.0), the only voice setting
-            Text-to-Dialogue reads. ElevenLabs documents three reference points:
-            0.0 is the most expressive but can hallucinate, 0.5 stays closest to
-            the reference recording, and 1.0 is the most consistent but least
-            responsive to audio tags. Values in between are accepted.
+        stability: Voice stability control (0.0 to 1.0). ElevenLabs documents
+            three reference points: 0.0 is the most expressive but can
+            hallucinate, 0.5 stays closest to the reference recording, and 1.0
+            is the most consistent but least responsive to audio tags. Values
+            in between are accepted.
+        clone_strength: Professional-voice-clone control (0.0 to 1.0) the v4
+            models read. Controls how closely the voice follows its clone
+            samples; ElevenLabs recommends 0 for most use cases, and on the
+            Text-to-Dialogue endpoints it also decides whether a v4
+            Professional Voice Clone runs as a PVC or an IVC. Dropped with a
+            warning on models that don't read it, such as eleven_v3.
+        apply_text_normalization: Whether ElevenLabs converts numbers, dates and
+            currencies to words before the model speaks them. ``"on"`` always
+            converts, so ``07/03/2026`` is read as "July third, twenty
+            twenty-six". ``"off"`` skips the conversion and leaves the text to the
+            model. ``"auto"`` (ElevenLabs' default) lets ElevenLabs decide. Word
+            timestamps, and so the LLM context, carry the original text in every
+            mode.
     """
 
     stability: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    clone_strength: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    apply_text_normalization: Literal["auto", "on", "off"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
     #: Fields in the WS URL — changing any of these requires a reconnect. Voice
     #: is absent because Text-to-Dialogue registers voices per context rather
     #: than in the URL, so a voice change only needs a new context.
-    URL_FIELDS: ClassVar[frozenset[str]] = frozenset({"model", "language"})
+    URL_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"model", "language", "apply_text_normalization"}
+    )
 
     #: Fields carried in the per-context registration message — changing these
     #: requires closing the current audio context so the next one picks them up.
-    VOICE_SETTINGS_FIELDS: ClassVar[frozenset[str]] = frozenset({"voice", "stability"})
+    VOICE_SETTINGS_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"voice", "stability", "clone_strength"}
+    )
 
 
 def build_elevenlabs_ttd_voice_settings(
@@ -72,24 +93,39 @@ def build_elevenlabs_ttd_voice_settings(
 ) -> dict[str, float] | None:
     """Build a Text-to-Dialogue voice settings dict.
 
-    ``stability`` is the only setting Text-to-Dialogue reads. The endpoint
-    silently ignores the other voice settings the text-to-speech endpoint
-    accepts, so sending them would suggest an effect they don't have.
+    Text-to-Dialogue reads ``stability``, plus ``clone_strength`` on the v4
+    models, whose Professional Voice Clones it shapes. The endpoint silently
+    ignores the other voice settings the text-to-speech endpoint accepts, so
+    sending them would suggest an effect they don't have; ``clone_strength``
+    is likewise dropped, with a warning, on models that don't read it.
 
     Args:
-        settings: A settings object or dict to read ``stability`` from.
+        settings: A settings object or dict to read the voice settings and the
+            model from.
 
     Returns:
-        The voice settings dict, or None if stability is unset.
+        The voice settings dict, or None if no supported setting is set.
     """
-    stability = (
-        getattr(settings, "stability", None)
-        if isinstance(settings, TTSSettings)
-        else settings.get("stability")
-    )
-    if stability is None or stability is NOT_GIVEN:
-        return None
-    return {"stability": stability}
+
+    def _get(key: str) -> Any:
+        return (
+            getattr(settings, key, None) if isinstance(settings, TTSSettings) else settings.get(key)
+        )
+
+    voice_settings: dict[str, float] = {}
+    stability = _get("stability")
+    if stability is not None and stability is not NOT_GIVEN:
+        voice_settings["stability"] = stability
+    clone_strength = _get("clone_strength")
+    if clone_strength is not None and clone_strength is not NOT_GIVEN:
+        model = _get("model")
+        if isinstance(model, str) and model.startswith("eleven_v4"):
+            voice_settings["clone_strength"] = clone_strength
+        else:
+            logger.warning(
+                f"clone_strength not applied. Only eleven_v4 models read it; {model!r} doesn't."
+            )
+    return voice_settings or None
 
 
 def _normalize_ttd_alignment(alignment: Mapping[str, Any]) -> dict[str, Any]:
@@ -141,12 +177,14 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
     Turbo v2.5, and Multilingual models — it has a fuller set of voice controls.
 
     Eleven v3 and v4 perform inline audio tags such as ``[laughs]`` and
-    ``[excited]``. They come back as spoken characters in the alignment, so they
-    reach the LLM context as text unless a text filter removes them.
+    ``[excited]``. They come back as characters in the alignment, and reach
+    the word timestamps as words of their own: a sound's or a pause's marks
+    when it is performed, and other markup isn't spoken.
     """
 
     Settings = ElevenLabsDialogueTTSSettings
     _settings: Settings
+    expression_adapter_class = ElevenLabsAudioTagExpressionAdapter
 
     CONNECTION_NAME = "ElevenLabs Text-to-Dialogue"
 
@@ -160,6 +198,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
         seed: int | None = None,
         settings: Settings | None = None,
         text_aggregation_mode: TextAggregationMode | None = None,
+        pause_frame_processing: bool = True,
         **kwargs,
     ):
         """Initialize the ElevenLabs Text-to-Dialogue TTS service.
@@ -174,6 +213,10 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             text_aggregation_mode: How to aggregate incoming text before
                 synthesis. Only :attr:`TextAggregationMode.SENTENCE` is
                 supported; any other value is ignored with a warning.
+            pause_frame_processing: Whether to hold incoming frames after a turn
+                until its audio has played. With False, contexts synthesize
+                concurrently on the one socket (e.g. two ``TTSSpeakFrame`` pushed
+                at once, or back-to-back turns) and still play in order.
             **kwargs: Additional arguments passed to the parent service.
         """
         default_settings = self.Settings(
@@ -181,6 +224,8 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             voice=None,
             language=None,
             stability=None,
+            clone_strength=None,
+            apply_text_normalization=None,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -191,7 +236,7 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
             enable_logging=enable_logging,
             push_text_frames=False,
             push_stop_frames=False,
-            pause_frame_processing=True,
+            pause_frame_processing=pause_frame_processing,
             # Consecutive inputs are concatenated verbatim, so without a
             # trailing space one input's last word merges into the next's first.
             append_trailing_space=True,
@@ -275,6 +320,10 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
 
         if self._seed is not None:
             url += f"&seed={self._seed}"
+
+        apply_text_normalization = assert_given(self._settings.apply_text_normalization)
+        if apply_text_normalization is not None:
+            url += f"&apply_text_normalization={apply_text_normalization}"
 
         language_code = elevenlabs_language_code(
             assert_given(model), assert_given(self._settings.language)
@@ -382,11 +431,10 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
                 not context.alignment_started,
             )
             context.alignment_started = True
-            word_times, self._partial_word, self._partial_word_start_time = calculate_word_times(
-                alignment,
-                self._cumulative_time,
-                self._partial_word,
-                self._partial_word_start_time,
+            # The audio tags expressive conversation sends mark when its sounds
+            # are performed.
+            word_times = self._word_times_from_alignment(
+                received_ctx_id, alignment, audio_tags=bool(self._expression_formatter)
             )
 
             if word_times:
@@ -401,19 +449,6 @@ class ElevenLabsDialogueTTSService(ElevenLabsTTSBase):
                         else None
                     ),
                 )
-
-            # Alignment times restart at zero in every message, so the clock
-            # advances by each chunk's span. It has to advance for chunks that
-            # complete no word too — trailing punctuation arrives on its own —
-            # or every later word is timestamped early by the shortfall.
-            char_start_times_ms = alignment.get("charStartTimesMs", [])
-            char_durations_ms = alignment.get("charDurationsMs", [])
-
-            if char_start_times_ms and char_durations_ms:
-                chunk_end_time_ms = char_start_times_ms[-1] + char_durations_ms[-1]
-                self._cumulative_time += chunk_end_time_ms / 1000.0
-            elif word_times:
-                self._cumulative_time = word_times[-1][1]
 
     async def _register_keepalive_context(self):
         """Open a context that exists only to keep the connection alive.

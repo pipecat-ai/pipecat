@@ -21,8 +21,9 @@ class LLMSearchResult:
     """Represents a single search result with confidence scores.
 
     Parameters:
-        text: The search result text content.
-        confidence: List of confidence scores associated with the result.
+        text: A part of the answer that the site supports.
+        confidence: How confident the LLM is in each site this part of the answer
+            cites, from 0 to 1, one score per site.
     """
 
     text: str
@@ -36,7 +37,7 @@ class LLMSearchOrigin:
     Parameters:
         site_uri: URI of the source website.
         site_title: Title of the source website.
-        results: List of search results from this origin.
+        results: The parts of the answer this site supports.
     """
 
     site_uri: str | None = None

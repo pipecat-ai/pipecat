@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     OutputAudioRawFrame,
     StartFrame,
+    UserMuteStoppedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -241,6 +242,8 @@ class AudioBufferProcessor(FrameProcessor):
             return
         self._recording = True
         self._reset_recording()
+        await self._input_resampler.reset()
+        await self._output_resampler.reset()
         await self._call_event_handler("on_recording_started")
 
     async def stop_recording(self):
@@ -249,6 +252,10 @@ class AudioBufferProcessor(FrameProcessor):
         Calls audio handlers with any remaining buffered audio before stopping,
         then triggers the ``on_recording_stopped`` event. Does nothing when
         recording is not active.
+
+        Stops at once, so bot audio still queued in the pipeline isn't recorded.
+        To stop after queued audio has played, push an
+        ``AudioBufferStopRecordingFrame`` instead.
         """
         if not self._recording:
             return
@@ -295,8 +302,14 @@ class AudioBufferProcessor(FrameProcessor):
             self._user_speaking = False
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
+            # No bot audio arrives between replies, so each reply starts the
+            # resampler clean instead of with the end of the previous one.
+            await self._output_resampler.reset()
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
+        elif isinstance(frame, UserMuteStoppedFrame):
+            # Likewise for user audio, which doesn't arrive while the user is muted.
+            await self._input_resampler.reset()
 
         resampled = None
         if isinstance(frame, InputAudioRawFrame):

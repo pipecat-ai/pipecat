@@ -29,10 +29,7 @@ from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_start import WakePhraseUserTurnStartStrategy
-from pipecat.turns.user_turn_strategies import (
-    UserTurnStrategies,
-    default_user_turn_start_strategies,
-)
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -98,7 +95,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                         # Timeout before wake phrase must be spoken again
                         timeout=5.0,
                     ),
-                    *default_user_turn_start_strategies(),
                 ]
             ),
             vad_analyzer=SileroVADAnalyzer(),

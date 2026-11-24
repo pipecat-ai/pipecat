@@ -25,9 +25,9 @@ from typing_extensions import override
 from websockets.asyncio import client as websocket_client
 from websockets.exceptions import ConnectionClosed
 
-from pipecat.adapters.schemas.direct_function import DirectFunction
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.direct_function import DirectFunction
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
@@ -58,6 +58,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, LLMWithBackendRole
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
 # Result shipped as the client_tool_result when we see an async-tool
@@ -172,6 +173,7 @@ class JoinUrlInputParams(BaseModel):
     join_url: str
 
 
+@traced_realtime_llm
 class UltravoxRealtimeLLMService(LLMService):
     """Provides access to the Ultravox Realtime API.
 
@@ -235,7 +237,6 @@ class UltravoxRealtimeLLMService(LLMService):
             seed=None,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
-            tool_call_text_policy=None,
             output_medium=None,
         )
 
@@ -268,6 +269,8 @@ class UltravoxRealtimeLLMService(LLMService):
         self._receive_task: asyncio.Task | None = None
         self._disconnecting = False
         self._bot_responding: Literal[None, "text", "voice"] = None
+        self._unanswered_tool_calls: set[str] = set()
+        self._text_turns: dict[int, bool] = {}
         self._last_user_id: str | None = None
         self._completed_tool_calls: set[str] = set()
         # Tracks tool_call_ids for which we've already shipped the
@@ -436,6 +439,8 @@ class UltravoxRealtimeLLMService(LLMService):
             self._receive_task = None
         self._completed_tool_calls = set()
         self._started_placeholder_sent = set()
+        self._unanswered_tool_calls.clear()
+        self._text_turns.clear()
 
     async def _update_settings(self, delta: Settings):
         changed = await super()._update_settings(delta)
@@ -497,7 +502,11 @@ class UltravoxRealtimeLLMService(LLMService):
         channel, or as text when the call was already settled with the
         placeholder that unfreezes an async one.
         """
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
         is_final = frame.properties.is_final if frame.properties else True
 
         if not is_final:
@@ -624,6 +633,7 @@ class UltravoxRealtimeLLMService(LLMService):
                 "result": result,
             }
         )
+        self._unanswered_tool_calls.discard(tool_call_id)
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle VAD user stopped speaking frame.
@@ -732,6 +742,7 @@ class UltravoxRealtimeLLMService(LLMService):
                             # response via _handle_response_end; firing the
                             # interruption first ensures the aggregator handles
                             # InterruptionFrame before LLMFullResponseEndFrame.
+                            self._unanswered_tool_calls.clear()
                             await self.broadcast_interruption()
                         case "client_tool_invocation":
                             await self._handle_tool_invocation(
@@ -754,6 +765,7 @@ class UltravoxRealtimeLLMService(LLMService):
                                         data.get("text"),
                                         data.get("delta"),
                                         data.get("final", False),
+                                        data.get("ordinal"),
                                     )
                                 case _:
                                     logger.debug(
@@ -794,6 +806,9 @@ class UltravoxRealtimeLLMService(LLMService):
     async def _handle_tool_invocation(
         self, tool_name: str, invocation_id: str, parameters: dict[str, Any]
     ):
+        self._unanswered_tool_calls.add(invocation_id)
+        if self._text_turns:
+            self._text_turns[max(self._text_turns)] = True
         # Ultravox freezes the conversation between client_tool_invocation
         # and the matching client_tool_result. For functions registered
         # with cancel_on_interruption=False the actual result won't be
@@ -819,6 +834,7 @@ class UltravoxRealtimeLLMService(LLMService):
         )
 
     async def _handle_user_transcript(self, text: str):
+        self._unanswered_tool_calls.clear()
         await self.push_frame(
             TranscriptionFrame(
                 user_id=self._last_user_id or "",
@@ -830,7 +846,12 @@ class UltravoxRealtimeLLMService(LLMService):
         )
 
     async def _handle_agent_transcript(
-        self, medium: str, text: str | None, delta: str | None, final: bool
+        self,
+        medium: str,
+        text: str | None,
+        delta: str | None,
+        final: bool,
+        ordinal: int | None = None,
     ):
         transcript = text or delta
         if medium == "voice":
@@ -846,13 +867,21 @@ class UltravoxRealtimeLLMService(LLMService):
                 await self.push_frame(tts_frame)
         elif medium == "text":
             if final:
+                if ordinal is not None:
+                    self._text_turns.pop(ordinal, None)
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
                 self._bot_responding = None
             elif transcript:
+                after_tool = bool(self._unanswered_tool_calls)
+                if ordinal is not None:
+                    # A late delta of the old utterance can follow a tool
+                    # result. Its ordinal distinguishes it from the reply.
+                    after_tool = self._text_turns.setdefault(ordinal, after_tool)
                 if not self._bot_responding:
                     await self.start_processing_metrics()
                     await self.stop_ttfb_metrics()
                     await self.push_frame(LLMFullResponseStartFrame())
                     self._bot_responding = "text"
-                await self.push_frame(LLMTextFrame(text=transcript))
+                if not self._should_suppress_tool_call_text(after_tool):
+                    await self.push_frame(LLMTextFrame(text=transcript))

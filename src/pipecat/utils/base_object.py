@@ -250,7 +250,9 @@ class BaseObject(ABC):
 
         event_handler = self._event_handlers[event_name]
 
-        for handler in event_handler.handlers:
+        # Iterate over a copy, so that a handler that adds or removes handlers
+        # for this event doesn't change which handlers this call runs.
+        for handler in list(event_handler.handlers):
             if event_handler.is_sync:
                 # Just run the handler.
                 await self._run_handler(event_handler.name, handler, *args, **kwargs)

@@ -19,8 +19,8 @@ from typing import Any, Literal, Optional, Union
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.services.anthropic_adapter import (
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.services.anthropic_adapter import (
     AnthropicCacheTTL,
     AnthropicLLMAdapter,
     AnthropicLLMInvocationParams,
@@ -40,7 +40,7 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import LLMSettings, ToolCallPolicy
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS
@@ -64,20 +64,21 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
-# The lowest thinking setting Anthropic documents for each model, sent when the
-# caller configures neither ``thinking`` nor ``effort``, keyed by model name.
-# Each entry is the request fields to send: ``thinking``, or ``output_config``
-# with an effort on models whose thinking can't be turned off. "between_tools"
-# is Sonnet 5.5's lowest setting, and "disabled" is already the default on the
-# Claude 4 models.
+# The request fields sent when the caller sets neither ``thinking`` nor
+# ``effort``, keyed by model name. Each is the model's lowest documented
+# setting, for the fastest responses, unless that setting makes the model speak
+# its reasoning: Haiku 5.5 with thinking disabled narrates its decisions before
+# tool calls, so it gets low effort. "between_tools" is Sonnet 5.5's lowest
+# setting, and "disabled" is already the default on the Claude 4 models.
 _THINKING_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
+    "claude-fable-5-2": {"output_config": {"effort": "low"}},
     "claude-fable-5-1": {"output_config": {"effort": "low"}},
     "claude-fable-5": {"output_config": {"effort": "low"}},
     "claude-opus-5-5": {"output_config": {"effort": "low"}},
     "claude-opus-5": {"thinking": {"type": "disabled"}},
     "claude-sonnet-5-5": {"thinking": {"type": "between_tools"}},
     "claude-sonnet-5": {"thinking": {"type": "disabled"}},
-    "claude-haiku-5-5": {"thinking": {"type": "disabled"}},
+    "claude-haiku-5-5": {"output_config": {"effort": "low"}},
     "claude-opus-4-8": {"thinking": {"type": "disabled"}},
     "claude-opus-4-7": {"thinking": {"type": "disabled"}},
     "claude-opus-4-6": {"thinking": {"type": "disabled"}},
@@ -334,7 +335,6 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             user_turn_completion_config=None,
             thinking=ANTHROPIC_NOT_GIVEN,
             effort=None,
-            tool_call_text_policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED,
             extra={},
         )
 
@@ -422,7 +422,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
         return output_config
 
     def _maybe_apply_thinking_default(self, params: dict[str, Any]):
-        """Send the model's lowest thinking setting when no reasoning is configured.
+        """Send the model's thinking default when no reasoning is configured.
 
         Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one. A
         request that already sets ``thinking`` or an effort, from the settings
@@ -529,6 +529,7 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
         # LLM completion
         response = await self._client.beta.messages.create(**params)
+        self._handle_stop_reason(response)
 
         return next((block.text for block in response.content if hasattr(block, "text")), None)
 
@@ -641,7 +642,8 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
 
                 if event.type == "content_block_delta":
                     if hasattr(event.delta, "text"):
-                        await self._push_llm_text(event.delta.text)
+                        if not self._should_suppress_tool_call_text(tool_use_block is not None):
+                            await self._push_llm_text(event.delta.text)
                         completion_tokens_estimate += self._estimate_tokens(event.delta.text)
                     elif hasattr(event.delta, "partial_json") and tool_use_block:
                         json_accumulator += event.delta.partial_json
@@ -658,7 +660,6 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                         # the call itself is what the caller gets and TTFAT ends
                         # here rather than going unmeasured.
                         await self.stop_ttfat_metrics()
-                        self._note_tool_call_detected()
                         tool_use_block = event.content_block
                         json_accumulator = ""
                     elif event.content_block.type == "thinking":
@@ -683,6 +684,9 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
                                 arguments=args,
                             )
                         )
+
+                if event.type == "message_delta":
+                    self._handle_stop_reason(event.delta)
 
                 # Usage counts are cumulative: message_start reports them so far
                 # and message_delta for the whole message, so each replaces the
@@ -780,6 +784,26 @@ class AnthropicLLMService(LLMService[AnthropicLLMAdapter]):
             self._settings.enable_prompt_caching = frame.enable
         else:
             await self.push_frame(frame, direction)
+
+    def _handle_stop_reason(self, result):
+        """Log why Claude stopped generating, when it stopped for a notable reason.
+
+        Anything other than a normal stop leaves the turn short of what the model
+        would otherwise have said: the request was refused, or the output hit the
+        token limit or the context window. Whatever text did arrive is still
+        passed on.
+
+        Args:
+            result: A streamed ``message_delta``'s delta or a complete message;
+                both carry ``stop_reason`` and ``stop_details``.
+        """
+        stop_reason = getattr(result, "stop_reason", None)
+        if stop_reason in (None, "end_turn", "tool_use", "stop_sequence"):
+            return
+
+        category = getattr(getattr(result, "stop_details", None), "category", None)
+        detail = f" ({category})" if category else ""
+        logger.warning(f"{self}: response incomplete, the model stopped for {stop_reason}{detail}")
 
     def _estimate_tokens(self, text: str) -> int:
         return int(len(re.split(r"[^\w]+", text)) * 1.3)

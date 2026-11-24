@@ -30,10 +30,14 @@ from openai import (
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletionChunk
+from openai.types.chat.chat_completion_chunk import ChoiceDelta
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, OpenAILLMInvocationParams
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.services.open_ai_adapter import (
+    OpenAILLMAdapter,
+    OpenAILLMInvocationParams,
+)
 from pipecat.frames.frames import (
     Frame,
     LLMContextFrame,
@@ -45,7 +49,8 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import LLMSettings, ToolCallPolicy
+from pipecat.services.openai._errors import classify_openai_error
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.http import TIMEOUT_EXCEPTIONS, connection_limits
@@ -97,6 +102,10 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
     Settings = OpenAILLMSettings
     _settings: Settings
+
+    # Set by services for providers other than OpenAI. Without a key the OpenAI
+    # client falls back to OPENAI_API_KEY and would send it to that provider.
+    _requires_api_key = False
 
     supports_developer_role: bool = True
     """Whether this service's API supports the "developer" message role.
@@ -211,7 +220,14 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 attempt produces no output within ``retry_timeout_secs``. The
                 retry is unbounded.
             **kwargs: Additional arguments passed to the parent LLMService.
+
+        Raises:
+            ValueError: If the service is for a provider other than OpenAI and
+                ``api_key`` is empty.
         """
+        if self._requires_api_key and not api_key:
+            raise ValueError(f"{type(self).__name__} requires an api_key.")
+
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
             model="gpt-4.1",
@@ -224,7 +240,6 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
             top_k=None,
             max_tokens=OPENAI_NOT_GIVEN,
             max_completion_tokens=OPENAI_NOT_GIVEN,
-            tool_call_text_policy=ToolCallPolicy.PRESERVE_TEXT_AFTER_TOOL_CALL_DETECTED,
             filter_incomplete_user_turns=False,
             user_turn_completion_config=None,
             extra={},
@@ -493,6 +508,14 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
         return response.choices[0].message.content
 
+    @staticmethod
+    def _audio_transcript(delta: ChoiceDelta) -> str | None:
+        """Read the audio transcript from a typed SDK delta or an older SDK's extra field."""
+        audio = getattr(delta, "audio", None)
+        if isinstance(audio, Mapping):
+            return audio.get("transcript")
+        return getattr(audio, "transcript", None)
+
     def _token_usage(self, usage: CompletionUsage) -> LLMTokenUsage:
         """Convert a chat completion's usage into Pipecat's token usage.
 
@@ -587,16 +610,16 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
 
                     await self.stop_ttfb_metrics()
 
-                    if not chunk.choices[0].delta:
+                    delta = chunk.choices[0].delta
+                    if not delta:
                         continue
 
-                    if chunk.choices[0].delta.tool_calls:
+                    if delta.tool_calls:
                         # A turn that only calls tools produces no answer text, so
                         # the call itself is what the caller gets and TTFAT ends
                         # here rather than going unmeasured.
                         await self.stop_ttfat_metrics()
 
-                        self._note_tool_call_detected()
                         # We're streaming the LLM response to enable the fastest response times.
                         # For text, we just yield each chunk as we receive it and count on consumers
                         # to do whatever coalescing they need (eg. to pass full sentences to TTS)
@@ -608,7 +631,7 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                         # the response is done, we package up all the arguments and the function name and
                         # yield a frame containing the function name and the arguments.
 
-                        tool_call = chunk.choices[0].delta.tool_calls[0]
+                        tool_call = delta.tool_calls[0]
                         if tool_call.index != func_idx:
                             functions_list.append(function_name)
                             arguments_list.append(arguments or "{}")
@@ -617,25 +640,22 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                             arguments = ""
                             tool_call_id = ""
                             func_idx += 1
+                        if tool_call.id:
+                            tool_call_id = tool_call.id
                         if tool_call.function and tool_call.function.name:
                             function_name += tool_call.function.name
-                            tool_call_id = tool_call.id
                         if tool_call.function and tool_call.function.arguments:
                             # Keep iterating through the response to collect all the argument fragments
                             arguments += tool_call.function.arguments
-                    elif chunk.choices[0].delta.content:
-                        await self._push_llm_text(chunk.choices[0].delta.content)
+                    elif delta.content and not self._should_suppress_tool_call_text(
+                        bool(function_name or arguments or func_idx)
+                    ):
+                        await self._push_llm_text(delta.content)
 
                     # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
                     # we need to get LLMTextFrame for the transcript
-                    elif (
-                        hasattr(chunk.choices[0].delta, "audio")
-                        and chunk.choices[0].delta.audio
-                        and chunk.choices[0].delta.audio.get("transcript")
-                    ):
-                        await self.push_frame(
-                            LLMTextFrame(chunk.choices[0].delta.audio["transcript"])
-                        )
+                    elif transcript := self._audio_transcript(delta):
+                        await self.push_frame(LLMTextFrame(transcript))
         finally:
             # Report even if the response is interrupted or cancelled mid-stream.
             if token_usage:
@@ -671,6 +691,17 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 )
 
             await self.run_function_calls(function_calls)
+
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        """Classify a content-filter rejection as ``ErrorCategory.CONTENT_FILTERED``.
+
+        Args:
+            exception: The exception to classify.
+
+        Returns:
+            The category, or None to fall back to the status code.
+        """
+        return classify_openai_error(exception)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
@@ -712,7 +743,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 # application-supplied content and the context is repaired, so
                 # the error is pushed as APPLICATION instead of letting the
                 # rejection classify as permanent and cost the service its
-                # usability.
+                # usability. A content-filter rejection keeps its own category
+                # even when a file is removed, since no response is coming.
                 removed = (
                     isinstance(e, (BadRequestError, UnprocessableEntityError))
                     or (isinstance(e, APIStatusError) and e.status_code == 413)
@@ -720,7 +752,8 @@ class BaseOpenAILLMService(LLMService[OpenAILLMAdapter]):
                 await self.push_error(
                     error_msg=f"Error during completion: {e}",
                     exception=e,
-                    category=ErrorCategory.APPLICATION if removed else None,
+                    category=classify_openai_error(e)
+                    or (ErrorCategory.APPLICATION if removed else None),
                 )
             finally:
                 await self.stop_processing_metrics()

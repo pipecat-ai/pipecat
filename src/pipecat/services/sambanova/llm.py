@@ -12,7 +12,7 @@ from typing import Any
 
 from loguru import logger
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import FunctionCallFromLLM
@@ -41,6 +41,7 @@ class SambaNovaLLMService(OpenAILLMService):
 
     Settings = SambaNovaLLMSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,
@@ -202,11 +203,11 @@ class SambaNovaLLMService(OpenAILLMService):
 
                     await self.stop_ttfb_metrics()
 
-                    if not chunk.choices[0].delta:
+                    delta = chunk.choices[0].delta
+                    if not delta:
                         continue
 
-                    if chunk.choices[0].delta.tool_calls:
-                        self._note_tool_call_detected()
+                    if delta.tool_calls:
                         # We're streaming the LLM response to enable the fastest response times.
                         # For text, we just yield each chunk as we receive it and count on consumers
                         # to do whatever coalescing they need (eg. to pass full sentences to TTS)
@@ -218,7 +219,7 @@ class SambaNovaLLMService(OpenAILLMService):
                         # the response is done, we package up all the arguments and the function name and
                         # yield a frame containing the function name and the arguments.
 
-                        tool_call = chunk.choices[0].delta.tool_calls[0]
+                        tool_call = delta.tool_calls[0]
                         if tool_call.index != func_idx:
                             functions_list.append(function_name)
                             arguments_list.append(arguments)
@@ -227,21 +228,22 @@ class SambaNovaLLMService(OpenAILLMService):
                             arguments = ""
                             tool_call_id = ""
                             func_idx += 1
+                        if tool_call.id:
+                            tool_call_id = tool_call.id
                         if tool_call.function and tool_call.function.name:
                             function_name += tool_call.function.name
-                            tool_call_id = tool_call.id
                         if tool_call.function and tool_call.function.arguments:
                             # Keep iterating through the response to collect all the argument fragments
                             arguments += tool_call.function.arguments
-                    elif chunk.choices[0].delta.content:
-                        await self._push_llm_text(chunk.choices[0].delta.content)
+                    elif delta.content and not self._should_suppress_tool_call_text(
+                        bool(function_name or arguments or func_idx)
+                    ):
+                        await self._push_llm_text(delta.content)
 
                     # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
                     # we need to get LLMTextFrame for the transcript
-                    elif (audio := getattr(chunk.choices[0].delta, "audio", None)) and audio.get(
-                        "transcript"
-                    ):
-                        await self._push_llm_text(audio["transcript"])
+                    elif transcript := self._audio_transcript(delta):
+                        await self._push_llm_text(transcript)
         finally:
             # Report even if the response is interrupted or cancelled mid-stream.
             if token_usage:

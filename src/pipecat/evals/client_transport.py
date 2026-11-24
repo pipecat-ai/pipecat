@@ -24,7 +24,7 @@ import time
 import wave
 from pathlib import Path
 
-from pipecat.audio.utils import create_stream_resampler, mix_audio
+from pipecat.audio.utils import create_file_resampler, mix_audio
 from pipecat.evals.serializer import EvalConnectionFlags, eval_connect_message
 from pipecat.frames.frames import (
     CancelFrame,
@@ -41,7 +41,7 @@ from pipecat.transports.websocket.client import (
     WebsocketClientInputTransport,
     WebsocketClientOutputTransport,
 )
-from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
+from pipecat.transports.websocket.rtvi_client import RTVIClientInputTransport, RTVIClientTransport
 
 # One audio frame per tick, on both edges. 40ms matches the bot's output chunking
 # (``audio_out_10ms_chunks`` defaults to 4), so the receive side re-emits the bot's
@@ -170,7 +170,7 @@ class _RecorderTrack:
             return b""
         audio = self._layout()
         if self._rate != out_rate:
-            audio = await create_stream_resampler().resample(audio, self._rate, out_rate)
+            audio = await create_file_resampler().resample(audio, self._rate, out_rate)
         lead = int((self.first - start) * out_rate * 2) & ~1
         return b"\x00" * lead + audio
 
@@ -285,7 +285,7 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
             self._send_task = None
 
 
-class EvalClientInputTransport(WebsocketClientInputTransport):
+class EvalClientInputTransport(RTVIClientInputTransport):
     """Feeds the bot's audio to the harness's VAD and STT as a continuous stream.
 
     The bot sends audio only while its TTS produces it, with gaps at its

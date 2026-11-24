@@ -50,6 +50,27 @@ def test_soniox_english_characters_assemble_into_words():
     ]
 
 
+def test_soniox_audio_tag_is_one_word_with_its_spaces():
+    service = _service("en")
+
+    assert [
+        w for w, _ in service._to_word_times("s1", _timestamps("7. [neutral][long pause] Hi "))
+    ] == [
+        "7.",
+        "[neutral][long pause]",
+        "Hi",
+    ]
+
+
+def test_soniox_stressed_word_is_reported_without_its_asterisks():
+    service = _service("en")
+
+    assert [w for w, _ in service._to_word_times("s1", _timestamps("*Really* good "))] == [
+        "Really",
+        "good",
+    ]
+
+
 def test_soniox_english_partial_word_carries_across_messages():
     service = _service("en")
 
@@ -172,6 +193,7 @@ class TestSonioxUpdateSettingsFinalizesOldContext(unittest.IsolatedAsyncioTestCa
         )
         # Applying a settings delta reports the service usable again.
         service._is_usable = True
+        service._expression_formatter = None
         # Real streaming sequencer with a mid-sentence prefix pending on the turn ctx.
         seq = AggregatedFrameSequencer(name=service._name, streaming=True)
         service._aggregated_frame_sequencer = seq
@@ -290,6 +312,56 @@ async def test_soniox_error_code_sets_category(monkeypatch):
     await service._receive_messages()
 
     assert categories == [ErrorCategory.QUOTA, ErrorCategory.AUTHENTICATION, None]
+
+
+def _stream_not_found(stream_id: str) -> dict:
+    return {
+        "stream_id": stream_id,
+        "error_code": 400,
+        "error_type": "invalid_stream_state",
+        "error_message": f"Stream {stream_id} not found. Send a start message first.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_soniox_cancel_crossing_the_stream_end_is_not_an_error(monkeypatch):
+    # The stream ends on Soniox's side as the interruption cancels it: Soniox's
+    # `terminated` is on its way, and the cancel then finds no stream.
+    service = SonioxTTSService(api_key="test-key")
+    errors = []
+
+    async def fake_push_error(*args, **kwargs):
+        errors.append(kwargs)
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+    service._websocket = _FakeReceivingWebsocket(
+        [{"stream_id": "stream-1", "terminated": True}, _stream_not_found("stream-1")]
+    )
+
+    await service._send_config("stream-1")
+    await service.on_audio_context_interrupted("stream-1")
+    await service._receive_messages()
+
+    assert service._websocket.sent[-1] == {"stream_id": "stream-1", "cancel": True}
+    assert errors == []
+
+
+@pytest.mark.asyncio
+async def test_soniox_stream_not_found_for_a_stream_not_cancelled_is_an_error(monkeypatch):
+    from pipecat.utils.errors import ErrorCategory
+
+    service = SonioxTTSService(api_key="test-key")
+    categories = []
+
+    async def fake_push_error(*args, **kwargs):
+        categories.append(kwargs.get("category"))
+
+    monkeypatch.setattr(service, "push_error", fake_push_error)
+    service._websocket = _FakeReceivingWebsocket([_stream_not_found("stream-1")])
+
+    await service._receive_messages()
+
+    assert categories == [ErrorCategory.INVALID_REQUEST]
 
 
 @pytest.mark.asyncio

@@ -30,18 +30,18 @@ class GroqSTTSettings(BaseWhisperSTTService.Settings):
 class GroqSTTService(BaseWhisperSTTService):
     """Groq Whisper speech-to-text service.
 
-    Uses Groq's Whisper API to convert audio to text. Requires a Groq API key
-    set via the api_key parameter or GROQ_API_KEY environment variable.
+    Uses Groq's Whisper API to convert audio to text.
     """
 
     Settings = GroqSTTSettings
     _settings: Settings
+    _requires_api_key = True
 
     def __init__(
         self,
         *,
         model: str | None = None,
-        api_key: str | None = None,
+        api_key: str,
         base_url: str = "https://api.groq.com/openai/v1",
         language: Language | None = None,
         prompt: str | None = None,
@@ -59,7 +59,7 @@ class GroqSTTService(BaseWhisperSTTService):
                     Use ``settings=GroqSTTService.Settings(model=...)`` instead.
                     Will be removed in 2.0.0.
 
-            api_key: Groq API key. Defaults to None.
+            api_key: Groq API key.
             base_url: API base URL. Defaults to "https://api.groq.com/openai/v1".
             language: Language of the audio input.
 

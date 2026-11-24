@@ -137,7 +137,8 @@ class OpenAIDecisionsClient:
                 return
             try:
                 response = await self._http.get(f"/models/{self._model}")
-            except httpx.HTTPError as e:
+            except (httpx.HTTPError, OSError) as e:
+                # A broken TLS connection can come through as an ssl.SSLError.
                 raise ClassifierError(f"could not connect to OpenAI Decisions: {e}") from e
             if response.status_code != 200:
                 raise ClassifierError(
@@ -181,8 +182,9 @@ class OpenAIDecisionsClient:
             attempt += 1
             try:
                 response = await self._http.post("/decisions", json=body)
-            except httpx.HTTPError as e:
-                # Some httpx errors, such as a timeout, carry no message.
+            except (httpx.HTTPError, OSError) as e:
+                # Some httpx errors, such as a timeout, carry no message, and a
+                # broken TLS connection can come through as an ssl.SSLError.
                 raise ClassifierError(f"OpenAI Decisions request failed: {e!r}") from e
             if response.status_code in (_TOO_MANY_REQUESTS, _OVERLOADED):
                 if attempt > self._max_retries:
