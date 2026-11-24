@@ -18,7 +18,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.fonadalabs import FonadaSTTService, FonadaTTSService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
@@ -46,9 +46,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         share_id=os.environ["FONADA_VOICE_SHARE_ID"],
         language=os.getenv("FONADA_LANGUAGE", "en"),
     )
-    llm = OpenAILLMService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
+    llm = GoogleLLMService(
+        api_key=os.environ["GOOGLE_API_KEY"],
+        settings=GoogleLLMService.Settings(
             system_instruction=(
                 "You are a concise voice assistant. Respond naturally in plain speech; "
                 "avoid markdown, bullets, emojis, and long answers."
