@@ -9,7 +9,7 @@ import aiohttp
 
 from pipecat.frames.frames import ErrorFrame, Frame, TTSAudioRawFrame, TTSStoppedFrame
 from pipecat.services.settings import TTSSettings
-from pipecat.services.tts_service import InterruptibleTTSService
+from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -23,7 +23,7 @@ class FonadaTTSSettings(TTSSettings):
     instruct: str | None = None
 
 
-class FonadaTTSService(InterruptibleTTSService):
+class FonadaTTSService(TTSService):
     """Stream Fonada Klone v2 Flash PCM audio into a Pipecat pipeline."""
 
     Settings = FonadaTTSSettings
