@@ -33,7 +33,7 @@ from pipecat.observers.bot_speech_observer import BotSpeechObserver
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
-from pipecat.services.soniox.stream_reconnect import SonioxStreamReconnect
+from pipecat.services.soniox.stream_reconnect import SonioxReconnectTracker
 from pipecat.services.soniox.stt import (
     DEFAULT_AGENT_TEXT_LEAD_MS,
     END_TOKEN,
@@ -1360,13 +1360,13 @@ _RECONNECT_OFFER = {
 }
 
 
-def _resumable_service(**kwargs):
-    """A connected service whose stream Soniox has offered to resume."""
+def _service_with_reconnect_offer(**kwargs):
+    """A connected service that Soniox has offered a reconnect."""
     service, websocket = _connected_service(
         settings=SonioxSTTService.Settings(enable_reconnect=True), **kwargs
     )
-    service._stream = SonioxStreamReconnect()
-    service._stream.handle_message(_RECONNECT_OFFER)
+    service._reconnect_tracker = SonioxReconnectTracker()
+    service._reconnect_tracker.handle_server_message(_RECONNECT_OFFER)
     return service, websocket
 
 
@@ -1396,41 +1396,41 @@ async def test_connect_config_requests_reconnect_only_when_enabled(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_messages_sent_while_the_connection_is_down_are_held_for_the_next():
-    service, _ = _resumable_service()
+async def test_messages_sent_while_disconnected_are_tracked_for_resend():
+    service, _ = _service_with_reconnect_offer()
     service._websocket = None
 
     await service._send(b"audio")
     await service._send_stop_recording()
 
-    assert service._stream.held_after(0) == [(1, b"audio"), (2, "")]
+    assert service._reconnect_tracker.unacknowledged_after(0) == [(1, b"audio"), (2, "")]
 
 
 @pytest.mark.asyncio
-async def test_a_lost_connection_is_left_without_ending_the_stream():
-    service, websocket = _resumable_service()
+async def test_a_lost_connection_is_aborted_without_ending_the_stream():
+    service, websocket = _service_with_reconnect_offer()
 
     await service._disconnect_websocket()
 
     # A close, with status 1000, would end the stream.
     assert not websocket.closed
     assert service._websocket is None
-    assert service._stream.resumable
+    assert service._reconnect_tracker.can_reconnect
 
 
 @pytest.mark.asyncio
 async def test_disconnecting_ends_the_stream():
-    service, websocket = _resumable_service()
+    service, websocket = _service_with_reconnect_offer()
 
     await service._disconnect()
 
     assert websocket.closed
-    assert service._stream is None
+    assert service._reconnect_tracker is None
 
 
 @pytest.mark.asyncio
-async def test_connect_resumes_the_stream_and_resends_what_soniox_lacks(monkeypatch):
-    service, _ = _resumable_service()
+async def test_connect_reconnects_and_resends_the_missing_messages(monkeypatch):
+    service, _ = _service_with_reconnect_offer()
     for message in (b"a", b"b", b"c"):
         await service._send(message)
     service._websocket = None
@@ -1449,7 +1449,7 @@ async def test_connect_resumes_the_stream_and_resends_what_soniox_lacks(monkeypa
 
 @pytest.mark.asyncio
 async def test_a_refused_reconnect_starts_a_new_stream(monkeypatch):
-    service, _ = _resumable_service()
+    service, _ = _service_with_reconnect_offer()
     service._websocket = None
     refused = {"tokens": [], "error_code": 400, "error_type": "reconnect_failed"}
     refusing, fresh = _FakeWebsocket([], replies=[refused]), _FakeWebsocket([])
@@ -1461,12 +1461,12 @@ async def test_a_refused_reconnect_starts_a_new_stream(monkeypatch):
     refusing.transport.abort.assert_called_once()
     assert json.loads(_sent_payloads(fresh)[0])["enable_reconnect"] is True
     assert service._websocket is fresh
-    assert not service._stream.resumable
+    assert not service._reconnect_tracker.can_reconnect
 
 
 @pytest.mark.asyncio
-async def test_a_resumed_stream_ends_the_transcript_begun_before_the_drop(monkeypatch):
-    service, _ = _resumable_service()
+async def test_reconnect_keeps_final_tokens_from_before_the_drop(monkeypatch):
+    service, _ = _service_with_reconnect_offer()
     service._final_transcription_buffer = [{"text": "Hello", "is_final": True}]
     end = {"text": END_TOKEN, "is_final": True}
     service._websocket = _FakeWebsocket(
@@ -1489,14 +1489,14 @@ async def test_a_resumed_stream_ends_the_transcript_begun_before_the_drop(monkey
     await service._receive_messages()
 
     assert transcripts == ["Hello there"]
-    assert json.loads(service._stream.reconnect_request())["last_seq"] == 4
+    assert json.loads(service._reconnect_tracker.create_reconnect_request())["last_seq"] == 4
 
 
 @pytest.mark.asyncio
-async def test_soniox_ending_the_stream_stops_it_being_resumed(monkeypatch):
-    service, _ = _resumable_service()
+async def test_a_finished_stream_cannot_be_reconnected(monkeypatch):
+    service, _ = _service_with_reconnect_offer()
     service._websocket = _FakeWebsocket([json.dumps({"tokens": [], "finished": True, "seq": 1})])
 
     await service._receive_messages()
 
-    assert service._stream is None
+    assert service._reconnect_tracker is None

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Bookkeeping for resuming a Soniox real-time stream on a new connection.
+"""Soniox stream reconnect state.
 
 See https://docs.soniox.com/stt/rt/stream-reconnect.
 """
@@ -16,36 +16,28 @@ from collections import deque
 from collections.abc import Callable
 from typing import Any
 
-# How long a stream waits for a reconnect after its connection drops: Soniox's
-# default idle timeout.
+# How long Soniox keeps a dropped stream open for a reconnect (its default idle timeout).
 RECONNECT_WINDOW_S = 20.0
 
-# How often to ping, how late a pong may be, and how long a reconnect attempt
-# may take: each a quarter of the reconnect window, as Soniox recommends.
+# Soniox recommends a quarter of the reconnect window for each of these.
 PING_INTERVAL_S = RECONNECT_WINDOW_S / 4
-
 RECONNECT_TIMEOUT_S = RECONNECT_WINDOW_S / 4
 
-Message = str | bytes
+ClientMessage = str | bytes
 
 
 class SonioxReconnectRefusedError(Exception):
-    """Soniox refused to resume a stream, which has to be started anew."""
+    """Soniox refused the reconnect, so the stream must be restarted."""
 
 
-class SonioxStreamReconnect:
-    """Tracks what a Soniox stream needs to be resumed on a new connection.
+class SonioxReconnectTracker:
+    """Tracks the state needed to reconnect to a Soniox stream.
 
-    Soniox numbers both sides of a stream. Its transcription responses carry a
-    ``seq``, and it counts the client's messages after the start request, all
-    but pings. A reconnect sends the ``seq`` of the last response received;
-    Soniox answers with how many messages it received, and the client resends
-    the ones after those. This class holds each message until a pong confirms
-    Soniox has it, and does no I/O itself.
-
-    A stream can be resumed once Soniox offers it a reconnect, which it does
-    before any transcription response. A stream that responds without one, or
-    that waits out the reconnect window, can't be: it stops holding messages.
+    Soniox counts the client messages it receives (all but pings) and numbers
+    its responses with ``seq``. On reconnect, the client sends its last
+    ``seq`` and Soniox replies with its received count, so the client resends
+    only the messages Soniox is missing. Sent messages are kept until a pong
+    acknowledges them. This class does no I/O.
     """
 
     def __init__(
@@ -54,174 +46,175 @@ class SonioxStreamReconnect:
         reconnect_window: float = RECONNECT_WINDOW_S,
         clock: Callable[[], float] = time.monotonic,
     ):
-        """Initialize the stream's bookkeeping.
+        """Initialize the tracker.
 
         Args:
-            reconnect_window: How long, in seconds, the stream waits for a
-                reconnect after its connection drops.
+            reconnect_window: Seconds Soniox keeps a dropped stream open.
             clock: Monotonic time source, in seconds.
         """
         self._reconnect_window = reconnect_window
         self._clock = clock
-        self._url: str | None = None
-        self._token: str | None = None
+        self._reconnect_url: str | None = None
+        self._reconnect_token: str | None = None
         self._last_seq = 0
-        self._numbered = 0
-        self._held: deque[tuple[int, Message]] = deque()
-        # Each unanswered ping's id, with the count of messages before it and
-        # when it was sent.
-        self._pings: dict[int, tuple[int, float]] = {}
+        self._sent_count = 0
+        self._unacknowledged: deque[tuple[int, ClientMessage]] = deque()
+        # Ping id -> (sent count when pinged, time pinged).
+        self._pending_pings: dict[int, tuple[int, float]] = {}
         self._ping_ids = itertools.count(1)
-        self._dropped_at: float | None = None
-        self._closed = False
+        self._disconnected_at: float | None = None
+        self._disabled = False
 
     @property
-    def url(self) -> str | None:
-        """Where to reconnect, as Soniox gave it."""
-        return self._url
+    def reconnect_url(self) -> str | None:
+        """The URL Soniox gave for reconnecting."""
+        return self._reconnect_url
 
     @property
-    def resumable(self) -> bool:
-        """Whether the stream can carry on over a new connection."""
-        self._expire_if_due()
-        return not self._closed and bool(self._token)
+    def can_reconnect(self) -> bool:
+        """Whether Soniox offered a reconnect and the reconnect window is still open."""
+        self._disable_if_window_expired()
+        return not self._disabled and self._reconnect_token is not None
 
-    def hold(self, message: Message):
-        """Number a message sent on the stream and hold it until Soniox confirms it.
+    def track_sent(self, message: ClientMessage):
+        """Number a sent message and keep it until Soniox acknowledges it.
 
         Args:
-            message: Any client message after the start request, except a ping.
+            message: A client message other than a ping.
         """
-        self._expire_if_due()
-        if self._closed:
+        self._disable_if_window_expired()
+        if self._disabled:
             return
-        self._numbered += 1
-        self._held.append((self._numbered, message))
+        self._sent_count += 1
+        self._unacknowledged.append((self._sent_count, message))
 
-    def held_after(self, number: int) -> list[tuple[int, Message]]:
-        """The held messages numbered after ``number``, in order.
+    def unacknowledged_after(self, count: int) -> list[tuple[int, ClientMessage]]:
+        """Return the kept messages numbered above ``count``, oldest first.
 
         Args:
-            number: The last message number not wanted.
+            count: Number of messages Soniox already has.
 
         Returns:
-            Each message with its number.
+            ``(number, message)`` pairs.
         """
-        return [(n, message) for n, message in self._held if n > number]
+        return [(number, message) for number, message in self._unacknowledged if number > count]
 
-    def handle_message(self, content: dict[str, Any]) -> bool:
-        """Track the stream from a message Soniox sent.
+    def handle_server_message(self, content: dict[str, Any]) -> bool:
+        """Update the state from a Soniox message.
 
         Args:
             content: The decoded message.
 
         Returns:
-            True if the message is part of the reconnect protocol, with nothing
-            else to handle.
+            True if the message was a reconnect offer or a pong and needs no
+            further handling.
         """
         message_type = content.get("type")
         if message_type == "reconnect":
-            self._url = content["reconnect_url"]
-            self._token = content["reconnect_token"]
+            self._reconnect_url = content["reconnect_url"]
+            self._reconnect_token = content["reconnect_token"]
             return True
         if message_type == "pong":
             self._handle_pong(content.get("id"))
             return True
         if (seq := content.get("seq")) is not None:
             self._last_seq = seq
-        elif not self._token and "error_code" not in content:
-            self._close()
+        elif self._reconnect_token is None and "error_code" not in content:
+            # A response before any reconnect offer: reconnect is unavailable.
+            self._disable()
         return False
 
-    def ping(self) -> str:
-        """Record a ping, so its pong confirms the messages sent before it.
+    def create_ping(self) -> str:
+        """Create a ping whose pong acknowledges every message sent before it.
 
         Returns:
-            The ping message to send.
+            The ping message.
         """
         ping_id = next(self._ping_ids)
-        self._pings[ping_id] = (self._numbered, self._clock())
+        self._pending_pings[ping_id] = (self._sent_count, self._clock())
         return json.dumps({"type": "ping", "id": ping_id})
 
-    def ping_overdue(self, timeout: float) -> bool:
-        """Whether a ping has gone unanswered for ``timeout`` seconds or more.
+    def is_pong_overdue(self, timeout: float) -> bool:
+        """Whether any ping has waited ``timeout`` seconds or more for its pong.
 
         Args:
-            timeout: How long, in seconds, a pong may take.
+            timeout: Seconds a pong may take.
 
         Returns:
-            True if the connection should count as lost.
+            True if the connection should be treated as lost.
         """
         now = self._clock()
-        return any(now - sent_at >= timeout for _, sent_at in self._pings.values())
+        return any(now - pinged_at >= timeout for _, pinged_at in self._pending_pings.values())
 
-    def connection_lost(self):
-        """Start the reconnect window, unless it is already running."""
-        if self._dropped_at is None:
-            self._dropped_at = self._clock()
+    def mark_disconnected(self):
+        """Start the reconnect window, unless already started."""
+        if self._disconnected_at is None:
+            self._disconnected_at = self._clock()
 
-    def reconnect_request(self) -> str:
-        """The first message to send on a reconnect connection.
+    def create_reconnect_request(self) -> str:
+        """Create the first message for a reconnect connection.
 
         Returns:
-            The reconnect message, carrying the newest token.
+            The reconnect message.
         """
         request = {
             "type": "reconnect",
-            "reconnect_token": self._token,
+            "reconnect_token": self._reconnect_token,
             "last_seq": self._last_seq,
         }
         return json.dumps(request)
 
-    def resumed(self, reply: dict[str, Any]) -> int:
-        """Take Soniox's answer to a reconnect request.
+    def handle_reconnect_reply(self, reply: dict[str, Any]) -> int:
+        """Apply Soniox's reply to a reconnect request.
 
         Args:
-            reply: The first message Soniox sent on the reconnect connection.
+            reply: The first message on the reconnect connection.
 
         Returns:
-            How many messages Soniox received; the held messages after that
-            many are to be resent.
+            Number of messages Soniox received; resend the ones after it.
 
         Raises:
-            SonioxReconnectRefusedError: If Soniox refused to resume the stream.
-            ConnectionError: If the reconnect failed for a reason worth
-                retrying, with the same token.
+            SonioxReconnectRefusedError: If Soniox refused the reconnect.
+            ConnectionError: If the reconnect failed and can be retried.
         """
         if reply.get("type") != "reconnected":
             error = f"{reply.get('error_type')}: {reply.get('error_message')}"
             if reply.get("error_type") == "reconnect_failed":
                 raise SonioxReconnectRefusedError(error)
-            raise ConnectionError(f"Soniox did not resume the stream ({error})")
-        self._token = reply["reconnect_token"]
-        self._dropped_at = None
-        # Pongs lost with the old connection are never sent.
-        self._pings.clear()
-        received = reply["last_request"]
-        self._confirm(received)
-        return received
+            raise ConnectionError(f"Soniox reconnect failed ({error})")
+        self._reconnect_token = reply["reconnect_token"]
+        self._disconnected_at = None
+        # Soniox never sends pongs lost with the old connection.
+        self._pending_pings.clear()
+        received_count = reply["last_request"]
+        self._acknowledge(received_count)
+        return received_count
 
     def _handle_pong(self, ping_id: Any):
-        ping = self._pings.pop(ping_id, None)
+        ping = self._pending_pings.pop(ping_id, None)
         if not ping:
             return
-        # Pongs come back in order, so the pings before it are answered too.
-        count, sent_at = ping
-        self._pings = {i: p for i, p in self._pings.items() if p[1] > sent_at}
-        self._confirm(count)
+        sent_count, pinged_at = ping
+        # Pongs arrive in order, so earlier pings are answered too.
+        self._pending_pings = {
+            ping_id: pending
+            for ping_id, pending in self._pending_pings.items()
+            if pending[1] > pinged_at
+        }
+        self._acknowledge(sent_count)
 
-    def _confirm(self, count: int):
-        while self._held and self._held[0][0] <= count:
-            self._held.popleft()
+    def _acknowledge(self, count: int):
+        while self._unacknowledged and self._unacknowledged[0][0] <= count:
+            self._unacknowledged.popleft()
 
-    def _expire_if_due(self):
+    def _disable_if_window_expired(self):
         if (
-            self._dropped_at is not None
-            and self._clock() - self._dropped_at > self._reconnect_window
+            self._disconnected_at is not None
+            and self._clock() - self._disconnected_at > self._reconnect_window
         ):
-            self._close()
+            self._disable()
 
-    def _close(self):
-        self._closed = True
-        self._held.clear()
-        self._pings.clear()
+    def _disable(self):
+        self._disabled = True
+        self._unacknowledged.clear()
+        self._pending_pings.clear()

@@ -10,10 +10,10 @@ import pytest
 
 from pipecat.services.soniox.stream_reconnect import (
     SonioxReconnectRefusedError,
-    SonioxStreamReconnect,
+    SonioxReconnectTracker,
 )
 
-OFFER = {"type": "reconnect", "reconnect_url": "wss://soniox/r", "reconnect_token": "t1"}
+RECONNECT_OFFER = {"type": "reconnect", "reconnect_url": "wss://soniox/r", "reconnect_token": "t1"}
 
 
 class _Clock:
@@ -24,114 +24,118 @@ class _Clock:
         return self.now
 
 
-def _offered_stream(clock=None) -> SonioxStreamReconnect:
-    stream = SonioxStreamReconnect(clock=clock or _Clock())
-    assert stream.handle_message(OFFER)
-    return stream
+def _tracker_with_offer(clock=None) -> SonioxReconnectTracker:
+    tracker = SonioxReconnectTracker(clock=clock or _Clock())
+    assert tracker.handle_server_message(RECONNECT_OFFER)
+    return tracker
 
 
 def _pong(ping: str) -> dict:
     return {"type": "pong", "id": json.loads(ping)["id"]}
 
 
-def test_a_stream_is_resumable_once_soniox_offers_a_reconnect():
-    stream = SonioxStreamReconnect()
-    assert not stream.resumable
+def test_can_reconnect_once_soniox_offers_a_reconnect():
+    tracker = SonioxReconnectTracker()
+    assert not tracker.can_reconnect
 
-    stream.handle_message(OFFER)
+    tracker.handle_server_message(RECONNECT_OFFER)
 
-    assert stream.resumable
-    assert stream.url == "wss://soniox/r"
-
-
-def test_a_stream_that_responds_without_an_offer_holds_nothing():
-    stream = SonioxStreamReconnect()
-    stream.hold(b"audio")
-
-    assert not stream.handle_message({"tokens": []})
-    stream.hold(b"audio")
-
-    assert not stream.resumable
-    assert stream.held_after(0) == []
+    assert tracker.can_reconnect
+    assert tracker.reconnect_url == "wss://soniox/r"
 
 
-def test_held_messages_are_numbered_from_one_in_send_order():
-    stream = _offered_stream()
+def test_a_response_before_any_offer_disables_reconnect():
+    tracker = SonioxReconnectTracker()
+    tracker.track_sent(b"audio")
+
+    assert not tracker.handle_server_message({"tokens": []})
+    tracker.track_sent(b"audio")
+
+    assert not tracker.can_reconnect
+    assert tracker.unacknowledged_after(0) == []
+
+
+def test_sent_messages_are_numbered_from_one_in_send_order():
+    tracker = _tracker_with_offer()
 
     for message in (b"a", '{"type": "finalize"}', b"b"):
-        stream.hold(message)
+        tracker.track_sent(message)
 
-    assert stream.held_after(1) == [(2, '{"type": "finalize"}'), (3, b"b")]
-
-
-def test_a_pong_confirms_the_messages_sent_before_its_ping():
-    stream = _offered_stream()
-    stream.hold(b"a")
-    stream.hold(b"b")
-    ping = stream.ping()
-    stream.hold(b"c")
-
-    assert stream.handle_message(_pong(ping))
-
-    assert stream.held_after(0) == [(3, b"c")]
+    assert tracker.unacknowledged_after(1) == [(2, '{"type": "finalize"}'), (3, b"b")]
 
 
-def test_a_pong_answers_the_pings_sent_before_it():
+def test_a_pong_acknowledges_the_messages_sent_before_its_ping():
+    tracker = _tracker_with_offer()
+    tracker.track_sent(b"a")
+    tracker.track_sent(b"b")
+    ping = tracker.create_ping()
+    tracker.track_sent(b"c")
+
+    assert tracker.handle_server_message(_pong(ping))
+
+    assert tracker.unacknowledged_after(0) == [(3, b"c")]
+
+
+def test_a_pong_also_answers_earlier_pings():
     clock = _Clock()
-    stream = _offered_stream(clock)
-    stream.ping()
+    tracker = _tracker_with_offer(clock)
+    tracker.create_ping()
     clock.now = 1
-    later = stream.ping()
+    later = tracker.create_ping()
 
-    stream.handle_message(_pong(later))
+    tracker.handle_server_message(_pong(later))
     clock.now = 10
 
-    assert not stream.ping_overdue(5)
+    assert not tracker.is_pong_overdue(5)
 
 
-def test_a_ping_is_overdue_once_its_pong_is_late():
+def test_pong_is_overdue_after_the_timeout():
     clock = _Clock()
-    stream = _offered_stream(clock)
-    stream.ping()
+    tracker = _tracker_with_offer(clock)
+    tracker.create_ping()
 
     clock.now = 4.9
-    assert not stream.ping_overdue(5)
+    assert not tracker.is_pong_overdue(5)
     clock.now = 5
-    assert stream.ping_overdue(5)
+    assert tracker.is_pong_overdue(5)
 
 
-def test_the_reconnect_request_carries_the_newest_token_and_last_seq():
-    stream = _offered_stream()
-    stream.handle_message({"tokens": [], "seq": 7})
+def test_reconnect_request_carries_the_newest_token_and_last_seq():
+    tracker = _tracker_with_offer()
+    tracker.handle_server_message({"tokens": [], "seq": 7})
 
-    assert json.loads(stream.reconnect_request()) == {
+    assert json.loads(tracker.create_reconnect_request()) == {
         "type": "reconnect",
         "reconnect_token": "t1",
         "last_seq": 7,
     }
 
 
-def test_resuming_keeps_only_the_messages_soniox_lacks_and_takes_the_new_token():
-    stream = _offered_stream()
+def test_reconnect_reply_acknowledges_received_messages_and_updates_the_token():
+    tracker = _tracker_with_offer()
     for message in (b"a", b"b", b"c"):
-        stream.hold(message)
+        tracker.track_sent(message)
 
-    sent = stream.resumed({"type": "reconnected", "reconnect_token": "t2", "last_request": 2})
+    received_count = tracker.handle_reconnect_reply(
+        {"type": "reconnected", "reconnect_token": "t2", "last_request": 2}
+    )
 
-    assert sent == 2
-    assert stream.held_after(0) == [(3, b"c")]
-    assert json.loads(stream.reconnect_request())["reconnect_token"] == "t2"
+    assert received_count == 2
+    assert tracker.unacknowledged_after(0) == [(3, b"c")]
+    assert json.loads(tracker.create_reconnect_request())["reconnect_token"] == "t2"
 
 
-def test_resuming_forgets_the_pings_of_the_old_connection():
+def test_reconnect_reply_clears_pending_pings():
     clock = _Clock()
-    stream = _offered_stream(clock)
-    stream.ping()
+    tracker = _tracker_with_offer(clock)
+    tracker.create_ping()
 
-    stream.resumed({"type": "reconnected", "reconnect_token": "t2", "last_request": 0})
+    tracker.handle_reconnect_reply(
+        {"type": "reconnected", "reconnect_token": "t2", "last_request": 0}
+    )
     clock.now = 10
 
-    assert not stream.ping_overdue(5)
+    assert not tracker.is_pong_overdue(5)
 
 
 @pytest.mark.parametrize(
@@ -141,34 +145,34 @@ def test_resuming_forgets_the_pings_of_the_old_connection():
         ({"error_type": "service_unavailable", "error_code": 503}, ConnectionError),
     ],
 )
-def test_a_reconnect_soniox_does_not_accept_raises(reply, error):
-    stream = _offered_stream()
+def test_failed_reconnect_reply_raises(reply, error):
+    tracker = _tracker_with_offer()
 
     with pytest.raises(error):
-        stream.resumed({"tokens": [], **reply})
+        tracker.handle_reconnect_reply({"tokens": [], **reply})
 
 
-def test_a_stream_past_its_reconnect_window_is_no_longer_resumable():
+def test_reconnect_is_disabled_after_the_window_expires():
     clock = _Clock()
-    stream = _offered_stream(clock)
-    stream.hold(b"a")
-    stream.connection_lost()
+    tracker = _tracker_with_offer(clock)
+    tracker.track_sent(b"a")
+    tracker.mark_disconnected()
 
     clock.now = 20
-    assert stream.resumable
+    assert tracker.can_reconnect
     clock.now = 20.1
-    stream.hold(b"b")
+    tracker.track_sent(b"b")
 
-    assert not stream.resumable
-    assert stream.held_after(0) == []
+    assert not tracker.can_reconnect
+    assert tracker.unacknowledged_after(0) == []
 
 
-def test_the_reconnect_window_runs_from_the_first_drop_until_resumed():
+def test_reconnect_window_starts_at_the_first_disconnect():
     clock = _Clock()
-    stream = _offered_stream(clock)
-    stream.connection_lost()
+    tracker = _tracker_with_offer(clock)
+    tracker.mark_disconnected()
     clock.now = 15
-    stream.connection_lost()
+    tracker.mark_disconnected()
     clock.now = 21
 
-    assert not stream.resumable
+    assert not tracker.can_reconnect
