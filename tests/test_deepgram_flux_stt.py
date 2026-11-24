@@ -549,8 +549,7 @@ async def test_empty_update_pushes_nothing():
 @pytest.mark.asyncio
 async def test_refused_handshake_reports_deepgram_reason():
     """Deepgram's reason for refusing the handshake reaches the error and the event."""
-    service = DeepgramFluxSTTService(api_key="test-key")
-    service._websocket_url = "wss://example.invalid/v2/listen"
+    service = DeepgramFluxSTTService(api_key="test-key", url="wss://example.invalid/v2/listen")
     reason = "eager_eot_threshold cannot be greater than eot_threshold."
     refusal = InvalidStatus(Response(400, "Bad Request", Headers({"dg-error": reason}), b""))
 
