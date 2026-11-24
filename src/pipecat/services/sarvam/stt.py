@@ -900,9 +900,9 @@ _REALTIME_MODEL = "saaras:v4"
 
 # Sarvam's realtime endpoint serves both generations over the same connection
 # parameters and event protocol, so only the model string differs. The default
-# follows Sarvam's current default, `saaras:v4`. The older generation is named
-# `saaras:v3-realtime` here, without the `-realtime` suffix its successor carries:
-# that is the name the endpoint accepts, and it rejects `saaras:v4-realtime`.
+# follows Sarvam's current default, `saaras:v4`. The newer generation is named
+# `saaras:v4` here, without the `-realtime` suffix its predecessor carries: that
+# is the name the endpoint accepts, and it rejects `saaras:v4-realtime`.
 # `saaras:v3-realtime` is beta-gated and still selectable through settings.
 _SUPPORTED_REALTIME_MODELS = frozenset({"saaras:v3-realtime", "saaras:v4"})
 
