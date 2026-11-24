@@ -93,6 +93,8 @@ To run locally:
   ``--moq-tls-generate localhost`` are the defaults)
 - MOQ (bot and browser both dial a relay): ``python bot.py -t moq --moq-connect
   https://cdn.moq.dev/anon``
+- Phone, with the Pipecat Playground app: ``python bot.py --host 0.0.0.0``, then scan the
+  QR code the runner prints
 - SIP (server: ``/start`` with transport ``sip`` and the Daily SIP-trunk webhook at
   ``/daily-sip-trunk-webhook``): ``python bot.py -t sip``
 - SIP (direct, one bot registers at once, no server): ``python bot.py -t sip -d``
@@ -111,6 +113,7 @@ import json
 import mimetypes
 import os
 import secrets
+import socket
 import sys
 import time
 import unicodedata
@@ -119,6 +122,7 @@ from contextlib import asynccontextmanager
 from http import HTTPMethod
 from pathlib import Path
 from typing import Any, TypedDict
+from urllib.parse import urlencode
 
 import aiohttp
 import yaml
@@ -314,6 +318,69 @@ def _runner_url(args: argparse.Namespace) -> str:
     return f"http://{args.host}:{args.port}"
 
 
+def _lan_address(host: str) -> str | None:
+    """Return the address a phone on the same network reaches the runner at.
+
+    Args:
+        host: The address the runner listens on.
+
+    Returns:
+        ``host`` itself for a specific address, this machine's LAN address
+        when listening on all interfaces, or ``None`` for a loopback address
+        or when no LAN address is found.
+    """
+    if host == "localhost" or host == "::1" or host.startswith("127."):
+        return None
+    if host not in ("0.0.0.0", "::"):
+        return host
+    # Connecting a UDP socket sends nothing; it only picks the outgoing interface.
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))
+            address = s.getsockname()[0]
+    except OSError:
+        return None
+    return None if address.startswith("127.") else address
+
+
+def _mobile_link(args: argparse.Namespace) -> str | None:
+    """Return the link that opens Pipecat Playground, the mobile prebuilt, on this bot.
+
+    Args:
+        args: Parsed runner arguments.
+
+    Returns:
+        A ``pipecat://connect`` link, or ``None`` when a phone can't reach the
+        runner. The link names the transport only when the runner is limited
+        to one the app supports; otherwise the app uses the one picked in it.
+    """
+    address = _lan_address(args.host)
+    if address is None:
+        return None
+    if ":" in address:
+        address = f"[{address}]"
+    query = {"url": f"http://{address}:{args.port}"}
+    if args.transport == "webrtc":
+        query["transport"] = "smallwebrtc"
+    elif args.transport == "daily":
+        query["transport"] = "daily"
+    return f"pipecat://connect?{urlencode(query, safe=':/')}"
+
+
+def _print_mobile_qr(args: argparse.Namespace):
+    """Print the mobile link, and a QR code of it for the phone's camera."""
+    link = _mobile_link(args)
+    if link is None:
+        return
+    print(f"   → Mobile: {link}")
+    try:
+        import segno
+    except ModuleNotFoundError:
+        return
+    print()
+    segno.make(link).terminal(out=sys.stdout, compact=True, border=2)
+
+
 def _transport_status_lists() -> tuple[list[str], list[str]]:
     """Return enabled and disabled transport labels for the startup banner."""
     transports = ["daily", "livekit", "webrtc", "telephony", "websocket", "moq", "sip"]
@@ -469,6 +536,8 @@ def _print_startup_message(args: argparse.Namespace):
         if disabled:
             print(f"   → Disabled transports: {_format_transport_status(disabled)}")
         _print_security_status(args)
+        if "webrtc" in enabled or "daily" in enabled:
+            _print_mobile_qr(args)
     elif args.transport == "webrtc":
         if args.esp32:
             print("🚀 Bot ready! (ESP32 mode)")
@@ -478,6 +547,8 @@ def _print_startup_message(args: argparse.Namespace):
             print("🚀 Bot ready! (WebRTC)")
         if _transport_routes_enabled("webrtc"):
             print(f"   → Open: {_runner_url(args)}")
+            if not args.esp32 and not args.whatsapp:
+                _print_mobile_qr(args)
         else:
             print(f"   → WebRTC disabled ({TRANSPORT_INSTALL_HINTS['webrtc']})")
     elif args.transport == "daily":
@@ -492,6 +563,7 @@ def _print_startup_message(args: argparse.Namespace):
                     f"http://{args.host}:{args.port}/daily-dialin-webhook"
                 )
                 print("   → Configure this URL in your Daily phone number settings")
+            _print_mobile_qr(args)
     elif args.transport == "sip":
         print("🚀 Bot ready! (SIP)")
         if not _transport_routes_enabled("sip"):
