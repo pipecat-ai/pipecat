@@ -205,6 +205,10 @@ class BaseDeepgramSTTSettings(STTSettings):
         profanity_filter: Filter profanity from transcripts.
         punctuate: Add punctuation to transcripts.
         redact: Redact sensitive information (str or list of redaction types).
+        redact_usage: Store ``keyterm``, ``keywords``, ``replace``, ``search``
+            and ``extra`` as ``[REDACTED]`` in Deepgram's usage records, plus
+            ``custom_topic`` and ``custom_intent`` on pre-recorded requests.
+            Transcription and the response are unaffected.
         replace: Word replacement rules (str or list).
         search: Search terms to highlight (str or list of str).
         smart_format: Apply smart formatting to transcripts.
@@ -228,6 +232,7 @@ class BaseDeepgramSTTSettings(STTSettings):
     profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     punctuate: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     redact: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact_usage: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     replace: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     search: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     smart_format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -271,7 +276,8 @@ class BaseDeepgramSTTSettings(STTSettings):
 class DeepgramSTTSettings(BaseDeepgramSTTSettings):
     """Settings for DeepgramSTTService.
 
-    ``language_hint`` requires deepgram-sdk 7.15.0 or later.
+    ``language_hint`` requires deepgram-sdk 7.15.0 or later, and
+    ``redact_usage`` 7.19.0 or later.
 
     Parameters:
         endpointing: Endpointing sensitivity in ms, or ``False`` to disable.
@@ -399,6 +405,7 @@ class DeepgramSTTService(STTService):
             profanity_filter=None,
             punctuate=True,
             redact=None,
+            redact_usage=None,
             replace=None,
             search=None,
             smart_format=False,
@@ -949,6 +956,7 @@ class DeepgramSegmentedSTTService(SegmentedSTTService):
             profanity_filter=None,
             punctuate=True,
             redact=None,
+            redact_usage=None,
             replace=None,
             search=None,
             smart_format=False,
