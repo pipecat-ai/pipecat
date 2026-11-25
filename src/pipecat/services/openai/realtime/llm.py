@@ -20,10 +20,11 @@ from PIL import Image
 from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.open_ai_realtime_adapter import (
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.open_ai_realtime_adapter import (
     OpenAIRealtimeLLMAdapter,
 )
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -65,10 +66,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai._constants import OPENAI_REALTIME_WHISPER_MODEL, OPENAI_SAMPLE_RATE
 from pipecat.services.settings import LLMSettings
-from pipecat.transcriptions.language import Language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
+from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
@@ -207,6 +207,7 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
         return instance
 
 
+@traced_realtime_llm
 class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     """OpenAI Realtime LLM service providing real-time audio and text communication.
 
@@ -362,6 +363,8 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         self._current_assistant_response = None
         self._current_audio_response = None
+
+        self._resampler = create_stream_resampler()
 
         self._user_audio_preroll_buffer = bytearray()
         # When set, pins the pre-roll duration; otherwise auto-sized from the
@@ -755,6 +758,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         :meth:`_handle_context`). Before the session's conversation is set up,
         nothing is sent: the setup sends the context, which the aggregator
         records the messages in.
+
+        The messages are taken from this frame, not read from the context.
+        ``LLMUserAggregator._realtime_handle_messages_append`` explains why.
         """
         if not self._api_session_ready or self._llm_needs_conversation_setup:
             return
@@ -764,7 +770,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 continue
             role = message.get("role") if isinstance(message, dict) else None
             await self._send_message_item(
-                text, role="assistant" if role == "assistant" else "system"
+                text, role=role if role in ("user", "assistant") else "system"
             )
         self._results_awaiting_response = True
 
@@ -780,6 +786,10 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         """
         await self._ws_send(event.model_dump(exclude_none=True))
 
+    async def _auth_headers(self) -> dict[str, str]:
+        """Return the headers that authenticate the WebSocket connection."""
+        return {"Authorization": f"Bearer {self.api_key}"}
+
     async def _connect(self):
         try:
             if self._websocket:
@@ -788,9 +798,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 return
             self._websocket = await websocket_connect(
                 uri=self.base_url,
-                additional_headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                },
+                additional_headers=await self._auth_headers(),
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
@@ -913,6 +921,8 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         async for message in self._websocket:
             evt = events.parse_server_event(message)
+            if evt is None:
+                continue
             if evt.type == "session.created":
                 await self._handle_evt_session_created(evt)
             elif evt.type == "session.updated":
@@ -1047,13 +1057,6 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             direction=FrameDirection.UPSTREAM,
         )
 
-    @traced_stt
-    async def _handle_user_transcription(
-        self, transcript: str, is_final: bool, language: Language | None = None
-    ):
-        """Handle a transcription result with tracing."""
-        pass
-
     async def handle_evt_input_audio_transcription_completed(self, evt):
         """Handle completion of input audio transcription.
 
@@ -1067,7 +1070,6 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
             TranscriptionFrame(evt.transcript, "", time_now_iso8601(), result=evt),
             FrameDirection.UPSTREAM,
         )
-        await self._handle_user_transcription(evt.transcript, True, Language.EN)
 
     async def _handle_conversation_item_retrieved(self, evt: events.ConversationItemRetrieved):
         futures = self._retrieve_conversation_item_futures.pop(evt.item.id, None)
@@ -1080,31 +1082,25 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         self._response_active = True
         self._results_awaiting_response = False
 
-    @traced_openai_realtime(operation="llm_response")
     async def _handle_evt_response_done(self, evt):
         # todo: figure out whether there's anything we need to do for "cancelled" events
         # usage metrics
-        input_details = (
-            evt.response.usage.input_token_details
-            if hasattr(evt.response.usage, "input_token_details")
-            else None
-        )
-        output_details = (
-            evt.response.usage.output_token_details
-            if hasattr(evt.response.usage, "output_token_details")
-            else None
-        )
-        cached_details = input_details.cached_tokens_details if input_details else None
-        tokens = LLMTokenUsage(
-            prompt_tokens=evt.response.usage.input_tokens,
-            completion_tokens=evt.response.usage.output_tokens,
-            total_tokens=evt.response.usage.total_tokens,
-            cache_read_input_tokens=input_details.cached_tokens if input_details else None,
-            input_audio_tokens=input_details.audio_tokens if input_details else None,
-            output_audio_tokens=output_details.audio_tokens if output_details else None,
-            cache_read_input_audio_tokens=cached_details.audio_tokens if cached_details else None,
-        )
-        await self.start_llm_usage_metrics(tokens)
+        usage = evt.response.usage
+        if usage is not None:
+            input_details = usage.input_token_details
+            output_details = usage.output_token_details
+            cached_details = input_details.cached_tokens_details if input_details else None
+            cached_audio_tokens = cached_details.audio_tokens if cached_details else None
+            tokens = LLMTokenUsage(
+                prompt_tokens=usage.input_tokens or 0,
+                completion_tokens=usage.output_tokens or 0,
+                total_tokens=usage.total_tokens or 0,
+                cache_read_input_tokens=input_details.cached_tokens if input_details else None,
+                input_audio_tokens=input_details.audio_tokens if input_details else None,
+                output_audio_tokens=output_details.audio_tokens if output_details else None,
+                cache_read_input_audio_tokens=cached_audio_tokens,
+            )
+            await self.start_llm_usage_metrics(tokens)
         await self.stop_processing_metrics()
         # Push TTSStoppedFrame here (rather than on each per-item
         # response.output_audio.done) so that a response containing multiple
@@ -1128,10 +1124,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 await self._create_response()
         # error handling
         if evt.response.status == "failed":
-            await self.push_error(error_msg=evt.response.status_details["error"]["message"])
+            error = (evt.response.status_details or {}).get("error") or {}
+            await self.push_error(error_msg=error.get("message") or "Response failed")
             return
         # response content
-        for item in evt.response.output:
+        for item in evt.response.output or []:
             await self._call_event_handler("on_conversation_item_updated", item.id, item)
 
     async def _handle_evt_text_delta(self, evt):
@@ -1269,7 +1266,6 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
 
         await self._connect()
 
-    @traced_openai_realtime(operation="llm_request")
     async def _create_response(self):
         if not self._api_session_ready:
             self._run_llm_when_api_session_ready = True
@@ -1400,8 +1396,14 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
                 frame.vad_params.start_secs + AUTOSIZED_USER_AUDIO_PREROLL_MARGIN_SECS
             )
 
-    async def _send_user_audio(self, frame):
-        payload = base64.b64encode(frame.audio).decode("utf-8")
+    async def _send_user_audio(self, frame: InputAudioRawFrame):
+        # The session's input format is PCM at a fixed 24 kHz.
+        audio = frame.audio
+        if frame.sample_rate != OPENAI_SAMPLE_RATE:
+            audio = await self._resampler.resample(audio, frame.sample_rate, OPENAI_SAMPLE_RATE)
+        if not audio:
+            return
+        payload = base64.b64encode(audio).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
         # In manual turn-detection mode, keep a rolling pre-roll buffer of the
@@ -1409,9 +1411,9 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         # after clearing the input buffer. (Server-side turn detection never
         # clears it, so no buffer is needed.)
         if self._is_turn_detection_disabled():
-            self._user_audio_preroll_buffer.extend(frame.audio)
+            self._user_audio_preroll_buffer.extend(audio)
             preroll_len = int(
-                frame.sample_rate * frame.num_channels * 2 * self._user_audio_preroll_secs
+                OPENAI_SAMPLE_RATE * frame.num_channels * 2 * self._user_audio_preroll_secs
             )
             self._user_audio_preroll_buffer = self._user_audio_preroll_buffer[-preroll_len:]
 
@@ -1500,7 +1502,11 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         answers the call, unless a reconnect has left the API without the id to
         answer, in which case it goes in as a message too.
         """
-        result = json.dumps(frame.result, ensure_ascii=False) if frame.result else "COMPLETED"
+        result = (
+            json.dumps(frame.result, ensure_ascii=False)
+            if frame.result is not None
+            else "COMPLETED"
+        )
         is_final = frame.properties.is_final if frame.properties else True
 
         if not is_final:

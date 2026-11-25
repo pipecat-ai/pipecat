@@ -56,6 +56,27 @@ class TestIdleFrameProcessor(unittest.IsolatedAsyncioTestCase):
 
         assert not callback_called.is_set()
 
+    async def test_cleanup_leaves_no_tasks_running(self):
+        """Cleanup cancels the processor's own tasks as well as the idle task."""
+
+        async def idle_callback(processor):
+            pass
+
+        processor = IdleFrameProcessor(callback=idle_callback, timeout=5)
+
+        await run_test(
+            processor,
+            frames_to_send=[TextFrame(text="hello")],
+            expected_down_frames=[TextFrame],
+        )
+
+        leftover = [
+            t.get_name()
+            for t in asyncio.all_tasks()
+            if not t.done() and t.get_name().startswith(f"{processor}::")
+        ]
+        self.assertEqual(leftover, [])
+
     async def test_signal_preserved_during_callback(self):
         """Regression: event set during callback must not be cleared."""
 

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Scenario files for Pipecat behavioral evaluations, of either kind.
+"""Scenario files for Pipecat behavioral evaluations, of every kind.
 
 A scenario describes one conversation to hold with a bot and how to judge it.
 A file holds one or more of them under ``scenarios:``, each with a ``name:``,
@@ -19,9 +19,15 @@ and a scenario's keys say which kind it is:
     goal, and a judge reads the whole conversation
     (:mod:`pipecat.evals.simulation`).
 
-Both carry the same ``user:`` and ``judge:`` blocks
-(:mod:`pipecat.evals.scenario_config`). A file is read by a ``SafeLoader`` that
-resolves only plain-decimal integers, so a DTMF ``012`` keeps its digits, with
+``success:``, with neither of the above
+    a *rubric*: what a simulation is judged on, without the caller, to judge a
+    conversation the harness didn't drive, such as a production call
+    (:class:`~pipecat.evals.simulation.EvalRubric`). It has nothing to run, so
+    ``pipecat eval run`` and ``pipecat eval suite`` skip it.
+
+They carry the same ``user:`` and ``judge:`` blocks
+(:mod:`pipecat.evals.scenario_config`), a rubric only the judge's. A file is
+read by a ``SafeLoader`` that resolves only plain-decimal integers, so a DTMF ``012`` keeps its digits, with
 an ``!include <path>`` tag that splices in another YAML file relative to the
 including one, so files can share their ``user:`` and ``judge:`` blocks.
 
@@ -99,13 +105,17 @@ are written once, and each scenario gives the caller a different errand::
 The scenarios of a file are independent: each runs on its own, against its
 own bot.
 
+A rubric takes the file's defaults like any entry, so a ``persona:`` at the top
+of a file makes every entry in it a simulation. Of the file's ``metrics:``, a
+rubric takes the judged ones: a measured metric is scored only in a simulation.
+
 .. deprecated:: 1.11.0
     Use a ``scenarios:`` list instead of a scenario's own keys (``turns:`` or
     ``persona:``) at a file's top level. Such a file still loads, as that one
     scenario under the file's ``name:``, with a ``DeprecationWarning``. Will be
     removed in 2.0.0.
 
-This module gathers the public names of both kinds, :class:`EvalScenarioFile`
+This module gathers the public names of every kind, :class:`EvalScenarioFile`
 loads a file as the scenarios it holds, and :func:`is_scenario_file` tells a
 scenario from a fragment it includes.
 """
@@ -131,6 +141,7 @@ from pipecat.evals.script import (
     _parse_script,
 )
 from pipecat.evals.simulation import (
+    EvalRubric,
     EvalSimulationMetric,
     EvalSimulationScenario,
     _parse_simulation,
@@ -144,6 +155,7 @@ __all__ = [
     "JUDGEABLE_EVENTS",
     "EvalConfigured",
     "EvalKind",
+    "EvalRubric",
     "EvalExpectation",
     "EvalFunctionCall",
     "EvalScenario",
@@ -193,15 +205,15 @@ class EvalKind(StrEnum):
     SIMULATION = "simulation"
 
 
-EvalLoadedScenario = EvalScriptScenario | EvalSimulationScenario
+EvalLoadedScenario = EvalScriptScenario | EvalSimulationScenario | EvalRubric
 
 
 @dataclass
 class EvalScenarioFile:
     """A scenario file: what it is called, where it is, and the scenarios it holds.
 
-    Manifests and ``pipecat eval run`` load files through :meth:`load`, so the
-    two kinds of scenario mix in one list. ``file[name]`` picks a scenario by
+    Manifests and ``pipecat eval run`` load files through :meth:`load`, so
+    every kind of scenario mixes in one list. ``file[name]`` picks a scenario by
     its ``<file name>/<scenario name>``.
 
     Parameters:
@@ -229,8 +241,8 @@ class EvalScenarioFile:
             The loaded file.
 
         Raises:
-            ValueError: If the file is malformed, or a scenario is neither kind,
-                claims to be both, or is invalid for its kind.
+            ValueError: If the file is malformed, or a scenario is of no kind,
+                claims to be two, or is invalid for its kind.
             FileNotFoundError: If the path doesn't exist.
         """
         path = Path(path)
@@ -265,7 +277,7 @@ class EvalScenarioFile:
             if not entry_name or not isinstance(entry_name, str):
                 raise ValueError(f"{path}: scenario #{idx} needs a 'name:'")
             merged = {**defaults, **entry, "name": f"{name}/{entry_name}"}
-            scenarios.append(_scenario_from_mapping(merged, path))
+            scenarios.append(_scenario_from_mapping(merged, path, own=entry))
 
         names = [scenario.name for scenario in scenarios]
         duplicates = sorted({n for n in names if names.count(n) > 1})
@@ -326,15 +338,21 @@ def _load_mapping(path: Path) -> dict:
     Raises:
         ValueError: If the top level is not a mapping.
     """
-    with path.open() as f:
+    with path.open(encoding="utf-8") as f:
         data = yaml.load(f, include_loader(path.parent, base=_ScenarioLoader))
     if not isinstance(data, dict):
         raise ValueError(f"{path}: top level must be a mapping")
     return data
 
 
-def _scenario_from_mapping(data: dict, path: Path) -> EvalLoadedScenario:
-    """Parse one scenario's mapping as a simulation (``persona:``) or a script (``turns:``)."""
+def _scenario_from_mapping(data: dict, path: Path, own: dict | None = None) -> EvalLoadedScenario:
+    """Parse one scenario's mapping as a simulation (``persona:``), a script (``turns:``), or a rubric (``success:``).
+
+    ``own`` is the entry's keys without the file's defaults, ``None`` when the
+    mapping is all the entry's own. A rubric that takes its ``metrics:`` from
+    the file leaves out the measured ones, which only a simulation can score; a
+    measured metric the rubric lists itself is refused.
+    """
     if "persona" in data and "turns" in data:
         raise ValueError(
             f"{path}: a scenario is scripted ('turns:') or a simulation ('persona:'), not both"
@@ -343,7 +361,17 @@ def _scenario_from_mapping(data: dict, path: Path) -> EvalLoadedScenario:
         return _parse_simulation(data, path)
     if "turns" in data:
         return _parse_script(data, path)
-    raise ValueError(f"{path}: a scenario needs 'turns:' (scripted) or 'persona:' (a simulation)")
+    if "success" in data:
+        if own is not None and "metrics" not in own:
+            judged = [
+                m for m in data.get("metrics") or [] if not (isinstance(m, dict) and "measure" in m)
+            ]
+            data = {**data, "metrics": judged}
+        return EvalRubric.from_dict(data, source=path)
+    raise ValueError(
+        f"{path}: a scenario needs 'turns:' (scripted), 'persona:' (a simulation), or "
+        "'success:' (a rubric)"
+    )
 
 
 def is_scenario_file(path: str | Path) -> bool:

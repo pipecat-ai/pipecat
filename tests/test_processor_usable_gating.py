@@ -118,7 +118,7 @@ class TestSegmentedSTTStatusGating(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.transcribe_calls, 0)
         # The buffered audio is released rather than growing for the rest of
         # the session.
-        self.assertEqual(len(service._audio_buffer), 0)
+        self.assertEqual(service._speech_buffer.stop(), b"")
 
 
 class TestTTSStatusGating(unittest.IsolatedAsyncioTestCase):

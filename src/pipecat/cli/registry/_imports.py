@@ -81,12 +81,15 @@ IMPORTS = {
     ],
     "openai_stt": ["from pipecat.services.openai.stt import OpenAISTTService"],
     "openai_realtime_stt": ["from pipecat.services.openai.stt import OpenAIRealtimeSTTService"],
+    "rime_stt": ["from pipecat.services.rime.stt import RimeSTTService"],
     "sarvam_stt": ["from pipecat.services.sarvam.stt import SarvamSTTService"],
+    "smallest_stt": ["from pipecat.services.smallest.stt import SmallestSTTService"],
     "soniox_stt": ["from pipecat.services.soniox.stt import SonioxSTTService"],
     "speechmatics_stt": ["from pipecat.services.speechmatics.stt import SpeechmaticsSTTService"],
     "moonshine_stt": ["from pipecat.services.moonshine.stt import MoonshineSTTService"],
     "whisper_stt": ["from pipecat.services.whisper.stt import WhisperSTTService"],
     "xai_stt": ["from pipecat.services.xai.stt import XAISTTService"],
+    "zoom_ai_stt": ["from pipecat.services.zoom_ai.stt import ZoomAISTTService"],
     # LLM Services
     "anthropic_llm": ["from pipecat.services.anthropic.llm import AnthropicLLMService"],
     "aws_bedrock_llm": ["from pipecat.services.aws.llm import AWSBedrockLLMService"],
@@ -97,6 +100,12 @@ IMPORTS = {
     "deepseek_llm": ["from pipecat.services.deepseek.llm import DeepSeekLLMService"],
     "fireworks_llm": ["from pipecat.services.fireworks.llm import FireworksLLMService"],
     "google_gemini_llm": ["from pipecat.services.google.llm import GoogleLLMService"],
+    "google_interactions_llm": [
+        "from pipecat.services.google.interactions.llm import GoogleInteractionsLLMService"
+    ],
+    "google_interactions_vertex_llm": [
+        "from pipecat.services.google.interactions.vertex.llm import GoogleInteractionsVertexLLMService"
+    ],
     "google_vertex_llm": ["from pipecat.services.google.vertex.llm import GoogleVertexLLMService"],
     "xai_llm": ["from pipecat.services.xai.llm import GrokLLMService"],
     "groq_llm": ["from pipecat.services.groq.llm import GroqLLMService"],
@@ -110,12 +119,14 @@ IMPORTS = {
         "from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService"
     ],
     "openrouter_llm": ["from pipecat.services.openrouter.llm import OpenRouterLLMService"],
-    "perplexity_llm": ["from pipecat.services.perplexity.llm import PerplexityLLMService"],
+    "perplexity_llm": ["from pipecat.services.perplexity.llm import PerplexityAgentHttpLLMService"],
     "qwen_llm": ["from pipecat.services.qwen.llm import QwenLLMService"],
     "sambanova_llm": ["from pipecat.services.sambanova.llm import SambaNovaLLMService"],
     "sarvam_llm": ["from pipecat.services.sarvam.llm import SarvamLLMService"],
+    "smallest_llm": ["from pipecat.services.smallest.llm import SmallestLLMService"],
     "together_llm": ["from pipecat.services.together.llm import TogetherLLMService"],
     # TTS Services
+    "assemblyai_tts": ["from pipecat.services.assemblyai.tts import AssemblyAITTSService"],
     "asyncai_tts": ["from pipecat.services.asyncai.tts import AsyncAITTSService"],
     "aws_polly_tts": ["from pipecat.services.aws.tts import AWSPollyTTSService"],
     "azure_tts": ["from pipecat.services.azure.tts import AzureTTSService"],
@@ -139,7 +150,7 @@ IMPORTS = {
     "google_tts": ["from pipecat.services.google.tts import GoogleTTSService"],
     "gradium_tts": ["from pipecat.services.gradium.tts import GradiumTTSService"],
     "groq_tts": ["from pipecat.services.groq.tts import GroqTTSService"],
-    "hume_tts": ["from pipecat.services.hume.tts import HumeTTSService"],
+    "heygen_tts": ["from pipecat.services.heygen.tts import HeyGenTTSService"],
     "inworld_tts": ["from pipecat.services.inworld.tts import InworldTTSService"],
     "kokoro_tts": ["from pipecat.services.kokoro.tts import KokoroTTSService"],
     "minimax_tts": ["from pipecat.services.minimax.tts import MiniMaxHttpTTSService"],
@@ -151,6 +162,7 @@ IMPORTS = {
     ],
     "openai_tts": ["from pipecat.services.openai.tts import OpenAITTSService"],
     "piper_tts": ["from pipecat.services.piper.tts import PiperTTSService"],
+    "plivo_tts": ["from pipecat.services.plivo.tts import PlivoTTSService"],
     "pockettts_tts": ["from pipecat.services.pocket_tts.tts import PocketTTSService"],
     "resemble_tts": ["from pipecat.services.resembleai.tts import ResembleAITTSService"],
     "rime_tts": ["from pipecat.services.rime.tts import RimeTTSService"],
@@ -160,6 +172,7 @@ IMPORTS = {
     "speechify_tts": ["from pipecat.services.speechify.tts import SpeechifyHttpTTSService"],
     "xai_tts": ["from pipecat.services.xai.tts import XAITTSService"],
     "xtts_tts": ["from pipecat.services.xtts.tts import XTTSService"],
+    "zoom_ai_tts": ["from pipecat.services.zoom_ai.tts import ZoomAIHttpTTSService"],
     # Realtime Services
     "aws_nova_realtime": ["from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService"],
     "azure_realtime": [
@@ -183,6 +196,9 @@ IMPORTS = {
     "openai_realtime": [
         "from pipecat.services.openai.realtime.events import SessionProperties, AudioConfiguration, AudioInput, InputAudioTranscription, SemanticTurnDetection, InputAudioNoiseReduction",
         "from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService",
+    ],
+    "zoom_ai_realtime": [
+        "from pipecat.services.zoom_ai.realtime.llm import ZoomAIRealtimeLLMService"
     ],
     "ultravox": [
         "from pipecat.services.ultravox.llm import UltravoxRealtimeLLMService, OneShotInputParams",

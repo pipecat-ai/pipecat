@@ -14,9 +14,9 @@ import json
 
 import pytest
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 WEATHER = FunctionSchema(

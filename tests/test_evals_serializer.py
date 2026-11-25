@@ -29,12 +29,10 @@ from pipecat.evals.serializer import (
 from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputTransportMessageFrame,
-    LLMFullResponseStartFrame,
     LLMMessagesUpdateFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     OutputTransportMessageUrgentFrame,
-    TranscriptionFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
 )
@@ -271,32 +269,69 @@ class TestEvalClientSerializer(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frame.sample_rate, 16000)
 
     async def test_user_transcription_stays_a_raw_message(self):
-        # Kept as the raw message (not a TranscriptionFrame) so the sink can tell it
-        # apart from the STT's transcription of the bot's audio.
+        # Not a TranscriptionFrame, which in the harness is its STT's
+        # transcription of the bot's audio.
         data = {"text": "hello", "user_id": "u", "final": True}
         frame = await self.serializer.deserialize(self._server("user-transcription", data))
         self.assertIsInstance(frame, InputTransportMessageFrame)
-        self.assertEqual(frame.message["type"], "user-transcription")
+
+    async def test_bot_output_and_user_input_stay_raw_messages(self):
+        # Kept as raw messages (not a TranscriptionFrame) so the sink can tell the
+        # user's transcriptions apart from the STT's transcription of the bot's
+        # audio, and find the backchannels.
+        for msg_type in ("bot-output", "user-input"):
+            frame = await self.serializer.deserialize(self._server(msg_type, {"text": "mhm"}))
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["type"], msg_type)
+
+    async def test_metrics_stay_a_raw_message(self):
+        # The base serializer drops metrics; the harness reports them as sent.
+        data = {"ttfb": [{"processor": "DeepgramSTTService#0", "value": 0.31}]}
+        frame = await self.serializer.deserialize(self._server("metrics", data))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], "metrics")
         self.assertEqual(frame.message["data"], data)
+
+    async def test_server_message_stays_a_raw_message(self):
+        # The base serializer drops it; the harness reports the bot's own data.
+        data = {"done": True, "transcript": "hello"}
+        frame = await self.serializer.deserialize(self._server("server-message", data))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], "server-message")
+        self.assertEqual(frame.message["data"], data)
+
+    async def test_flow_node_entered_stays_a_raw_message(self):
+        data = {"node": "verify.ask", "previous_node": "start", "parent": "verify"}
+        frame = await self.serializer.deserialize(self._server("flow-node-entered", data))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], "flow-node-entered")
+        self.assertEqual(frame.message["data"], data)
+
+    async def test_function_calls_are_kept_like_the_bots_other_reports(self):
+        # The same kind of frame as the bot's other reports, so none can
+        # overtake another: they reach the harness in the order the bot sent them.
+        for cancelled in (True, False):
+            frame = await self.serializer.deserialize(
+                self._server(
+                    "llm-function-call-stopped",
+                    {
+                        "function_name": "write_report",
+                        "tool_call_id": "call_1",
+                        "cancelled": cancelled,
+                    },
+                )
+            )
+            self.assertIsInstance(frame, InputTransportMessageFrame)
+            self.assertEqual(frame.message["data"]["cancelled"], cancelled)
 
     async def test_generic_messages_delegate_to_base(self):
         # Non-eval RTVI messages keep the base RTVIClientSerializer mapping.
-        self.assertIsInstance(
-            await self.serializer.deserialize(self._server("bot-llm-started")),
-            LLMFullResponseStartFrame,
-        )
-        self.assertIsNone(await self.serializer.deserialize(self._server("bot-ready")))
+        frame = await self.serializer.deserialize(self._server("bot-llm-started"))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
+        self.assertEqual(frame.message["type"], "bot-llm-started")
+        frame = await self.serializer.deserialize(self._server("bot-ready"))
+        self.assertIsInstance(frame, InputTransportMessageFrame)
         self.assertIsNone(await self.serializer.deserialize("not json"))
-
-    async def test_base_no_longer_maps_user_transcription_to_transcription(self):
-        # Sanity: only the eval subclass diverts user-transcription; the generic
-        # base still produces a TranscriptionFrame (unchanged for other clients).
-        from pipecat.serializers.rtvi_client import RTVIClientSerializer
-
-        frame = await RTVIClientSerializer().deserialize(
-            self._server("user-transcription", {"text": "hi", "final": True})
-        )
-        self.assertIsInstance(frame, TranscriptionFrame)
 
 
 if __name__ == "__main__":

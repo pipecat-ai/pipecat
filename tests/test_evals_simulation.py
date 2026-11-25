@@ -9,6 +9,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pipecat.evals.persona import END_CALL_FUNCTION, EvalPersona
 from pipecat.evals.results import EvalSimulationResult
@@ -221,6 +222,13 @@ metrics:
         with self.assertRaises(ValueError):
             _load_simulation(_write(MINIMAL + "max_duration_s: -1\n"))
 
+    def test_timeout_caps_must_be_finite(self):
+        for field in ("max_duration_s", "max_silence_s"):
+            for value in (".nan", ".inf", "-.inf"):
+                with self.subTest(field=field, value=value):
+                    with self.assertRaisesRegex(ValueError, field):
+                        _load_simulation(_write(MINIMAL + f"{field}: {value}\n"))
+
     def test_describe(self):
         text = describe_simulation(_load_simulation(_write(MINIMAL)))
         self.assertIn(
@@ -283,18 +291,26 @@ class TestSimulationRunResult(unittest.TestCase):
 import asyncio  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
+import pipecat.processors.frameworks.rtvi.models as RTVI  # noqa: E402
 from pipecat.evals.client import (  # noqa: E402
     BOT_ENDED_EVENT,
     HARNESS_ERROR_EVENT,
     PERSONA_TURN_EVENT,
+    _PersonaTurnRelay,
 )
 from pipecat.evals.events import EvalEventStream  # noqa: E402
 from pipecat.evals.judge import JudgeVerdict, RunVerdicts  # noqa: E402
 from pipecat.evals.results import EvalAssertionFailure, EvalTrace  # noqa: E402
 from pipecat.evals.scenario import EvalSimulationMetric  # noqa: E402
 from pipecat.evals.simulation_driver import END_CALL_EVENT, EvalSimulationDriver  # noqa: E402
-from pipecat.frames.frames import LLMTextFrame  # noqa: E402
+from pipecat.frames.frames import (  # noqa: E402
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    TextType,
+    TTSTextFrame,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor  # noqa: E402
 from pipecat.services.llm_service import FunctionCallParams  # noqa: E402
 
 
@@ -354,16 +370,23 @@ class _FakePersonaLLM:
         self.handlers[name] = handler
 
 
-class _FakeClient:
-    def __init__(self):
-        self.instruction: str | None = None
-        self.hung_up = False
+class _Discard(FrameProcessor):
+    """Takes what the processor before it pushes, without a running pipeline."""
 
-    async def configure_persona(self, instruction: str):
-        self.instruction = instruction
+    async def queue_frame(self, frame, direction=FrameDirection.DOWNSTREAM, callback=None):
+        pass
+
+
+class _FakeClient:
+    def __init__(self, stream: EvalEventStream):
+        self.hung_up = False
+        self._stream = stream
 
     async def hang_up(self):
         self.hung_up = True
+
+    async def report_end_call(self, event: dict):
+        await self._stream.append(event)
 
 
 def _simulation(**overrides) -> EvalSimulationScenario:
@@ -388,7 +411,7 @@ def _driver(
     trace = EvalTrace()
     stream = EvalEventStream(bot_audio=simulation.bot_audio, trace=trace)
     llm = _FakePersonaLLM()
-    client = _FakeClient()
+    client = _FakeClient(stream)
 
     async def progress(record):
         if progress_records is not None:
@@ -454,7 +477,6 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         await task
 
         self.assertEqual(failures, [])
-        self.assertIn("A traveler.", client.instruction or "")
         self.assertTrue(client.hung_up)
         # One judge call saw the whole conversation, the criteria, and the goal.
         self.assertEqual(
@@ -478,6 +500,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.succeeded)
         self.assertTrue(result.passed)
         self.assertEqual(result.reason, "because the bot said Berlin")
+        self.assertEqual(result.success, "the bot said Berlin")
         self.assertEqual(result.ended_by, "end_call")
         self.assertEqual(result.turns, 2)
         self.assertEqual(result.end_call, {"success": True, "reason": "I got my answer"})
@@ -485,6 +508,7 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         # brevity scored 0.5 but gates nothing, so the run still passes.
         self.assertEqual([m.passed for m in result.metrics], [True, True])
         self.assertEqual(result.metrics[0].reason, "all 3 turn(s)")
+        self.assertEqual(result.metrics[0].criterion, "stayed polite")
         self.assertEqual(result.metrics[1].reason, "turn 2: because kept it short")
         self.assertEqual([v.turn for v in result.metrics[1].verdicts if not v.passed], [2])
         self.assertIsNone(result.failure)
@@ -563,7 +587,8 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         # The slowest reply took 1.4 s, over the 1 s bound; the greeting had no send before it.
         self.assertEqual((by_name["latency"].value, by_name["latency"].passed), (1.4, False))
         self.assertEqual(
-            by_name["latency"].reason, "slowest reply 1.40 s to the first token, at most 1"
+            by_name["latency"].reason,
+            "slowest reply 1.40 s from the persona's send to the first token, at most 1",
         )
         self.assertEqual((by_name["words"].value, by_name["words"].passed), (5.0, False))
         self.assertEqual((by_name["turns"].value, by_name["turns"].passed), (2.0, True))
@@ -571,8 +596,80 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.succeeded)
         self.assertFalse(result.passed)
         self.assertEqual(
-            result.failure, "latency: slowest reply 1.40 s to the first token, at most 1"
+            result.failure,
+            "latency: slowest reply 1.40 s from the persona's send to the first token, at most 1",
         )
+
+    async def test_a_required_measurement_without_a_value_fails_a_successful_goal(self):
+        for measure in ("latency", "words"):
+            for bounds in ({"min_value": 0}, {"max_value": 3}, {"min_value": 0, "max_value": 3}):
+                with self.subTest(measure=measure, bounds=bounds):
+                    driver, stream, llm, _ = _driver(
+                        _simulation(
+                            metrics=[EvalSimulationMetric(measure, measure=measure, **bounds)]
+                        ),
+                        _FakeConversationJudge(["yes"]),
+                    )
+                    end_call = asyncio.create_task(_end_call(llm, success=True, reason="done"))
+                    failures = await driver.run()
+                    await end_call
+                    result = driver.result(
+                        failures=failures,
+                        duration_ms=0,
+                        events_seen=stream.events_seen,
+                        debug_log=[],
+                    )
+                    metric = result.metrics[0]
+                    self.assertTrue(result.succeeded)
+                    self.assertIsNone(result.error)
+                    self.assertIsNone(metric.value)
+                    self.assertIsNone(metric.score)
+                    self.assertFalse(metric.passed)
+                    self.assertEqual(metric.failure_kind, "error")
+                    self.assertFalse(result.passed)
+                    self.assertIn("no reply", result.failure or "")
+
+    async def test_a_measured_zero_can_pass_its_bounds(self):
+        driver, stream, llm, _ = _driver(
+            _simulation(metrics=[EvalSimulationMetric("turns", measure="turns", max_value=0)]),
+            _FakeConversationJudge(["yes"]),
+        )
+        end_call = asyncio.create_task(_end_call(llm, success=True, reason="done"))
+        failures = await driver.run()
+        await end_call
+        result = driver.result(
+            failures=failures, duration_ms=0, events_seen=stream.events_seen, debug_log=[]
+        )
+        metric = result.metrics[0]
+        self.assertEqual(metric.value, 0.0)
+        self.assertEqual(metric.score, 1.0)
+        self.assertTrue(metric.passed)
+        self.assertIsNone(metric.failure_kind)
+        self.assertTrue(result.passed)
+
+    async def test_words_measure_counts_each_cjk_character(self):
+        chinese = "这是一个比较长的中文回复用来测量字数"
+        metrics = [EvalSimulationMetric("words", measure="words", max_value=10)]
+        driver, stream, llm, _ = _driver(
+            _simulation(metrics=metrics), _FakeConversationJudge(["yes"])
+        )
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": chinese})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "好"})
+            await stream.append({"type": "llm_response", "text": "Berlin."})
+            await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(
+            failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
+        )
+        words = result.metrics[0]
+        self.assertEqual(words.value, float(len(chinese)))
+        self.assertFalse(words.passed)
+        self.assertIn("longest reply", words.reason)
 
     async def test_function_calls_are_checked_against_the_list_the_bot_should_make(self):
         metrics = [
@@ -705,6 +802,21 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
                 {"role": "assistant", "content": "Let me check. Six is free, booked."},
             ],
         )
+        # The conversation file has the call in place too.
+        self.assertEqual(
+            result.conversation,
+            [
+                {"role": "assistant", "content": "Hello!"},
+                {"role": "user", "content": "A table at six, please."},
+                {
+                    "role": "tool_call",
+                    "name": "check_availability",
+                    "arguments": {"time": "6"},
+                    "cancelled": False,
+                },
+                {"role": "assistant", "content": "Let me check. Six is free, booked."},
+            ],
+        )
 
     async def test_the_conversation_is_reported_as_it_happens(self):
         records: list = []
@@ -763,6 +875,33 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ended_by, "bot")
         self.assertTrue(client.hung_up)
 
+    async def test_the_bots_last_words_before_hanging_up_are_judged(self):
+        judge = _FakeConversationJudge(["yes"])
+        records: list = []
+        driver, stream, _, _ = _driver(_simulation(bot_audio=True), judge, records)
+
+        async def conversation():
+            stream.bot_turn_started()
+            # The bot hangs up as it stops speaking, before the harness has
+            # closed its last words into a turn.
+            await stream.append({"type": BOT_ENDED_EVENT})
+            await asyncio.sleep(0.1)
+            await stream.bot_turn_stopped("Have a wonderful day!")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "bot")
+        self.assertEqual(
+            result.messages[-1], {"role": "assistant", "content": "Have a wonderful day!"}
+        )
+        # The live conversation shows them too, before the run's end.
+        self.assertEqual(
+            [(r.status, r.text) for r in records[-2:]],
+            [("bot", "Have a wonderful day!"), ("ended", "bot")],
+        )
+
     async def test_the_bots_tool_calls_are_the_judges_evidence(self):
         judge = _FakeConversationJudge(["yes"])
         driver, stream, llm, _ = _driver(_simulation(), judge)
@@ -800,6 +939,11 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         with self.assertWarns(DeprecationWarning):
             transcript = driver.transcript()
         self.assertEqual([e["content"] for e in transcript if e["role"] == "tool"], calls)
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(
+            [(m["name"], m["cancelled"]) for m in result.conversation],
+            [("check_availability", False), ("end_conversation", True)],
+        )
 
     async def test_wall_clock_cap_ends_the_run(self):
         driver, _, _, _ = _driver(_simulation(max_duration_s=0.05), _FakeConversationJudge(["no"]))
@@ -839,8 +983,177 @@ class TestSimulationDriver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.reason, "refused")
 
 
+class TestReplyLatency(unittest.IsolatedAsyncioTestCase):
+    """Latency is timed from the caller's side by its modality, to the bot's side by its own."""
+
+    # (user_audio, bot_audio, events after the greeting, expected value, expected reason).
+    # Times are seconds on the stream's clock. In the first three cases the reply
+    # follows an LLM response that only calls a function, which has no text and
+    # isn't the reply.
+    CASES = [
+        (
+            False,
+            False,
+            [
+                {"type": PERSONA_TURN_EVENT, "text": "A table for two.", "at": 1.0},
+                {"type": "llm_response", "text": "", "at": 1.5},
+                {"type": "llm_response", "text": "Done.", "at": 3.0, "started_at": 2.4},
+            ],
+            1.4,
+            "slowest reply 1.40 s from the persona's send to the first token",
+        ),
+        (
+            True,
+            False,
+            [
+                # The persona's line is sent before its audio has been heard.
+                {"type": PERSONA_TURN_EVENT, "text": "A table for two.", "at": 1.0},
+                {"type": "user_started_speaking", "at": 1.2},
+                {"type": "user_stopped_speaking", "at": 3.0},
+                {"type": "llm_response", "text": "", "at": 3.4},
+                {"type": "llm_response", "text": "Done.", "at": 4.5, "started_at": 3.9},
+            ],
+            0.9,
+            "slowest reply 0.90 s from the persona stopping to the first token",
+        ),
+        (
+            False,
+            True,
+            [
+                # Text input never makes the bot report the persona stopping.
+                {"type": PERSONA_TURN_EVENT, "text": "A table for two.", "at": 1.0},
+                {"type": "llm_response", "text": "", "at": 1.5},
+                {"type": "bot_started_speaking", "at": 2.2},
+                {"type": "tts_response", "text": "Done.", "at": 2.3},
+            ],
+            1.2,
+            "slowest reply 1.20 s from the persona's send to the bot starting to speak",
+        ),
+        (
+            True,
+            True,
+            [
+                {"type": PERSONA_TURN_EVENT, "text": "A table for two.", "at": 1.0},
+                {"type": "user_stopped_speaking", "at": 3.0},
+                # The bot's report of its first spoken word lags its audio.
+                {"type": "bot_started_speaking", "at": 3.8},
+                {"type": "tts_response", "text": "Done.", "at": 3.9},
+            ],
+            0.8,
+            "slowest reply 0.80 s from the persona stopping to the bot starting to speak",
+        ),
+    ]
+
+    async def test_each_end_is_timed_by_its_own_sides_modality(self):
+        for user_audio, bot_audio, events, value, reason in self.CASES:
+            with self.subTest(user_audio=user_audio, bot_audio=bot_audio):
+                simulation = _simulation(user_audio=user_audio, bot_audio=bot_audio)
+                driver, stream, _, _ = _driver(simulation, _FakeConversationJudge(["yes"]))
+                await stream.append({"type": "llm_response", "text": "Hi.", "at": 0.5})
+                for event in events:
+                    await stream.append(event)
+                self.assertEqual(driver._measurement("latency"), (value, reason))
+
+    async def test_a_spoken_turn_the_bot_ends_twice_is_timed_from_the_later_end(self):
+        # A pause mid-line makes the bot end the persona's turn once too early.
+        simulation = _simulation(user_audio=True)
+        driver, stream, _, _ = _driver(simulation, _FakeConversationJudge(["yes"]))
+        for event in [
+            {"type": PERSONA_TURN_EVENT, "text": "A table for two, at seven.", "at": 1.0},
+            {"type": "user_stopped_speaking", "at": 2.0},
+            {"type": "user_started_speaking", "at": 2.2},
+            {"type": "user_stopped_speaking", "at": 3.0},
+            {"type": "llm_response", "text": "Done.", "at": 4.0, "started_at": 3.5},
+        ]:
+            await stream.append(event)
+        self.assertEqual(
+            driver._measurement("latency"),
+            (0.5, "slowest reply 0.50 s from the persona stopping to the first token"),
+        )
+
+    async def _run_ending_with_an_unanswered_turn(self, bot_audio: bool, *, hang_up: bool):
+        """A reply in 0.05 s, then a turn the bot answers only with a function call."""
+        metric = EvalSimulationMetric("latency", measure="latency", max_value=0.3)
+        simulation = _simulation(bot_audio=bot_audio, max_silence_s=0.4, metrics=[metric])
+        driver, stream, llm, _ = _driver(simulation, _FakeConversationJudge(["yes"]))
+        reply = (
+            {"type": "bot_started_speaking"}
+            if bot_audio
+            else {"type": "llm_response", "text": "Sure."}
+        )
+
+        async def conversation():
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "A table for two?"})
+            await asyncio.sleep(0.05)
+            await stream.append(reply)
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "At seven."})
+            await stream.append({"type": "llm_response", "text": ""})
+            if hang_up:
+                await _end_call(llm, success=True, reason="done")
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(
+            failures=[], duration_ms=10, events_seen=stream.events_seen, debug_log=[]
+        )
+        return result, {m.name: m for m in result.metrics}["latency"]
+
+    async def test_a_turn_unanswered_when_the_run_falls_silent_counts_its_wait(self):
+        for bot_audio in (False, True):
+            with self.subTest(bot_audio=bot_audio):
+                result, latency = await self._run_ending_with_an_unanswered_turn(
+                    bot_audio, hang_up=False
+                )
+                self.assertEqual(result.ended_by, "silence")
+                # The caller waited out the silence window, well over the bound.
+                self.assertGreaterEqual(latency.value, 0.4)
+                self.assertFalse(latency.passed)
+                self.assertIn(
+                    "the last turn unanswered when the run ended by silence", latency.reason
+                )
+                self.assertFalse(result.passed)
+
+    async def test_a_turn_left_when_the_persona_hangs_up_is_not_counted(self):
+        result, latency = await self._run_ending_with_an_unanswered_turn(False, hang_up=True)
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertLess(latency.value, 0.3)
+        self.assertTrue(latency.passed)
+
+
 class TestClosingTurn(unittest.IsolatedAsyncioTestCase):
     """A persona that hangs up on its own last line leaves the bot its reply to it."""
+
+    async def _hang_up_while_speaking(self, simulation: EvalSimulationScenario):
+        """Run a conversation whose last persona line ends with end_call, made while the line is spoken."""
+        # In audio mode the persona calls end_call before the user TTS has
+        # spoken the line the call came with.
+        judge = _FakeConversationJudge(["yes"])
+        driver, stream, llm, client = _driver(simulation, judge)
+        relay = _PersonaTurnRelay(lambda text: {}, EvalTrace(), stream)
+        relay.link(_Discard())
+        client.report_end_call = relay.end_call
+
+        async def conversation():
+            await stream.append({"type": "response", "text": "Anything else?"})
+            await relay.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+            await _end_call(llm, success=True, reason="done")
+            self.assertTrue(client.hung_up)
+            # Speaking the line takes a while.
+            await asyncio.sleep(0.1)
+            for frame in (
+                TTSTextFrame(text="No, goodbye!", text_type=TextType.SENTENCE),
+                LLMFullResponseEndFrame(),
+            ):
+                await relay.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            await stream.append({"type": "response", "text": "Goodbye!"})
+
+        task = asyncio.create_task(conversation())
+        await driver.run()
+        await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        return result, judge
 
     async def test_the_bots_reply_to_the_last_line_closes_the_run(self):
         driver, stream, llm, client = _driver(_simulation(), _FakeConversationJudge(["yes"]))
@@ -861,6 +1174,74 @@ class TestClosingTurn(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ended_by, "end_call")
         self.assertEqual(
             result.messages[-1], {"role": "assistant", "content": "Great, you're all set."}
+        )
+
+    async def test_a_hang_up_while_the_last_line_is_spoken_waits_for_the_bots_reply(self):
+        result, judge = await self._hang_up_while_speaking(_simulation(bot_audio=True))
+        self.assertEqual(result.ended_by, "end_call")
+        # The judge read the persona's last line and the bot's reply to it.
+        self.assertEqual(
+            judge.transcript[-2:],
+            [
+                {"role": "user", "content": "No, goodbye!"},
+                {"role": "assistant", "content": "Goodbye!"},
+            ],
+        )
+
+    async def test_a_hang_up_on_the_last_allowed_turn_waits_for_the_bots_reply(self):
+        result, _ = await self._hang_up_while_speaking(_simulation(bot_audio=True, max_turns=1))
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertEqual(result.messages[-1], {"role": "assistant", "content": "Goodbye!"})
+
+    async def test_the_wait_for_the_bots_reply_counts_from_when_it_heard_the_line_end(self):
+        driver, stream, llm, _ = _driver(_simulation(), _FakeConversationJudge(["yes"]))
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Is that all correct?"})
+            await stream.append({"type": "user_started_speaking"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Yes, thanks, goodbye."})
+            await _end_call(llm, success=True, reason="done")
+            # The line plays to the bot for longer than the wait itself.
+            await asyncio.sleep(0.7)
+            await stream.append({"type": "user_stopped_speaking"})
+            await asyncio.sleep(0.3)
+            await stream.append({"type": "llm_response", "text": "Goodbye!"})
+
+        with patch("pipecat.evals.simulation_driver.CLOSING_REPLY_WAIT_S", 0.5):
+            task = asyncio.create_task(conversation())
+            await driver.run()
+            await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertEqual(result.messages[-1], {"role": "assistant", "content": "Goodbye!"})
+
+    async def test_a_long_closing_reply_holds_the_wait_until_the_bot_stops(self):
+        driver, stream, llm, _ = _driver(_simulation(), _FakeConversationJudge(["yes"]))
+
+        async def bot_report(msg_type: str):
+            event = stream.rtvi_message_to_event({"label": RTVI.MESSAGE_LABEL, "type": msg_type})
+            assert event is not None
+            await stream.append(event)
+
+        async def conversation():
+            await stream.append({"type": "llm_response", "text": "Is that all correct?"})
+            await stream.append({"type": PERSONA_TURN_EVENT, "text": "Yes, goodbye."})
+            await _end_call(llm, success=True, reason="done")
+            await bot_report("bot-started-speaking")
+            # The bot's reply goes on for longer than the wait itself.
+            await asyncio.sleep(0.7)
+            await bot_report("bot-stopped-speaking")
+            await asyncio.sleep(0.2)
+            await stream.append({"type": "llm_response", "text": "Goodbye, safe travels!"})
+
+        with patch("pipecat.evals.simulation_driver.CLOSING_REPLY_WAIT_S", 0.5):
+            task = asyncio.create_task(conversation())
+            await driver.run()
+            await task
+        result = driver.result(failures=[], duration_ms=0, events_seen=[], debug_log=[])
+        self.assertEqual(result.ended_by, "end_call")
+        self.assertEqual(
+            result.messages[-1], {"role": "assistant", "content": "Goodbye, safe travels!"}
         )
 
     async def test_a_hang_up_with_no_reply_coming_still_ends_as_end_call(self):
@@ -922,7 +1303,13 @@ class TestSimulationEarlyEndings(unittest.IsolatedAsyncioTestCase):
             await stream.append({"type": "llm_started"})
             for _ in range(3):
                 await asyncio.sleep(0.1)
-                stream.frame_to_event(LLMTextFrame(text="token "))
+                stream.rtvi_message_to_event(
+                    {
+                        "label": RTVI.MESSAGE_LABEL,
+                        "type": "bot-llm-text",
+                        "data": {"text": "token "},
+                    }
+                )
             await _end_call(llm, success=True, reason="done")
 
         task = asyncio.create_task(conversation())

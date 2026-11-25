@@ -10,12 +10,11 @@ This module provides Google Gemini integration for the Pipecat framework,
 including LLM services, context management, and message aggregation.
 """
 
-import asyncio
 import io
 import os
 import re
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncIterator
 from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, Union, cast
@@ -24,8 +23,11 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.base_llm_adapter import LLMContextConversionError
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.llm.base_llm_adapter import LLMContextConversionError
+from pipecat.adapters.llm.services.gemini_adapter import (
+    GeminiLLMAdapter,
+    gemini_thought_signature_message,
+)
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
     Frame,
@@ -41,7 +43,14 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
-from pipecat.services.google.utils import update_google_client_http_options
+from pipecat.services.google.utils import (
+    _MODELS_SUPPORTING_THINKING_LEVEL,
+    _model_name,
+    _thinking_default,
+    gemini_api_http_options,
+    stream_with_retry,
+    update_google_client_http_options,
+)
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.utils.deprecation import deprecated
@@ -72,19 +81,6 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module: {e}") from e
 
 
-# The lowest thinking level each model accepts, keyed by model name prefix. A
-# model that isn't listed is assumed to accept "minimal", the fastest setting.
-_LOWEST_MODEL_THINKING_LEVELS = {
-    "gemini-3.7-flash": "low",
-    "gemini-3.8-flash": "low",
-}
-
-# Models that take their thinking configuration from thinking_level, keyed by
-# model name prefix. Whether one of these honors a thinking_budget set alongside
-# it varies by model and by backend, so such a budget can't be relied on.
-_MODELS_SUPPORTING_THINKING_LEVEL = ("gemini-3",)
-
-
 class GoogleThinkingConfig(BaseModel):
     """Configuration for controlling the model's internal "thinking" process used before generating a response.
 
@@ -103,7 +99,7 @@ class GoogleThinkingConfig(BaseModel):
             -1 for dynamic thinking (model decides), 0 to disable thinking,
             or a specific token count (e.g., 128-32768 for 2.5 Pro).
             If not provided, most models today default to dynamic thinking.
-            See https://ai.google.dev/gemini-api/docs/thinking#set-budget
+            See https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking#gemini-2-5-and-earlier-models
             for default values and allowed ranges.
             Note: Gemini 3 models must use thinking_level instead.
         include_thoughts: Whether to include thought summaries in the response.
@@ -124,7 +120,11 @@ class GoogleLLMSettings(LLMSettings):
     """Settings for GoogleLLMService.
 
     Parameters:
-        thinking: Thinking configuration.
+        thinking: Thinking configuration. If this is not provided, Pipecat
+            sends the lowest thinking setting Google documents for the model,
+            for the fastest responses, and logs what it sent. Models Pipecat
+            doesn't list, and any model when ``use_provider_thinking_default`` is
+            set, run at Google's default.
         safety_settings: Content safety filters, as a list of
             :class:`~google.genai.types.SafetySetting`. Each entry pairs a harm
             category with the threshold at which content is blocked. Categories
@@ -195,9 +195,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             thinking: Thinking configuration with thinking_budget, thinking_level, and include_thoughts.
                 Used to control the model's internal "thinking" process used before generating a response.
                 Gemini 2.5 series models use thinking_budget; Gemini 3 models use thinking_level.
-                If this is not provided, Pipecat disables thinking for all
-                models where that's possible (the 2.5 series, except 2.5 Pro),
-                to reduce latency.
+                If this is not provided, Pipecat sends the lowest thinking setting Google
+                documents for the model, for the fastest responses, and logs what it sent.
+                Models Pipecat doesn't list run at Google's default.
             extra: Additional parameters as a dictionary.
         """
 
@@ -338,7 +338,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
     def create_client(self):
         """Create the Gemini client instance. Subclasses can override this."""
-        self._client = genai.Client(api_key=self._api_key, http_options=self._http_options)
+        self._client = genai.Client(
+            api_key=self._api_key, http_options=gemini_api_http_options(self._http_options)
+        )
 
     @staticmethod
     def model_supports_response_schema(model: str) -> bool:
@@ -421,6 +423,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             config=generation_config,
         )
 
+        if response.candidates and response.candidates[0].finish_reason:
+            self._handle_finish_reason(response.candidates[0].finish_reason)
+
         # Extract text from response
         if response.candidates and response.candidates[0].content:
             for part in response.candidates[0].content.parts or []:
@@ -473,7 +478,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
         # Applied last, so an explicit thinking config from the settings or from
         # extra wins over the low-latency default.
-        self._maybe_unset_thinking_budget(generation_params)
+        self._maybe_apply_thinking_default(generation_params)
 
         return generation_params
 
@@ -506,7 +511,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             return
 
         model = assert_given(self._settings.model)
-        if not model or not model.startswith(_MODELS_SUPPORTING_THINKING_LEVEL):
+        if not model or not _model_name(model).startswith(_MODELS_SUPPORTING_THINKING_LEVEL):
             return
 
         logger.warning(
@@ -514,32 +519,31 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
             "ignore it or reject the request outright. Use thinking_level instead."
         )
 
-    def _maybe_unset_thinking_budget(self, generation_params: dict[str, Any]):
-        try:
-            model = assert_given(self._settings.model)
-            # If we have an image model, we don't apply a thinking default.
-            if model is None or "image" in model:
-                return
-            # If thinking_config is already set, don't override it.
-            if "thinking_config" in generation_params:
-                return
-            # Apply model-aware low-latency thinking defaults.
-            # Gemini 2.5 Flash: disable thinking via thinking_budget.
-            # Gemini 3+ Flash: use the lowest thinking_level the model accepts.
-            if model.startswith("gemini-2.5-flash"):
-                generation_params["thinking_config"] = {"thinking_budget": 0}
-            elif model.startswith("gemini-3") and "flash" in model:
-                level = next(
-                    (
-                        lowest
-                        for prefix, lowest in _LOWEST_MODEL_THINKING_LEVELS.items()
-                        if model.startswith(prefix)
-                    ),
-                    "minimal",
-                )
-                generation_params["thinking_config"] = {"thinking_level": level}
-        except Exception as e:
-            logger.error(f"Failed to unset thinking budget: {e}")
+    def _maybe_apply_thinking_default(self, generation_params: dict[str, Any]):
+        """Send the model's lowest thinking setting when none is configured.
+
+        Applies the model's entry in ``_THINKING_DEFAULTS``, if it has one.
+        Generation params that already set ``thinking_config``, from the
+        settings or from ``extra``, are left as they are, and so are all
+        generation params when ``use_provider_thinking_default`` is set. The first
+        request for each model logs the setting sent, or that the model runs at
+        Google's default, warning for an unlisted model that can think.
+
+        Args:
+            generation_params: The generation params dict (modified in place).
+        """
+        if "thinking_config" in generation_params:
+            return
+        model = assert_given(self._settings.model) or ""
+        thinking, can_think = _thinking_default(model)
+        self._apply_thinking_default(
+            generation_params,
+            model,
+            {"thinking_config": thinking} if thinking is not None else None,
+            can_think=can_think,
+            provider="Google",
+            settings_fields="`thinking`",
+        )
 
     # Models known to accept a request whose contents end with a model turn,
     # continuing that turn as the start of the response. Newer models reject
@@ -612,10 +616,8 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
     async def _stream_response(self, context: LLMContext) -> AsyncIterator[GenerateContentResponse]:
         """Yield the model's streamed chunks, re-issuing the request once if it stalls.
 
-        The API client sends the request lazily, when the first chunk is pulled, so a
-        request that is accepted and then produces nothing shows up as a first chunk
-        that never arrives. Re-issuing is safe only up to that point: once a chunk has
-        been yielded, its content is already on its way downstream.
+        The API client sends the request lazily, when the first chunk is pulled, so
+        a stalled request shows up as a first chunk that never arrives.
 
         Args:
             context: The context to generate a response for.
@@ -626,80 +628,18 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         Raises:
             TimeoutError: If the stream stalls past the timeout it is bounded by.
         """
-        if self._retry_on_timeout:
-            async with aclosing(
-                self._iter_stream(
-                    await self._stream_content(context),
-                    first_chunk_timeout=self._retry_timeout_secs,
-                )
-            ) as stream:
-                try:
-                    first_chunk = await stream.__anext__()
-                except StopAsyncIteration:
-                    return
-                except (TimeoutError, DeadlineExceeded):
-                    logger.debug(f"{self}: retrying content generation due to timeout")
-                else:
-                    yield first_chunk
-                    async for chunk in stream:
-                        yield chunk
-                    return
-
-        # Either retries are disabled, or the initial attempt timed out.
         async with aclosing(
-            self._iter_stream(
-                await self._stream_content(context),
-                first_chunk_timeout=self._stream_idle_timeout_secs,
+            stream_with_retry(
+                lambda: self._stream_content(context),
+                idle_timeout=self._stream_idle_timeout_secs,
+                retry_timeout=self._retry_timeout_secs,
+                retry_on_timeout=bool(self._retry_on_timeout),
+                timeout_errors=(TimeoutError, DeadlineExceeded),
+                label=str(self),
             )
         ) as stream:
             async for chunk in stream:
                 yield chunk
-
-    async def _iter_stream(
-        self,
-        response: AsyncIterator[GenerateContentResponse],
-        *,
-        first_chunk_timeout: float | None,
-    ) -> AsyncGenerator[GenerateContentResponse, None]:
-        """Yield streamed chunks, giving up if the stream stalls between them.
-
-        A stream that stops producing without closing would otherwise leave the
-        response open indefinitely, since the API client applies no timeout of its
-        own. The timeout covers the gap between chunks rather than the response as
-        a whole, so a slow but healthy stream is never cut short.
-
-        Args:
-            response: The streamed response to consume.
-            first_chunk_timeout: How long to wait for the first chunk. Every later
-                chunk is bounded by ``stream_idle_timeout_secs``.
-
-        Yields:
-            Each chunk of the streamed response.
-
-        Raises:
-            TimeoutError: If the next chunk doesn't arrive in time.
-        """
-        chunks = response.__aiter__()
-        timeout = first_chunk_timeout
-        try:
-            while True:
-                try:
-                    if timeout is None:
-                        chunk = await chunks.__anext__()
-                    else:
-                        chunk = await asyncio.wait_for(chunks.__anext__(), timeout=timeout)
-                except StopAsyncIteration:
-                    return
-                yield chunk
-                timeout = self._stream_idle_timeout_secs
-        finally:
-            # Release the HTTP resources held by a stream we walk away from, whether
-            # that's because it stalled, was interrupted, or is being re-issued.
-            # Closing is best-effort: the client's stream type only promises
-            # AsyncIterator, which has no aclose().
-            aclose = getattr(response, "aclose", None)
-            if aclose is not None:
-                await aclose()
 
     def _handle_finish_reason(self, finish_reason: FinishReason):
         """Log why Gemini stopped generating, when it stopped for a notable reason.
@@ -707,7 +647,7 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
         Anything other than a normal stop leaves the turn short of what the model
         would otherwise have said: the response was withheld (safety, recitation,
         prohibited content), a tool call was rejected, or the output hit the token
-        limit. Whatever text did arrive is still passed downstream.
+        limit. Whatever text did arrive is still passed on.
         """
         if finish_reason in (FinishReason.STOP, FinishReason.FINISH_REASON_UNSPECIFIED):
             return
@@ -842,11 +782,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
                                         LLMMessagesAppendFrame(
                                             [
                                                 self.get_llm_adapter().create_llm_specific_message(
-                                                    {
-                                                        "type": "thought_signature",
-                                                        "signature": part.thought_signature,
-                                                        "bookmark": bookmark,
-                                                    }
+                                                    gemini_thought_signature_message(
+                                                        part.thought_signature, bookmark
+                                                    )
                                                 )
                                             ]
                                         )

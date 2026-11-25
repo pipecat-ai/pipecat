@@ -13,7 +13,7 @@ subclasses that don't need a custom tool schema. See the class for details.
 
 from loguru import logger
 
-from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.pipeline.job_context import JobError, JobParams
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.utils.deprecation import deprecated

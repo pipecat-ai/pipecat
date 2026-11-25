@@ -4,83 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""User turn stop strategy gated on the LLM's turn-completion verdict."""
+"""Import path for :class:`LLMTurnCompletionUserTurnStopStrategy`.
 
-from pipecat.frames.frames import Frame, LLMUpdateSettingsFrame, StartFrame
-from pipecat.services.settings import LLMSettings
-from pipecat.turns.types import ProcessFrameResult
-from pipecat.turns.user_stop.external_user_turn_completion_stop_strategy import (
-    ExternalUserTurnCompletionStopStrategy,
+The strategy lives in :mod:`pipecat.turns.user_stop.llm_turn_completion`,
+beside the LLM extension it installs.
+"""
+
+from pipecat.turns.user_stop.llm_turn_completion.llm_turn_completion_user_turn_stop_strategy import (
+    LLMTurnCompletionUserTurnStopStrategy,
 )
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
-
-class LLMTurnCompletionUserTurnStopStrategy(ExternalUserTurnCompletionStopStrategy):
-    """LLM-gated stop strategy.
-
-    Extends
-    :class:`~pipecat.turns.user_stop.ExternalUserTurnCompletionStopStrategy`
-    with the LLM-specific setup needed for the marker-based completion
-    protocol: on ``StartFrame``, pushes an ``LLMUpdateSettingsFrame``
-    downstream that enables ``filter_incomplete_user_turns`` on the LLM
-    and seeds the
-    :class:`~pipecat.turns.user_turn_completion_mixin.UserTurnCompletionConfig`.
-    The update is marked ``reach_inactive_services`` so that every LLM behind
-    an :class:`~pipecat.pipeline.llm_switcher.LLMSwitcher` is configured, not
-    only the one active at startup.
-
-    Finalization itself is inherited: when the LLM service's
-    :class:`~pipecat.turns.user_turn_completion_mixin.UserTurnCompletionLLMServiceMixin`
-    detects a ``●`` marker, it broadcasts a
-    :class:`~pipecat.frames.frames.UserTurnInferenceCompletedFrame` and the
-    base class fires ``on_user_turn_stopped``. On
-    ``incomplete_short`` / ``incomplete_long`` markers the mixin
-    re-prompts internally and no completion frame is emitted, so the
-    public stop event stays deferred.
-
-    Install alongside one or more ``deferred(...)``-wrapped detector
-    strategies that drive ``on_user_turn_inference_triggered`` but
-    leave finalization to this strategy. The aggregator's deprecation
-    path for ``filter_incomplete_user_turns`` does this rewiring
-    automatically.
-    """
-
-    def __init__(
-        self,
-        *,
-        config: UserTurnCompletionConfig | None = None,
-        **kwargs,
-    ):
-        """Initialize the LLM turn-completion stop strategy.
-
-        Args:
-            config: Configuration applied to the LLM via the
-                ``filter_incomplete_user_turns`` setting on
-                ``StartFrame``. Defaults to ``UserTurnCompletionConfig()``.
-            **kwargs: Additional keyword arguments forwarded to the base
-                class.
-        """
-        super().__init__(**kwargs)
-        self._config = config or UserTurnCompletionConfig()
-
-    @property
-    def config(self) -> UserTurnCompletionConfig:
-        """Return the configured ``UserTurnCompletionConfig``."""
-        return self._config
-
-    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
-        """Configure the LLM on start and delegate completion handling to the base."""
-        if isinstance(frame, StartFrame):
-            await self._configure_llm()
-        return await super().process_frame(frame)
-
-    async def _configure_llm(self):
-        await self.push_frame(
-            LLMUpdateSettingsFrame(
-                delta=LLMSettings(
-                    filter_incomplete_user_turns=True,
-                    user_turn_completion_config=self._config,
-                ),
-                reach_inactive_services=True,
-            )
-        )
+__all__ = ["LLMTurnCompletionUserTurnStopStrategy"]

@@ -125,7 +125,7 @@ async def test_trailing_partial_sample_is_padded_at_end_of_context():
     last_audio = max(i for i, f in enumerate(down_frames) if isinstance(f, TTSAudioRawFrame))
     stopped = next(i for i, f in enumerate(down_frames) if isinstance(f, TTSStoppedFrame))
     assert last_audio < stopped
-    assert service._audio_remainders == {}
+    assert service._audio_context_manager._remainders == {}
 
 
 @pytest.mark.asyncio
@@ -143,7 +143,7 @@ async def test_context_timeout_drops_partial_sample():
         ],
     )
 
-    assert service._audio_remainders == {}
+    assert service._audio_context_manager._remainders == {}
 
 
 @pytest.mark.asyncio
@@ -152,7 +152,7 @@ async def test_interruption_discards_partial_sample():
 
     await _speak(service, SleepFrame(sleep=0.02), InterruptionFrame(), SleepFrame(sleep=0.2))
 
-    assert service._audio_remainders == {}
+    assert service._audio_context_manager._remainders == {}
 
 
 def test_speech_onset_tolerates_partial_trailing_sample():

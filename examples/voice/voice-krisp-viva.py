@@ -10,14 +10,14 @@ This example demonstrates a conversational bot with:
 - Krisp VIVA noise reduction on incoming audio
 - Krisp VIVA Turn detection for end-of-turn
 - Krisp Interruption Prediction (IP) to filter backchannels from real interruptions
-- Voice activity detection (VAD)
+- Krisp VIVA voice activity detection (VAD), which also drives IP
 
 Required environment variables:
 - KRISP_VIVA_FILTER_MODEL_PATH: Path to the Krisp noise filter model file (.kef)
 - KRISP_VIVA_TURN_MODEL_PATH: Path to the Krisp turn detection model file (.kef)
 - KRISP_VIVA_IP_MODEL_PATH: Path to the Krisp IP model file (.kef)
-- DEEPGRAM_API_KEY: Deepgram API key for STT
-- CARTESIA_API_KEY: Cartesia API key for TTS
+- KRISP_VIVA_VAD_MODEL_PATH: Path to the Krisp VAD model file (.kef)
+- DEEPGRAM_API_KEY: Deepgram API key for STT and TTS
 - OPENAI_API_KEY: OpenAI API key for LLM
 
 Optional environment variables:
@@ -33,7 +33,7 @@ from loguru import logger
 
 from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
 from pipecat.audio.turn.krisp_viva_turn import KrispVivaTurn
-from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.krisp_viva_vad import KrispVivaVadAnalyzer
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.metrics.metrics import TurnMetricsData
@@ -47,17 +47,14 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.deepgram.tts import DeepgramTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.livekit.transport import LiveKitParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_start import (
-    KrispVivaIPUserTurnStartStrategy,
-    TranscriptionUserTurnStartStrategy,
-)
+from pipecat.turns.user_start import KrispVivaIPUserTurnStartStrategy
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
@@ -98,11 +95,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
 
-    tts = CartesiaTTSService(
-        api_key=os.environ["CARTESIA_API_KEY"],
-        settings=CartesiaTTSService.Settings(
-            voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49",
-        ),
+    tts = DeepgramTTSService(
+        api_key=os.environ["DEEPGRAM_API_KEY"],
     )
 
     llm = OpenAILLMService(
@@ -117,13 +111,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
-                start=[
-                    KrispVivaIPUserTurnStartStrategy(threshold=0.5),
-                    TranscriptionUserTurnStartStrategy(),
-                ],
+                start=[KrispVivaIPUserTurnStartStrategy(threshold=0.5)],
                 stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=KrispVivaTurn())],
             ),
-            vad_analyzer=SileroVADAnalyzer(),  # or KrispVivaVadAnalyzer
+            vad_analyzer=KrispVivaVadAnalyzer(),
         ),
     )
 

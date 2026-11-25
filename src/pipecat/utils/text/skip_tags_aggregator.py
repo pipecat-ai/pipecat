@@ -48,6 +48,11 @@ class SkipTagsAggregator(SimpleTextAggregator):
         self._current_tag: StartEndTags | None = None
         self._current_tag_index: int = 0
 
+    @property
+    def tags(self) -> Sequence[StartEndTags]:
+        """The tag pairs whose text is kept in one aggregation."""
+        return self._tags
+
     async def aggregate(self, text: str) -> AsyncIterator[Aggregation]:
         """Aggregate text while respecting tag boundaries.
 
@@ -109,10 +114,26 @@ class SkipTagsAggregator(SimpleTextAggregator):
             if self._current_tag:
                 continue
 
-            # Otherwise, use parent's lookahead logic for sentence detection
-            result = await super()._check_sentence_with_lookahead(char)
+            # Otherwise, use parent's lookahead logic for sentence detection,
+            # ignoring boundaries inside tags that have already closed.
+            result = await super()._check_sentence_with_lookahead(
+                char, protected_end=self._closed_tags_offset()
+            )
             if result:
+                # The buffer was trimmed, so rescan it from the start for tags.
+                self._current_tag_index = 0
                 yield result
+
+    def _closed_tags_offset(self) -> int:
+        """Return the buffer offset just past the last closing tag, or 0 if none."""
+        return max(
+            (
+                self._text.rfind(end_tag) + len(end_tag)
+                for _, end_tag in self._tags
+                if end_tag in self._text
+            ),
+            default=0,
+        )
 
     async def flush(self) -> Aggregation | None:
         """Flush any remaining text in the buffer.

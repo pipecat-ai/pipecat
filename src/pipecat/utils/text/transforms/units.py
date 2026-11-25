@@ -48,7 +48,8 @@ _AMBIGUOUS_UNITS = {"in", "m", "g", "l"}
 _sorted_unambiguous = sorted(
     (u for u in _UNIT_MAP if u not in _AMBIGUOUS_UNITS), key=len, reverse=True
 )
-_sorted_ambiguous = sorted(_AMBIGUOUS_UNITS, key=len, reverse=True)
+# Liters are also written with a capital "L".
+_sorted_ambiguous = sorted(_AMBIGUOUS_UNITS | {"L"}, key=len, reverse=True)
 
 # Unambiguous units allow optional whitespace between the number and the unit.
 _UNIT_RE = re.compile(
@@ -56,11 +57,16 @@ _UNIT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Ambiguous units require the unit to follow the digit with no space.
+# Ambiguous units require the unit to follow the digit with no space, and match
+# case-sensitively: "5M" (million) and "5G" (the network) are not meters or grams.
 _AMBIGUOUS_UNIT_RE = re.compile(
-    r"(\d+(?:\.\d+)?)(" + "|".join(re.escape(u) for u in _sorted_ambiguous) + r")\b",
-    re.IGNORECASE,
+    r"(\d+(?:\.\d+)?)(" + "|".join(re.escape(u) for u in _sorted_ambiguous) + r")\b"
 )
+
+# Degrees: "25°C", "72 °F", "a 90° turn". The degree sign is not a word, so a TTS
+# engine may skip it or read the scale letter on its own ("twenty-five C").
+_DEGREE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*°(?:\s*([CF])(?![a-zA-Z])|(?![a-zA-Z\d]))")
+_DEGREE_SCALES = {"C": " Celsius", "F": " Fahrenheit"}
 
 
 async def expand_units(text: str, text_type: str | TextType) -> str:
@@ -91,5 +97,11 @@ async def expand_units(text: str, text_type: str | TextType) -> str:
         # plural in speech.
         return f"{number} {singular if number == '1' else plural}"
 
+    def _replace_degrees(match: re.Match) -> str:
+        number = match.group(1)
+        degrees = "degree" if number == "1" else "degrees"
+        return f"{number} {degrees}{_DEGREE_SCALES.get(match.group(2) or '', '')}"
+
+    text = _DEGREE_RE.sub(_replace_degrees, text)
     text = _UNIT_RE.sub(_replace, text)
     return _AMBIGUOUS_UNIT_RE.sub(_replace, text)

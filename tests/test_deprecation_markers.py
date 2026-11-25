@@ -37,10 +37,12 @@ from deprecations import scan as dscan  # noqa: E402
 
 from pipecat.frames.frames import (  # noqa: E402
     CancelTaskFrame,
+    EagerEndOfTurnCancelFrame,
     EndTaskFrame,
     InterruptionTaskFrame,
     StartFrame,
     StopTaskFrame,
+    UserTurnResponseCancelFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
 from pipecat.pipeline.runner import PipelineRunner  # noqa: E402
@@ -104,6 +106,45 @@ def test_no_replacement_directive_extracts_no_replacement():
     use = "Use :class:`Foo` instead. Will be removed in 2.0.0."
     assert dscan.first_reference(use) == "Foo"
     assert dscan.relation_for(use, "Foo") == "use_existing"
+
+
+def test_directives_are_attributed_to_the_entry_they_sit_under():
+    """A directive under an event bullet or an Args entry deprecates that entry alone."""
+    docstring = """A processor.
+
+    Events:
+
+    - on_ready: Triggered when ready.
+    - on_old_event: Triggered by the old thing.
+
+      .. deprecated:: 1.8.0
+          Use ``on_ready`` instead. Will be removed in 2.0.0.
+
+    Args:
+        old_param: An old parameter.
+
+            .. deprecated:: 1.8.0
+                Use ``new_param`` instead. Will be removed in 2.0.0.
+    """
+    entries = [(param, kind) for _, _, param, kind in dscan.iter_directives(docstring)]
+
+    assert entries == [("on_old_event", "event"), ("old_param", "parameter")]
+
+
+def test_top_level_directive_deprecates_the_symbol():
+    """A directive outside any entry deprecates the symbol the docstring belongs to."""
+    docstring = """A processor.
+
+    .. deprecated:: 1.8.0
+        Use ``NewProcessor`` instead. Will be removed in 2.0.0.
+
+    Events:
+
+    - on_ready: Triggered when ready.
+    """
+    entries = [(param, kind) for _, _, param, kind in dscan.iter_directives(docstring)]
+
+    assert entries == [(None, "parameter")]
 
 
 # --- @deprecated decorator message consistency -------------------------------
@@ -210,14 +251,43 @@ def test_task_frame_aliases_warn(frame_cls):
         frame_cls()
 
 
+def test_eager_end_of_turn_cancel_frame_warns():
+    with pytest.warns(DeprecationWarning, match="`EagerEndOfTurnCancelFrame` is deprecated"):
+        frame = EagerEndOfTurnCancelFrame()
+    assert isinstance(frame, UserTurnResponseCancelFrame)
+
+
+def test_deferring_a_stop_strategy_warns_once():
+    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy, deferred
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        deferred(SpeechTimeoutUserTurnStopStrategy())
+    messages = [str(w.message) for w in caught if issubclass(w.category, DeprecationWarning)]
+    assert messages == [
+        "`deferred` is deprecated since 1.15.0 and will be removed in 2.0.0. No replacement."
+    ]
+
+
+def test_external_user_turn_completion_stop_strategy_warns():
+    from pipecat.turns.user_stop import ExternalUserTurnCompletionStopStrategy
+
+    with pytest.warns(
+        DeprecationWarning, match="`ExternalUserTurnCompletionStopStrategy` is deprecated"
+    ):
+        ExternalUserTurnCompletionStopStrategy()
+
+
 def test_no_deprecation_warnings_at_import_time():
     """Importing the modules with deprecated shims must not emit a pipecat DeprecationWarning.
 
-    Guards the suppression of @deprecated subclassing warnings for the task frame
-    aliases defined inside pipecat.frames.frames. Done in a subprocess for a
+    Guards against @deprecated subclassing warnings from the task frame aliases
+    in pipecat.frames.frames, the deprecated stop strategies in
+    pipecat.turns.user_stop, and the deprecated TTS base classes in
+    pipecat.services.tts_service. Done in a subprocess for a
     fresh import, and filtered to pipecat's own deprecations (the canonical
-    "... is deprecated since X.Y.Z ..." message) so unrelated stdlib warnings —
-    e.g. ``audioop`` on Python 3.12 — don't trip it.
+    "... is deprecated since X.Y.Z ..." message) so unrelated stdlib and
+    third-party warnings don't trip it.
     """
     script = (
         "import sys, warnings\n"
@@ -226,7 +296,9 @@ def test_no_deprecation_warnings_at_import_time():
         "    import pipecat.frames.frames\n"
         "    import pipecat.pipeline.worker\n"
         "    import pipecat.pipeline.runner\n"
-        "bad = [str(w.message) for w in caught\n"
+        "    import pipecat.turns.user_stop\n"
+        "    import pipecat.services.tts_service\n"
+        "bad =[str(w.message) for w in caught\n"
         "       if issubclass(w.category, DeprecationWarning)\n"
         "       and ' is deprecated since ' in str(w.message)]\n"
         "if bad:\n"
@@ -427,6 +499,13 @@ def test_compute_removals_no_change_when_nothing_removed():
     assert drem.compute_removals(prev, current, "2.0.0", []) == []
 
 
+def test_compute_removals_ignores_subject_recorded_by_member():
+    """A subject now recorded per member (``X`` → ``X.member``) wasn't removed."""
+    prev = _dep_registry(_dep_record("Proc"))
+    current = _dep_registry(_dep_record("Proc.on_event", kind="event"))
+    assert drem.compute_removals(prev, current, "2.0.0", []) == []
+
+
 def test_compute_removals_is_idempotent():
     """A subject already recorded as removed is not appended again."""
     prev = _dep_registry(_dep_record("Gone"))
@@ -449,3 +528,155 @@ def test_compute_removals_records_actual_vs_announced_version():
     removals = drem.compute_removals(prev, current, "2.1.0", [])  # slipped past 2.0.0
     assert removals[0]["removed_in"] == "2.1.0"
     assert removals[0]["announced_removed_in"] == "2.0.0"
+
+
+# --- Undeprecated moves/removals ----------------------------------------------
+#
+# compute_removals only sees subjects deprecated in the previous release, so an
+# alpha feature moved outright is invisible to it. The generator drafts records
+# for those straight into removals.json (deprecated_in null); a person reviews
+# them in the release PR, and a rerun never overwrites an existing record.
+
+
+def _draft(subject, **overrides):
+    rec = {
+        "subject": subject,
+        "module": "pipecat.old",
+        "kind": "class",
+        "deprecated_in": None,
+        "removed_in": "2.0.0",
+        "announced_removed_in": None,
+        "relation": "move",
+        "replacement": "pipecat.new.Thing",
+        "message": f"`{subject}` moved to `pipecat.new` in 2.0.0.",
+    }
+    rec.update(overrides)
+    return rec
+
+
+def test_add_drafts_appends_new_subjects_sorted():
+    existing = [_draft("Zed", removed_in="1.0.0")]
+    merged = drem.add_drafts(existing, [_draft("Moved")])
+    assert [r["subject"] for r in merged] == ["Zed", "Moved"]  # 1.0.0 sorts before 2.0.0
+
+
+def test_add_drafts_never_overwrites_an_existing_record():
+    detected = _draft("Moved", deprecated_in="1.0.0", message="detected")
+    merged = drem.add_drafts([detected], [_draft("Moved")])
+    assert merged == [detected]
+
+
+def test_hand_edited_draft_survives_a_rerun():
+    """The release PR flow: draft, a reviewer edits it, the script runs again."""
+    draft = _draft("Moved")
+    first = drem.add_drafts([], [draft])
+    edited = [dict(first[0], replacement="pipecat.better.Thing", message="fixed by reviewer")]
+    # Rerun: compute_removals starts from the file on disk, the guard re-drafts only
+    # modules with no record, and add_drafts keeps whatever is already recorded.
+    rerun = drem.compute_removals(None, _dep_registry(), "2.0.0", edited)
+    assert drem.unrecorded_vanished_modules({"pipecat.old"}, set(), rerun) == []
+    assert drem.add_drafts(rerun, [draft]) == edited
+
+
+def test_deleted_draft_is_redrafted_on_rerun():
+    """A draft a reviewer removes is not recorded, so the next run drafts it again."""
+    draft = _draft("Moved")
+    assert drem.unrecorded_vanished_modules({"pipecat.old"}, set(), []) == ["pipecat.old"]
+    assert drem.add_drafts([], [draft]) == [draft]
+
+
+def test_committed_removals_drafts_are_reviewed_records():
+    """Records with deprecated_in null are reviewed drafts: each needs a message, and a
+    replacement unless it is a plain deletion."""
+    doc = json.loads(drem.REMOVALS_PATH.read_text(encoding="utf-8"))
+    drafts = [r for r in doc["removals"] if r["deprecated_in"] is None]
+    assert drafts  # the 1.16.0 tone move
+    for rec in drafts:
+        assert rec["message"], rec["subject"]
+        assert rec["replacement"] or rec["relation"] == "none", rec["subject"]
+
+
+def test_module_name_skips_private_modules():
+    assert drem._module_name("src/pipecat/processors/tone/reader/model.py") == (
+        "pipecat.processors.tone.reader.model"
+    )
+    assert drem._module_name("src/pipecat/processors/tone/__init__.py") == (
+        "pipecat.processors.tone"
+    )
+    assert drem._module_name("src/pipecat/processors/tone/_models.py") is None
+    assert drem._module_name("src/pipecat/_private/thing.py") is None
+
+
+def test_vanished_module_without_record_is_flagged():
+    prev = {"pipecat.a", "pipecat.old", "pipecat.old.sub"}
+    assert drem.unrecorded_vanished_modules(prev, {"pipecat.a"}, []) == [
+        "pipecat.old",
+        "pipecat.old.sub",
+    ]
+
+
+def test_vanished_module_is_accounted_for_by_a_package_record_or_module_field():
+    prev = {"pipecat.a", "pipecat.old", "pipecat.old.sub", "pipecat.gone"}
+    current = {"pipecat.a"}
+    records = [
+        _draft("pipecat.old", module="pipecat.old", kind="module"),  # package + children
+        _draft("Gone", module="pipecat.gone"),  # named by `module`
+    ]
+    assert drem.unrecorded_vanished_modules(prev, current, records) == []
+
+
+def test_modules_still_present_are_not_flagged():
+    modules = {"pipecat.a", "pipecat.b"}
+    assert drem.unrecorded_vanished_modules(modules, set(modules), []) == []
+
+
+# --- Drafting removals automatically ---------------------------------------
+
+
+def test_public_classes_and_exported_names():
+    src = "from .a import Foo as Bar, Baz\n__all__ = ['Qux']\nclass Public: ...\nclass _Private: ...\n"
+    assert drem._public_classes(src) == ["Public"]
+    assert drem._exported_names(src) == {"Bar", "Baz", "Qux"}
+    assert drem._public_classes("def broken(") == []
+    assert drem._exported_names("def broken(") == set()
+
+
+def test_public_home_walks_up_to_the_shortest_reexporting_package():
+    reexports = {"pkg.a": {"Thing"}, "pkg.a.b": {"Thing"}, "pkg": set()}
+    assert drem._public_home("pkg.a.b.impl", "Thing", reexports) == "pkg.a"
+    assert drem._public_home("pkg.a.b.impl", "Other", reexports) == "pkg.a.b.impl"
+
+
+def test_draft_removals_tracks_classes_by_name():
+    drafts = drem.draft_removals(
+        vanished=["pkg.old", "pkg.old.impl"],
+        old_classes={"pkg.old": [], "pkg.old.impl": ["Moved", "Deleted", "Ambiguous"]},
+        homes={"Moved": ["pkg.new.impl"], "Ambiguous": ["pkg.x", "pkg.y"]},
+        reexports={"pkg.new": {"Moved"}},
+        version="2.0.0",
+        old_reexports={"pkg.old": {"Moved"}},
+    )
+    by = {d["subject"]: d for d in drafts}
+    assert set(by) == {"pkg.old", "Moved", "Deleted"}  # ambiguous is left for a human
+    assert by["Moved"]["module"] == "pkg.old"  # the public path users imported from
+    assert by["Moved"]["replacement"] == "pkg.new.Moved"  # re-exported home, not pkg.new.impl
+    assert (by["Deleted"]["relation"], by["Deleted"]["replacement"]) == ("none", "")
+    assert by["pkg.old"]["kind"] == "module" and by["pkg.old"]["replacement"] == "pkg.new"
+    assert all(d["removed_in"] == "2.0.0" and d["deprecated_in"] is None for d in drafts)
+
+
+def test_draft_removals_one_module_record_per_package_root():
+    drafts = drem.draft_removals(["pkg.old", "pkg.old.a", "pkg.old.b"], {}, {}, {}, "2.0.0")
+    assert [d["subject"] for d in drafts] == ["pkg.old"]
+    assert drafts[0]["relation"] == "none"
+
+
+def test_drafted_records_have_the_removals_schema_and_merge_into_the_registry():
+    drafts = drem.draft_removals(
+        ["pkg.old"], {"pkg.old": ["Moved", "Gone"]}, {"Moved": ["pkg.new"]}, {}, "2.0.0"
+    )
+    assert all(set(d) == _REMOVAL_FIELDS for d in drafts)
+    # a deletion (relation none) may have no replacement
+    assert all(d["message"] for d in drafts)
+    merged = drem.add_drafts(drem.compute_removals(None, _dep_registry(), "2.0.0", []), drafts)
+    assert {r["subject"] for r in merged} == {d["subject"] for d in drafts}

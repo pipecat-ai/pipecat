@@ -27,10 +27,10 @@ from enum import StrEnum
 from typing import Any
 
 from loguru import logger
+from pydantic import model_validator
 
+from pipecat.audio import g711
 from pipecat.audio.dtmf.types import KeypadEntry
-from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
-from pipecat.audio.utils import pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -42,19 +42,28 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.utils.deprecation import deprecated, warn_deprecated
 
 
 class AudioHookMessageType(StrEnum):
-    """AudioHook protocol message types."""
+    """AudioHook protocol message types.
+
+    The server (Pipecat) sends ``pause`` and ``resume`` to ask Genesys to pause
+    or resume the audio stream. Genesys sends ``paused`` and ``resumed`` when the
+    stream actually pauses or resumes, whether the server asked or Genesys
+    decided on its own.
+    """
 
     OPEN = "open"
     OPENED = "opened"
     CLOSE = "close"
     CLOSED = "closed"
     PAUSE = "pause"
+    PAUSED = "paused"
+    RESUME = "resume"
     RESUMED = "resumed"
+    DISCARDED = "discarded"
     PING = "ping"
     PONG = "pong"
     UPDATE = "update"
@@ -95,6 +104,26 @@ class GenesysAudioHookSerializer(FrameSerializer):
     - Text WebSocket frames for JSON control messages
     - Binary WebSocket frames for audio data
 
+    While Genesys has paused the stream, audio is dropped in both directions.
+    Genesys pauses on its own (for example during a hold) or when asked with
+    :meth:`create_pause_request`, and resumes the same way with
+    :meth:`create_resume_request`.
+
+    Event handlers available:
+
+    - on_open: Called when Genesys opens the session. Args: (message: dict)
+    - on_close: Called when Genesys closes the session. Args: (message: dict)
+    - on_ping: Called when Genesys sends a ping. Args: (message: dict)
+    - on_paused: Called when Genesys pauses the audio stream. Args: (message: dict)
+    - on_resumed: Called when Genesys resumes the audio stream. Args: (message: dict)
+    - on_update: Called when Genesys sends an update. Args: (message: dict)
+    - on_error: Called when Genesys reports an error. Args: (message: dict)
+    - on_dtmf: Called when Genesys sends a DTMF digit. Args: (message: dict)
+    - on_pause: Called when Genesys pauses the audio stream. Args: (message: dict)
+
+      .. deprecated:: 1.16.0
+          Use ``on_paused`` instead. Will be removed in 2.0.0.
+
     Example usage::
 
         serializer = GenesysAudioHookSerializer(
@@ -112,7 +141,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
                 audio_in_enabled=True,
                 audio_out_enabled=True,
                 serializer=serializer,
-                audio_out_fixed_packet_size=1600,  # Important: prevents 429 rate limiting from Genesys
+                # Send audio in 200 ms packets; Genesys rate-limits incoming messages
+                audio_out_10ms_chunks=20,
             ),
         )
 
@@ -122,6 +152,11 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         # Set output variables to return to Architect
         serializer.set_output_variables({"intent": "billing", "resolved": True})
+
+        # Resume a session opened with start_paused=True
+        await worker.queue_frame(
+            OutputTransportMessageUrgentFrame(message=serializer.create_resume_request())
+        )
 
     Parameters:
         PROTOCOL_VERSION: The AudioHook protocol version (currently "2").
@@ -133,19 +168,36 @@ class GenesysAudioHookSerializer(FrameSerializer):
         """Configuration parameters for GenesysAudioHookSerializer.
 
         Parameters:
-            genesys_sample_rate: Sample rate used by Genesys (default: 8000 Hz).
-            sample_rate: Optional override for pipeline input sample rate.
+            audio_in_sample_rate: Sample rate of the audio Genesys sends, and the rate
+                the session is opened with (default: 8000 Hz).
+            audio_out_sample_rate: Sample rate of the audio sent to Genesys (default:
+                8000 Hz).
+            genesys_sample_rate: Sample rate used by Genesys.
+
+                .. deprecated:: 1.16.0
+                    Use ``audio_in_sample_rate`` and ``audio_out_sample_rate`` instead.
+                    Will be removed in 2.0.0.
+
+            sample_rate: Has no effect: incoming audio is converted to the pipeline's input rate.
+
+                .. deprecated:: 1.16.0
+                    Use :attr:`~pipecat.pipeline.worker.PipelineParams.audio_in_sample_rate`
+                    instead. Will be removed in 2.0.0.
+
             channel: Which audio channels to process (external, internal, both).
             media_format: Audio format (PCMU or L16).
             process_external: Whether to process external (customer) audio.
             process_internal: Whether to process internal (agent) audio.
             supported_languages: List of language codes the bot supports (e.g., ["en-US", "es-ES"]).
             selected_language: Default language code to use.
-            start_paused: Whether to start the session in paused state.
+            start_paused: Whether Genesys starts the audio stream paused. Send
+                :meth:`GenesysAudioHookSerializer.create_resume_request` to start it.
             ignore_rtvi_messages: Inherited from base FrameSerializer, defaults to True.
         """
 
-        genesys_sample_rate: int = 8000
+        audio_in_sample_rate: int = 8000
+        audio_out_sample_rate: int = 8000
+        genesys_sample_rate: int | None = None
         sample_rate: int | None = None
         channel: AudioHookChannel = AudioHookChannel.EXTERNAL
         media_format: AudioHookMediaFormat = AudioHookMediaFormat.PCMU
@@ -154,6 +206,29 @@ class GenesysAudioHookSerializer(FrameSerializer):
         supported_languages: list[str] | None = None
         selected_language: str | None = None
         start_paused: bool = False
+
+        @model_validator(mode="before")
+        @classmethod
+        def _carry_deprecated_rates(cls, data: Any) -> Any:
+            if not isinstance(data, dict):
+                return data
+            if data.get("genesys_sample_rate") is not None:
+                warn_deprecated(
+                    "`GenesysAudioHookSerializer.InputParams.genesys_sample_rate` is deprecated "
+                    "since 1.16.0 and will be removed in 2.0.0. Use `audio_in_sample_rate` and "
+                    "`audio_out_sample_rate` instead.",
+                    stacklevel=4,
+                )
+                data.setdefault("audio_in_sample_rate", data["genesys_sample_rate"])
+                data.setdefault("audio_out_sample_rate", data["genesys_sample_rate"])
+            if data.get("sample_rate") is not None:
+                warn_deprecated(
+                    "`GenesysAudioHookSerializer.InputParams.sample_rate` is deprecated since "
+                    "1.16.0 and will be removed in 2.0.0. Use "
+                    "`PipelineParams.audio_in_sample_rate` instead.",
+                    stacklevel=4,
+                )
+            return data
 
     def __init__(
         self,
@@ -170,16 +245,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         super().__init__(params, **kwargs)
         self._params: GenesysAudioHookSerializer.InputParams = params
 
-        self._genesys_sample_rate = self._params.genesys_sample_rate
-        self._sample_rate = 0  # Pipeline input rate, set in setup()
         self._session_id = str(uuid.uuid4())
-
-        self._input_resampler = SOXRStreamAudioResampler(
-            clear_after_secs=self._params.resampler_clear_after_secs
-        )
-        self._output_resampler = SOXRStreamAudioResampler(
-            clear_after_secs=self._params.resampler_clear_after_secs
-        )
 
         # Protocol state
         self._client_seq = 0
@@ -200,10 +266,27 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._register_event_handler("on_open")
         self._register_event_handler("on_close")
         self._register_event_handler("on_ping")
+        self._register_event_handler("on_paused")
+        self._register_event_handler("on_resumed")
         self._register_event_handler("on_pause")
         self._register_event_handler("on_update")
         self._register_event_handler("on_error")
         self._register_event_handler("on_dtmf")
+
+    def add_event_handler(self, event_name: str, handler):
+        """Add an event handler for the specified event.
+
+        Args:
+            event_name: The name of the event to handle.
+            handler: The function to call when the event occurs.
+        """
+        if event_name == "on_pause":
+            warn_deprecated(
+                "`on_pause` is deprecated since 1.16.0 and will be removed in 2.0.0. "
+                "Use `on_paused` instead.",
+                stacklevel=2,
+            )
+        super().add_event_handler(event_name, handler)
 
     @property
     def session_id(self) -> str:
@@ -222,7 +305,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
     @property
     def is_paused(self) -> bool:
-        """Check if audio streaming is paused."""
+        """Whether Genesys has paused the audio stream."""
         return self._is_paused
 
     @property
@@ -261,15 +344,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
         """
         self._output_variables = variables
         logger.debug(f"Output variables set: {variables}")
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Sets up the serializer with pipeline configuration.
-
-        Args:
-            setup: Configuration object containing setup parameters.
-        """
-        self._sample_rate = self._params.sample_rate or setup.audio_in_sample_rate
-        logger.debug(f"GenesysAudioHookSerializer setup with sample_rate={self._sample_rate}")
 
     def _format_position(self, position: timedelta) -> str:
         """Format a timedelta as ISO 8601 duration string.
@@ -377,7 +451,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
                     "type": "audio",
                     "format": self._params.media_format.value,
                     "channels": channels,
-                    "rate": self._genesys_sample_rate,
+                    "rate": self._params.audio_in_sample_rate,
                 }
             ],
         }
@@ -394,6 +468,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
         )
 
         self._is_open = True
+        # Genesys holds the stream until a 'resume', then confirms with 'resumed'.
+        self._is_paused = start_paused
 
         logger.debug(f"AudioHook session opened: {self._session_id}")
 
@@ -452,20 +528,42 @@ class GenesysAudioHookSerializer(FrameSerializer):
         msg = self._create_message(AudioHookMessageType.PONG)
         return msg
 
-    def create_resumed_response(self) -> dict[str, Any]:
-        """Create a 'resumed' response message.
+    def create_pause_request(self) -> dict[str, Any]:
+        """Create a 'pause' message asking Genesys to pause the audio stream.
 
-        This should be sent in response to a 'pause' message when ready to resume.
+        Genesys answers with a 'paused' message, which pauses the session.
 
         Returns:
-            Dictionary of the resumed response message.
+            Dictionary of the pause message.
         """
-        msg = self._create_message(AudioHookMessageType.RESUMED)
+        return self._create_message(AudioHookMessageType.PAUSE)
 
-        self._is_paused = False
-        logger.debug(f"AudioHook session resumed: {self._session_id}")
+    def create_resume_request(self) -> dict[str, Any]:
+        """Create a 'resume' message asking Genesys to resume the audio stream.
 
-        return msg
+        Genesys answers with a 'resumed' message, which resumes the session.
+        Send it to start a session opened with ``start_paused=True``.
+
+        Returns:
+            Dictionary of the resume message.
+        """
+        return self._create_message(AudioHookMessageType.RESUME)
+
+    @deprecated(
+        "`GenesysAudioHookSerializer.create_resumed_response` is deprecated since 1.16.0 and "
+        "will be removed in 2.0.0. Use `GenesysAudioHookSerializer.create_resume_request` "
+        "instead."
+    )
+    def create_resumed_response(self) -> dict[str, Any]:
+        """Create a 'resume' message asking Genesys to resume the audio stream.
+
+        .. deprecated:: 1.16.0
+            Use :meth:`create_resume_request` instead. Will be removed in 2.0.0.
+
+        Returns:
+            Dictionary of the resume message.
+        """
+        return self.create_resume_request()
 
     def create_barge_in_event(self) -> dict[str, Any]:
         """Create a barge-in event message.
@@ -481,7 +579,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             parameters={"entities": [{"type": "barge_in", "data": {}}]},
         )
 
-        logger.debug("🔇 Barge-in event sent to Genesys")
+        logger.debug("Barge-in event sent to Genesys")
 
         return msg
 
@@ -556,7 +654,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         """Serializes a Pipecat frame to Genesys AudioHook format.
 
         Handles conversion of various frame types to AudioHook messages:
-        - AudioRawFrame -> Binary PCMU audio data (resampled to 8kHz)
+        - AudioRawFrame -> Binary PCMU audio data
         - EndFrame/CancelFrame -> Disconnect message (JSON)
         - InterruptionFrame -> Barge-in event (JSON)
         - OutputTransportMessageFrame -> Pass-through JSON
@@ -579,27 +677,18 @@ class GenesysAudioHookSerializer(FrameSerializer):
             if not self._is_open or self._is_paused:
                 return None
 
-            data = frame.audio
-
-            # Convert PCM to μ-law at 8kHz for Genesys
-            if self._params.media_format == AudioHookMediaFormat.PCMU:
-                serialized_data = await pcm_to_ulaw(
-                    data,
-                    frame.sample_rate,
-                    self._genesys_sample_rate,
-                    self._output_resampler,
-                )
-            else:
-                # L16 format - just resample if needed
+            if self._params.media_format != AudioHookMediaFormat.PCMU:
                 logger.warning("L16 format not yet fully implemented")
                 return None
 
-            if serialized_data is None or len(serialized_data) == 0:
+            data = await self._resample_audio_out(frame)
+            if not data:
                 return None
 
-            return bytes(serialized_data)
+            return g711.pcm_to_ulaw(data)
 
         elif isinstance(frame, InterruptionFrame):
+            await self._reset_audio_out()
             return json.dumps(self.create_barge_in_event())
 
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
@@ -625,7 +714,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
         - JSON 'open' -> OutputTransportMessageUrgentFrame with 'opened' response
         - JSON 'close' -> OutputTransportMessageUrgentFrame with 'closed' response
         - JSON 'ping' -> OutputTransportMessageUrgentFrame with 'pong' response
-        - JSON 'pause' -> Sets is_paused=True, returns None
+        - JSON 'paused' -> Sets is_paused=True, returns None
+        - JSON 'resumed' -> Sets is_paused=False, returns None
         - JSON 'dtmf' -> InputDTMFFrame
         - JSON 'update' -> Updates participant info, returns None
         - JSON 'error' -> Logs error, returns None
@@ -659,13 +749,12 @@ class GenesysAudioHookSerializer(FrameSerializer):
             data: Raw audio bytes (PCMU or L16).
 
         Returns:
-            InputAudioRawFrame with PCM audio at pipeline sample rate.
+            InputAudioRawFrame with PCM audio at the pipeline's input rate.
         """
         if not self._is_open or self._is_paused:
             return None
 
         audio_data = data
-        original_len = len(data)
 
         # If Genesys sends stereo audio (BOTH channels), extract only the external channel (left)
         # Stereo audio comes interleaved: [L0, R0, L1, R1, ...]
@@ -673,36 +762,20 @@ class GenesysAudioHookSerializer(FrameSerializer):
             # For PCMU, each sample is 1 byte
             # Extract only bytes at even positions (left channel = external)
             audio_data = bytes(data[i] for i in range(0, len(data), 2))
-            logger.debug(
-                f"🔊 Stereo audio: {original_len} bytes → {len(audio_data)} bytes (external channel)"
-            )
 
-        if self._params.media_format == AudioHookMediaFormat.PCMU:
-            # Convert μ-law at 8kHz to PCM at pipeline rate
-            deserialized_data = await ulaw_to_pcm(
-                audio_data,
-                self._genesys_sample_rate,
-                self._sample_rate,
-                self._input_resampler,
-            )
-        else:
-            # L16 format
+        if self._params.media_format != AudioHookMediaFormat.PCMU:
             logger.warning("L16 format not yet fully implemented")
             return None
 
-        if deserialized_data is None or len(deserialized_data) == 0:
+        if not audio_data:
+            return None
+
+        audio = await self._resample_audio_in(g711.ulaw_to_pcm(audio_data))
+        if not audio:
             return None
 
         # Always use mono for STT - ElevenLabs expects single channel
-        num_channels = 1
-
-        audio_frame = InputAudioRawFrame(
-            audio=deserialized_data,
-            num_channels=num_channels,
-            sample_rate=self._sample_rate,
-        )
-
-        return audio_frame
+        return InputAudioRawFrame(audio=audio, num_channels=1, sample_rate=self._sample_rate)
 
     async def _handle_control_message(self, message: dict[str, Any]) -> Frame | None:
         """Handle a JSON control message from Genesys.
@@ -729,8 +802,15 @@ class GenesysAudioHookSerializer(FrameSerializer):
         elif msg_type == AudioHookMessageType.PING.value:
             return await self._handle_ping(message)
 
-        elif msg_type == AudioHookMessageType.PAUSE.value:
-            return await self._handle_pause(message)
+        elif msg_type == AudioHookMessageType.PAUSED.value:
+            return await self._handle_paused(message)
+
+        elif msg_type == AudioHookMessageType.RESUMED.value:
+            return await self._handle_resumed(message)
+
+        elif msg_type == AudioHookMessageType.DISCARDED.value:
+            logger.debug(f"AudioHook discarded audio: {message.get('parameters', {})}")
+            return None
 
         elif msg_type == AudioHookMessageType.UPDATE.value:
             return await self._handle_update(message)
@@ -788,19 +868,19 @@ class GenesysAudioHookSerializer(FrameSerializer):
             audio_media: dict[str, Any] = media_list[0]  # Get first media entry
             channels = audio_media.get("channels", [])
             logger.debug(
-                f"📡 Genesys audio config: format={audio_media.get('format')}, channels={channels}, rate={audio_media.get('rate')}"
+                f"Genesys audio config: format={audio_media.get('format')}, channels={channels}, rate={audio_media.get('rate')}"
             )
             # channels is a list like ["external"] or ["external", "internal"]
             if isinstance(channels, list):
                 if "external" in channels and "internal" in channels:
                     self._params.channel = AudioHookChannel.BOTH
-                    logger.debug("📡 Stereo mode: extracting external channel")
+                    logger.debug("Stereo mode: extracting external channel")
                 elif "external" in channels:
                     self._params.channel = AudioHookChannel.EXTERNAL
-                    logger.debug("📡 Mono mode: external channel")
+                    logger.debug("Mono mode: external channel")
                 elif "internal" in channels:
                     self._params.channel = AudioHookChannel.INTERNAL
-                    logger.debug("📡 Mono mode: internal channel")
+                    logger.debug("Mono mode: internal channel")
 
         # Log participant info for debugging
         ani = self._participant.get("ani", "unknown") if self._participant else "unknown"
@@ -836,11 +916,11 @@ class GenesysAudioHookSerializer(FrameSerializer):
         params = message.get("parameters", {})
         reason = params.get("reason", "unknown")
 
-        logger.info(f"🔴 Genesys closed the connection: {reason}")
+        logger.info(f"Genesys closed the connection: {reason}")
 
         self._is_open = False
 
-        logger.info("Sending closed response to Genesys...")
+        logger.debug("Sending closed response to Genesys")
 
         await self._call_event_handler("on_close", message)
 
@@ -861,35 +941,52 @@ class GenesysAudioHookSerializer(FrameSerializer):
         Returns:
             OutputTransportMessageUrgentFrame with pong response.
         """
-        logger.info("Sending pong response to Genesys...")
+        logger.trace("Sending pong response to Genesys")
 
         await self._call_event_handler("on_ping", message)
 
         # Return as urgent frame to be sent through pipeline immediately
         return OutputTransportMessageUrgentFrame(message=self.create_pong_response())
 
-    async def _handle_pause(self, message: dict[str, Any]) -> Frame | None:
-        """Handle a 'pause' message from Genesys.
-
-        This is used when audio streaming is temporarily suspended
-        (e.g., during hold).
+    async def _handle_paused(self, message: dict[str, Any]) -> Frame | None:
+        """Handle a 'paused' message: Genesys has paused the audio stream.
 
         Args:
-            message: The pause message.
+            message: The paused message.
 
         Returns:
-            None (response should be sent via create_resumed_response()).
+            None.
         """
-        params = message.get("parameters", {})
-        reason = params.get("reason", "unknown")
-
-        logger.info(f"AudioHook pause request: reason={reason}")
+        logger.info(f"AudioHook session paused: {self._session_id}")
 
         self._is_paused = True
+        # Audio is dropped while paused, so what the resampler holds never plays.
+        await self._reset_audio_out()
 
+        await self._call_event_handler("on_paused", message)
         await self._call_event_handler("on_pause", message)
+        return None
 
-        # Note: Application should call create_resumed_response() when ready
+    async def _handle_resumed(self, message: dict[str, Any]) -> Frame | None:
+        """Handle a 'resumed' message: Genesys has resumed the audio stream.
+
+        Args:
+            message: The resumed message. Its parameters give the stream
+                position where audio resumed (``start``) and how much audio
+                Genesys discarded while paused (``discarded``).
+
+        Returns:
+            None.
+        """
+        params = message.get("parameters", {})
+        logger.info(
+            f"AudioHook session resumed: {self._session_id}, "
+            f"start={params.get('start')}, discarded={params.get('discarded')}"
+        )
+
+        self._is_paused = False
+
+        await self._call_event_handler("on_resumed", message)
         return None
 
     async def _handle_update(self, message: dict[str, Any]) -> Frame | None:

@@ -24,9 +24,10 @@ class RTVISearchResponseMessageData(BaseModel):
     """Data payload for search response messages in RTVI protocol.
 
     Parameters:
-        search_result: The search result text, if available.
-        rendered_content: The rendered content from the search, if available.
-        origins: List of search result origins with metadata.
+        search_result: The bot's answer, grounded in the search.
+        rendered_content: HTML of the search suggestions the LLM provider asks to be
+            shown with a grounded answer, if it gave any.
+        origins: The sites the answer came from.
     """
 
     search_result: str | None
@@ -55,13 +56,21 @@ class GoogleRTVIObserver(RTVIObserver):
     particularly LLM search response frames from Google services.
     """
 
-    def __init__(self, rtvi: RTVIProcessor):
+    def __init__(
+        self,
+        rtvi: RTVIProcessor,
+        *,
+        params: RTVIObserverParams | None = None,
+        **kwargs,
+    ):
         """Initialize the Google RTVI observer.
 
         Args:
             rtvi: The RTVI processor to send messages through.
+            params: Settings to enable/disable specific messages.
+            **kwargs: Additional arguments passed to the observer.
         """
-        super().__init__(rtvi)
+        super().__init__(rtvi, params=params, **kwargs)
 
     async def on_push_frame(self, data: FramePushed):
         """Process frames being pushed through the pipeline.
@@ -105,4 +114,4 @@ class GoogleRTVIProcessor(RTVIProcessor):
         Returns:
             A new RTVI observer.
         """
-        return GoogleRTVIObserver(self)
+        return GoogleRTVIObserver(self, params=params, **kwargs)

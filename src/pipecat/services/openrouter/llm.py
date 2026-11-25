@@ -16,7 +16,7 @@ from typing import Any, Literal
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
@@ -111,6 +111,7 @@ class OpenRouterLLMService(OpenAILLMService):
 
     Settings = OpenRouterLLMSettings
     _settings: Settings
+    _requires_api_key = True
     supports_developer_role = False
 
     ProviderPreferences = OpenRouterProviderPreferences
@@ -118,7 +119,7 @@ class OpenRouterLLMService(OpenAILLMService):
     def __init__(
         self,
         *,
-        api_key: str | None = None,
+        api_key: str,
         model: str | None = None,
         base_url: str = "https://openrouter.ai/api/v1",
         settings: Settings | None = None,
@@ -127,8 +128,7 @@ class OpenRouterLLMService(OpenAILLMService):
         """Initialize the OpenRouter LLM service.
 
         Args:
-            api_key: The API key for accessing OpenRouter's API. If None, will attempt
-                to read from environment variables.
+            api_key: The API key for accessing OpenRouter's API.
             model: The model identifier to use. Defaults to "openai/gpt-4.1".
 
                 .. deprecated:: 0.0.105

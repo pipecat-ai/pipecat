@@ -183,9 +183,9 @@ suite:
       data: {kwargs: {api_key: $FIREWORKS_API_KEY}, model: accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b, service: pipecat.services.fireworks.llm.FireworksLLMService}
     scenarios: *all
   - bot: bot.py
-    name: inception/mercury-2
+    name: inception/mercury-3
     runner_body:
-      data: {kwargs: {api_key: $INCEPTION_API_KEY}, model: mercury-2, service: pipecat.services.inception.llm.InceptionLLMService}
+      data: {kwargs: {api_key: $INCEPTION_API_KEY}, model: mercury-3, service: pipecat.services.inception.llm.InceptionLLMService}
     scenarios: *all
   - bot: bot.py
     name: mistral/mistral-small-latest
@@ -214,9 +214,9 @@ suite:
       data: {kwargs: {api_key: $NEBIUS_API_KEY}, model: google/gemma-3-27b-it, service: pipecat.services.nebius.llm.NebiusLLMService}
     scenarios: *all
   - bot: bot.py
-    name: nebius/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B
+    name: nebius/nvidia/Nemotron-3_5-Lightning
     runner_body:
-      data: {kwargs: {api_key: $NEBIUS_API_KEY}, model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B, service: pipecat.services.nebius.llm.NebiusLLMService, system_suffix: /no_think}
+      data: {kwargs: {api_key: $NEBIUS_API_KEY}, model: nvidia/Nemotron-3_5-Lightning, service: pipecat.services.nebius.llm.NebiusLLMService, system_suffix: /no_think}
     scenarios: *all
   - bot: bot.py
     name: novita/moonshotai/kimi-k2.5

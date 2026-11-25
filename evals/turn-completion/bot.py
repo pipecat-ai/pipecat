@@ -36,8 +36,8 @@ from typing import Any
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -50,7 +50,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.turns.user_turn_completion_mixin import (
+from pipecat.turns.user_turn_completion import (
     USER_TURN_COMPLETE_MARKER,
     USER_TURN_INCOMPLETE_LONG_MARKER,
     USER_TURN_INCOMPLETE_SHORT_MARKER,

@@ -12,10 +12,11 @@ import unittest
 from unittest.mock import AsyncMock, PropertyMock
 
 from loguru import logger
-from starlette.websockets import WebSocketState
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-from pipecat.frames.frames import Frame, OutputAudioRawFrame
+from pipecat.frames.frames import Frame, OutputAudioRawFrame, TextFrame
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketCallbacks,
     FastAPIWebsocketClient,
@@ -79,6 +80,34 @@ class TestWebSocketMessageIterator(unittest.IsolatedAsyncioTestCase):
         messages = [msg async for msg in iterator]
 
         self.assertEqual(len(messages), 0)
+
+
+class TestProtobufReceive(unittest.IsolatedAsyncioTestCase):
+    async def test_continues_after_malformed_protobuf(self):
+        serializer = ProtobufFrameSerializer()
+        text = TextFrame(text="Still connected")
+        audio = OutputAudioRawFrame(audio=b"\x00\x00" * 160, sample_rate=16000, num_channels=1)
+        mock_ws = AsyncMock()
+        mock_ws.receive.side_effect = [
+            {"type": "websocket.receive", "bytes": b"\x80"},
+            {"type": "websocket.receive", "bytes": await serializer.serialize(text)},
+            {"type": "websocket.receive", "bytes": await serializer.serialize(audio)},
+            {"type": "websocket.disconnect"},
+        ]
+        transport = FastAPIWebsocketTransport(
+            mock_ws, FastAPIWebsocketParams(serializer=serializer)
+        )
+        input_transport = transport.input()
+        input_transport.push_frame = AsyncMock()
+        input_transport.push_audio_frame = AsyncMock()
+
+        await input_transport._receive_messages()
+
+        input_transport.push_frame.assert_awaited_once()
+        self.assertEqual(input_transport.push_frame.call_args.args[0].text, text.text)
+        input_transport.push_audio_frame.assert_awaited_once()
+        self.assertEqual(input_transport.push_audio_frame.call_args.args[0].audio, audio.audio)
+        self.assertEqual(mock_ws.receive.await_count, 4)
 
 
 class TestSendDisconnectRace(unittest.IsolatedAsyncioTestCase):
@@ -209,6 +238,26 @@ class TestSendDisconnectRace(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(client.is_closing)
 
+    async def test_disconnect_skips_close_after_send_disconnect(self):
+        """disconnect() does not close a socket Starlette already marked DISCONNECTED.
+
+        When the input transport stops first, the receive loop never reads the
+        peer's disconnect, so client_state stays CONNECTED while a failed send has
+        already set application_state to DISCONNECTED. Starlette refuses a close
+        in that state with "Cannot call "send" once a close message has been sent".
+        """
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        type(mock_ws).application_state = PropertyMock(return_value=WebSocketState.DISCONNECTED)
+        mock_ws.close = AsyncMock()
+
+        client, _ = self._make_client(mock_ws)
+        client._leave_counter = 1
+
+        await client.disconnect()
+
+        mock_ws.close.assert_not_called()
+
 
 class TestDisconnectCloseTimeout(unittest.IsolatedAsyncioTestCase):
     """Tests for issue #4528.
@@ -317,6 +366,56 @@ class TestDisconnectCloseTimeout(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(client._close_task.done())
         self.assertIsInstance(client._close_task.exception(), RuntimeError)
         self.assertIn("exception while closing the websocket", logs.getvalue())
+
+    async def test_close_after_peer_gone_logs_debug_not_error(self):
+        """A WebSocketDisconnect from close() (peer already gone) is logged at DEBUG."""
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        mock_ws.close = AsyncMock(side_effect=WebSocketDisconnect(code=1006))
+
+        client, _ = self._make_client(mock_ws, ws_close_timeout=5.0)
+
+        errors = io.StringIO()
+        error_id = logger.add(errors, level="ERROR", format="{message}")
+        try:
+            with self._capture_logs("DEBUG") as logs:
+                await client.disconnect()  # must not raise
+                await asyncio.sleep(0)  # let the done callback run
+        finally:
+            logger.remove(error_id)
+
+        self.assertEqual(errors.getvalue(), "")
+        self.assertIn("peer already disconnected", logs.getvalue())
+        self.assertIn("WebSocketDisconnect (code=1006)", logs.getvalue())
+
+    async def test_close_error_message_includes_exception_class(self):
+        """Any other close() exception stays at ERROR, with its class name and text."""
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        mock_ws.close = AsyncMock(side_effect=RuntimeError("boom"))
+
+        client, _ = self._make_client(mock_ws, ws_close_timeout=5.0)
+
+        with self._capture_logs("ERROR") as logs:
+            await client.disconnect()
+            await asyncio.sleep(0)
+
+        self.assertIn("exception while closing the websocket", logs.getvalue())
+        self.assertIn("RuntimeError (boom)", logs.getvalue())
+
+    async def test_close_success_logs_no_error(self):
+        """A close that succeeds logs nothing at ERROR."""
+        mock_ws = AsyncMock()
+        type(mock_ws).client_state = PropertyMock(return_value=WebSocketState.CONNECTED)
+        mock_ws.close = AsyncMock()
+
+        client, _ = self._make_client(mock_ws, ws_close_timeout=5.0)
+
+        with self._capture_logs("ERROR") as logs:
+            await client.disconnect()
+            await asyncio.sleep(0)
+
+        self.assertEqual(logs.getvalue(), "")
 
     async def test_transport_passes_ws_close_timeout_to_client(self):
         """The transport wires params.ws_close_timeout through to its client."""

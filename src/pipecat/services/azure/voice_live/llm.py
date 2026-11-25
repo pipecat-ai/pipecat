@@ -25,8 +25,8 @@ from typing_extensions import override
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.azure_voice_live_adapter import AzureVoiceLiveLLMAdapter
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -38,7 +38,6 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
@@ -63,6 +62,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
@@ -211,6 +211,7 @@ _EXPECTED_ERROR_CODES = {
 }
 
 
+@traced_realtime_llm
 class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     """Azure Voice Live LLM service for real-time audio and text communication.
 
@@ -671,8 +672,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             await self._handle_bot_stopped_speaking()
         elif isinstance(frame, SpeechControlParamsFrame):
             self._handle_speech_control_params(frame)
-        elif isinstance(frame, LLMMessagesAppendFrame):
-            await self._handle_messages_append(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             # Continuous session: no fresh context frame per turn, so sync the
             # registered tool handlers to the new tool set here (the base service
@@ -741,10 +740,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                         )
                         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
                         await self._create_response()
-
-    async def _handle_messages_append(self, frame):
-        """Handle a request to append messages to the conversation."""
-        logger.warning(f"{self}: LLMMessagesAppendFrame is not yet supported by Voice Live")
 
     #
     # WebSocket communication
@@ -1108,10 +1103,15 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
         """Handle response.done event."""
         usage = evt.usage
         if usage and usage.total_tokens:
+            input_details = usage.input_token_details
+            output_details = usage.output_token_details
             tokens = LLMTokenUsage(
                 prompt_tokens=usage.input_tokens or 0,
                 completion_tokens=usage.output_tokens or 0,
                 total_tokens=usage.total_tokens or 0,
+                cache_read_input_tokens=input_details.cached_tokens if input_details else None,
+                input_audio_tokens=input_details.audio_tokens if input_details else None,
+                output_audio_tokens=output_details.audio_tokens if output_details else None,
             )
             await self.start_llm_usage_metrics(tokens)
 

@@ -12,7 +12,7 @@ import unittest
 import warnings
 from unittest.mock import AsyncMock, MagicMock
 
-from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper
+from pipecat.adapters.llm.schemas.direct_function import DirectFunctionWrapper
 from pipecat.bus.messages import BusJobCancelMessage, BusJobRequestMessage, BusTTSSpeakMessage
 from pipecat.bus.ui.messages import (
     UI_SNAPSHOT_EVENT_NAME,
@@ -38,6 +38,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.workers.ui import UI_STATE_PROMPT_GUIDE, UISelection, UIWorker, ui_event
+from pipecat.workers.ui.llm_extension import UIStateLLMExtension
 from pipecat.workers.ui.ui_tools import screen_tools
 
 
@@ -207,7 +208,8 @@ class TestUIWorkerDispatch(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_construction_unaffected(self):
         worker = _PlainWorker("ui", llm=MagicMock())
-        self.assertTrue(worker._auto_inject_ui_state)
+        (extension,) = worker.llm.add_extension.call_args.args
+        self.assertIsNotNone(extension._render)
         self.assertTrue(worker.active)
 
 
@@ -499,19 +501,18 @@ class TestUIWorkerSnapshot(unittest.IsolatedAsyncioTestCase):
 
 
 class TestUIWorkerSnapshotInjection(unittest.IsolatedAsyncioTestCase):
-    """The <ui_state> snapshot is injected just before inference via the LLM's
-    on_before_process_frame hook (e.g. during a respond job).
+    """The <ui_state> snapshot is injected just before inference by the
+    UIStateLLMExtension the worker installs on its LLM (e.g. during a respond job).
     """
 
     def _worker(self, cls=_PlainWorker, **kwargs) -> UIWorker:
-        # A real LLM service so the on_before_process_frame event actually fires.
         llm = OpenAILLMService(api_key="sk-test")
         return cls("ui", llm=llm, **kwargs)
 
     async def _fire(self, worker: UIWorker, context: LLMContext) -> None:
-        await worker.llm._call_event_handler(
-            "on_before_process_frame", LLMContextFrame(context=context)
-        )
+        """Hand the extension the context frame, as the LLM does before its inference."""
+        (extension,) = [e for e in worker.llm._extensions if isinstance(e, UIStateLLMExtension)]
+        await extension.process_frame(LLMContextFrame(context=context), FrameDirection.DOWNSTREAM)
 
     def _developer_messages(self, context: LLMContext) -> list:
         return [m for m in context.messages if isinstance(m, dict) and m.get("role") == "developer"]
@@ -901,17 +902,32 @@ class TestUIWorkerRespondJob(unittest.IsolatedAsyncioTestCase):
 
 
 class TestUIWorkerPromptGuide(unittest.IsolatedAsyncioTestCase):
+    """The guide reaches the LLM's system instruction through the worker's extension."""
+
+    def _guide(self, worker: UIWorker) -> str | None:
+        (extension,) = worker.llm.add_extension.call_args.args
+        return extension.system_instruction
+
     async def test_default_appends_ui_state_prompt_guide(self):
         worker = UIWorker("ui", llm=MagicMock())
-        worker.llm.append_system_instruction.assert_called_once_with(UI_STATE_PROMPT_GUIDE)
+        self.assertEqual(self._guide(worker), UI_STATE_PROMPT_GUIDE)
 
     async def test_custom_prompt_guide_overrides(self):
         worker = UIWorker("ui", llm=MagicMock(), prompt_guide="MY GUIDE")
-        worker.llm.append_system_instruction.assert_called_once_with("MY GUIDE")
+        self.assertEqual(self._guide(worker), "MY GUIDE")
 
     async def test_none_disables_injection(self):
         worker = UIWorker("ui", llm=MagicMock(), prompt_guide=None)
-        worker.llm.append_system_instruction.assert_not_called()
+        self.assertIsNone(self._guide(worker))
+
+
+class TestUIWorkerPipelineWorkerArguments(unittest.TestCase):
+    def test_pipeline_worker_arguments_reach_the_worker(self):
+        worker = UIWorker(
+            "ui", llm=MagicMock(), conversation_id="conversation-1", idle_timeout_secs=30
+        )
+        self.assertEqual(worker._conversation_id, "conversation-1")
+        self.assertEqual(worker._idle_timeout_secs, 30)
 
 
 if __name__ == "__main__":
@@ -935,7 +951,7 @@ class _FakeClassifier(BaseClassifier):
     async def cleanup(self):
         self.cleaned_up = True
 
-    async def _ask(self, state, questions, images=()):
+    async def _ask(self, state, questions, inputs=()):
         results = {}
         for name, question in questions.items():
             self.asked.append((state, question))
@@ -1201,7 +1217,7 @@ class TestUIWorkerScreenJobs(unittest.IsolatedAsyncioTestCase):
         from pipecat.classifiers.base_classifier import ClassifierError
 
         class _Broken(_FakeClassifier):
-            async def _ask(self, state, questions, images=()):
+            async def _ask(self, state, questions, inputs=()):
                 raise ClassifierError("down")
 
         worker = await _make_worker(classifier=_Broken(0.9))

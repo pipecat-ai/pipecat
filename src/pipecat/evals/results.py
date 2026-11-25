@@ -27,14 +27,17 @@ FAILURE_KINDS = (
     "no_content",  # the matched event carried no text to judge
     "text_mismatch",  # `text_contains` not present in the event's text
     "text_present",  # `text_excludes` found in the event's text
+    "text_unmatched",  # a `text_matches` pattern did not match the event's text
     "missing_function_call",  # an expected function call never arrived
     "function_args_mismatch",  # the call arrived with unexpected arguments
     "unexpected_event",  # an `absent:` expectation saw the event it forbade
     "send_after_timeout",  # a turn's `send_after` event never fired
+    "bot_ended",  # the bot ended the call before a turn's send_after or expectation was met
     "connect_failed",  # never connected to the bot's eval transport
     "closed_before_ready",  # connected, but the bot closed the connection before bot-ready
     "handshake_timeout",  # connected, but the bot never sent bot-ready
-    "judge_no_verdict",  # the judge answered nothing usable about a simulation's goal
+    "audio_unsupported",  # bot-ready said the transport is off for audio the run uses
+    "judge_no_verdict",  # a judge call failed, so it decided nothing
     "error",  # the harness itself raised (a sub-pipeline, the judge, ...), not the bot
 )
 
@@ -154,6 +157,11 @@ class EvalScriptResult:
         skipped: When set, the scenario was not run (e.g. a ``tts_response``
             assertion without audio mode); the string is the reason. Such a result
             is neither passed nor failed.
+        bot_metrics: Every metrics report the bot sent during the run, in
+            order: ``at`` (seconds since the run's stream began) and ``data``,
+            the report as the bot sent it, its measurements grouped by kind
+            (``ttfb``, ``processing``, ``tokens``, ...). Empty for a bot that
+            runs without metrics.
     """
 
     scenario_name: str
@@ -164,6 +172,7 @@ class EvalScriptResult:
     events_seen: list[dict] = field(default_factory=list)
     debug_log: list[str] = field(default_factory=list)
     skipped: str | None = None
+    bot_metrics: list[dict] = field(default_factory=list)
 
 
 @deprecated(
@@ -199,15 +208,22 @@ class EvalSimulationTurnVerdict:
             something; it indexes the ``assistant`` messages of the run's
             conversation.
         passed: Whether the turn satisfied the criterion.
-        reason: The judge's one-sentence justification.
+        reason: The explainer's one-sentence reason for the verdict, or the
+            classifier's probabilities when nothing explained it.
         verdict: The judge's answer: ``yes``, ``no``, or ``none`` when it gave
             no verdict on the turn, which counts as a no.
+        confidence: How sure the judge is of the verdict, from 0 to 1; ``None``
+            when it gave none.
+        probabilities: The probability of each outcome the classifier was
+            offered; empty when it gave no verdict.
     """
 
     turn: int
     passed: bool
     reason: str
     verdict: str = "no"
+    confidence: float | None = None
+    probabilities: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -232,8 +248,11 @@ class EvalSimulationMetricScore:
         failure_kind: How the metric failed, for grouping across runs: ``judge_no``
             when the judge rejected a turn, ``judge_no_verdict`` when it only
             left turns unanswered, ``out_of_range`` for a measure outside its
-            bounds, ``function_calls`` for a call list that did not match;
-            ``None`` when it passed.
+            bounds, ``function_calls`` for a call list that did not match,
+            ``error`` when a required measurement was unavailable; ``None``
+            when it passed.
+        criterion: The criterion each bot turn was judged on, as the
+            simulation worded it; ``None`` for a measured metric.
     """
 
     name: str
@@ -244,6 +263,7 @@ class EvalSimulationMetricScore:
     verdicts: list[EvalSimulationTurnVerdict] = field(default_factory=list)
     value: float | None = None
     failure_kind: str | None = None
+    criterion: str | None = None
 
 
 @dataclass
@@ -257,10 +277,18 @@ class EvalSimulationResult:
         error: When set, the run did not complete (a failed connect, a harness
             error); ``succeeded`` is then False and the run is neither a goal
             success nor a goal failure.
+        failure_kind: What kind of failure ``error`` is, one of
+            ``FAILURE_KINDS``: ``connect_failed`` for a bot that couldn't be
+            reached, ``error`` for a failed harness service, and so on.
+            ``None`` when no failure ended the run (it reached a verdict, or
+            was skipped), and in saved results without the field.
         metrics: The quality metrics' outcomes.
         messages: The conversation, with the persona's turns as ``user`` messages
             and the bot's as ``assistant`` (the convention scenarios' judges use);
             the ``assistant`` messages are the bot turns the metrics scored.
+        conversation: The conversation as a conversation file holds it, the
+            ``messages`` with the bot's function calls in place (see
+            :mod:`pipecat.evals.conversation`).
         turns: How many turns the persona took.
         ended_by: How the run ended, one of ``SIMULATION_ENDINGS``.
         end_call: The persona's own ``end_call`` claim (``success``, ``reason``)
@@ -268,6 +296,16 @@ class EvalSimulationResult:
         duration_ms: Wall-clock time the run took, in milliseconds.
         events_seen: Every friendly event observed, for diagnostics.
         debug_log: Timestamped trace of the harness's own decisions.
+        confidence: How sure the judge is of its goal verdict, from 0 to 1;
+            ``None`` when it gave none.
+        probabilities: The probability of each answer to the goal question;
+            empty when the judge gave none.
+        success: The goal the conversation was judged on, the simulation's
+            ``success`` as it was worded.
+        bot_metrics: Every metrics report the bot sent during the run, in
+            order: ``at`` (seconds since the run's stream began) and ``data``,
+            the report as the bot sent it. These are the bot's own
+            measurements, not the quality ``metrics`` the run was scored on.
     """
 
     simulation_name: str
@@ -276,12 +314,18 @@ class EvalSimulationResult:
     error: str | None = None
     metrics: list[EvalSimulationMetricScore] = field(default_factory=list)
     messages: list[dict] = field(default_factory=list)
+    conversation: list[dict] = field(default_factory=list)
     turns: int = 0
     ended_by: str = "error"
     end_call: dict | None = None
     duration_ms: int = 0
     events_seen: list[dict] = field(default_factory=list)
     debug_log: list[str] = field(default_factory=list)
+    confidence: float | None = None
+    probabilities: dict[str, float] = field(default_factory=dict)
+    success: str = ""
+    failure_kind: str | None = None
+    bot_metrics: list[dict] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:

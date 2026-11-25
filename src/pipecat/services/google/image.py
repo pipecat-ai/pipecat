@@ -25,7 +25,10 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
-from pipecat.services.google.utils import update_google_client_http_options
+from pipecat.services.google.utils import (
+    gemini_api_http_options,
+    update_google_client_http_options,
+)
 from pipecat.services.image_service import ImageGenService
 from pipecat.services.settings import ImageGenSettings
 from pipecat.utils.deprecation import deprecated, warn_deprecated
@@ -158,7 +161,9 @@ class GoogleImageGenService(ImageGenService):
         # Add client header
         http_options = update_google_client_http_options(http_options)
 
-        self._client = genai.Client(api_key=api_key, http_options=http_options)
+        self._client: genai.Client | None = genai.Client(
+            api_key=api_key, http_options=gemini_api_http_options(http_options)
+        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -195,6 +200,7 @@ class GoogleImageGenService(ImageGenService):
                 ),
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             )
+            assert self._client is not None
             for _ in range(assert_given(self._settings.number_of_images)):
                 response = await self._client.aio.models.generate_content(
                     model=model, contents=prompt, config=config
@@ -217,6 +223,22 @@ class GoogleImageGenService(ImageGenService):
 
         except Exception as e:
             yield ErrorFrame(f"Image generation error: {str(e)}")
+
+    async def cleanup(self):
+        """Close the GenAI client at teardown."""
+        await super().cleanup()
+        await self._close_client()
+
+    async def _close_client(self):
+        if not self._client:
+            return
+        try:
+            await self._client.aio.aclose()
+        except Exception:
+            # Do nothing - we're shutting down anyway
+            pass
+        finally:
+            self._client = None
 
 
 def _get_image_bytes(response: types.GenerateContentResponse) -> bytes | None:

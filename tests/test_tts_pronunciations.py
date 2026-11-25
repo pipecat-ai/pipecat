@@ -17,6 +17,7 @@ from pipecat.services.deepgram.tts import DeepgramHttpTTSService, DeepgramTTSSer
 from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService
 from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService, ElevenLabsTTSService
 from pipecat.services.inworld.tts import InworldHttpTTSService, InworldTTSService
+from pipecat.services.plivo.tts import PlivoHttpTTSService, PlivoTTSService
 from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.utils.text.phonemes import ipa_phones, normalize_ipa, stress_before_vowels
@@ -74,6 +75,22 @@ class TestIpaPhones(unittest.TestCase):
         phones = stress_before_vowels(ipa_phones("ˌsɪpɹoʊˈflɑksəsɪn"))
         self.assertEqual("".join(phones), "sˌɪpɹoʊflˈɑksəsɪn")
 
+    def test_stress_before_composed_and_decomposed_nasal_vowels(self):
+        for vowel, base in (("ã", "a"), ("ẽ", "e"), ("ĩ", "i"), ("õ", "o"), ("ũ", "u"), ("ỹ", "y")):
+            for notation in (vowel, base + "\u0303"):
+                for stress in ("ˈ", "ˌ"):
+                    with self.subTest(notation=notation, stress=stress):
+                        self.assertEqual(
+                            stress_before_vowels(ipa_phones(stress + "k" + notation)),
+                            ["k", stress, vowel],
+                        )
+
+    def test_stress_does_not_skip_a_nasal_vowel(self):
+        self.assertEqual("".join(stress_before_vowels(ipa_phones("ˈkãtu"))), "kˈãtu")
+
+    def test_stress_skips_nasal_consonants_and_keeps_uncomposed_vowels(self):
+        self.assertEqual(stress_before_vowels(ipa_phones("ˈɲɑ̃")), ["ɲ", "ˈ", "ɑ̃"])
+
 
 class TestCartesiaPronunciation(unittest.TestCase):
     def test_ipa(self):
@@ -86,6 +103,12 @@ class TestCartesiaPronunciation(unittest.TestCase):
         a = CartesiaTTSService.format_pronunciation("Achoo", "/əˈʧu/")
         b = CartesiaTTSService.format_pronunciation("Achoo", "ə'tʃu")
         self.assertEqual(a, b)
+
+    def test_stress_stays_on_a_nasal_vowel(self):
+        self.assertEqual(
+            CartesiaTTSService.format_pronunciation("Canto", "ˈkãtu"),
+            "<<k|ˈ|ã|t|u>>",
+        )
 
     def test_phrase(self):
         self.assertEqual(
@@ -194,6 +217,30 @@ class TestDeepgramPronunciation(unittest.TestCase):
 
     def test_flux_unsupported(self):
         self.assertIsNone(DeepgramFluxTTSBase.format_pronunciation("Crete", "kriːt"))
+
+
+class TestPlivoPronunciation(unittest.TestCase):
+    def test_ipa(self):
+        self.assertEqual(PlivoTTSService.format_pronunciation("Plivo", "ˈpliːvoʊ"), "{ˈpliːvoʊ}")
+
+    def test_notation_variants_format_the_same(self):
+        a = PlivoTTSService.format_pronunciation("Achoo", "/əˈʧu/")
+        b = PlivoTTSService.format_pronunciation("Achoo", "ə'tʃu")
+        self.assertEqual(a, b)
+
+    def test_phrase_gets_a_span_per_word(self):
+        self.assertEqual(
+            PlivoTTSService.format_pronunciation("New Delhi", "njuː ˈdɛli"), "{njuː} {ˈdɛli}"
+        )
+
+    def test_unusable(self):
+        self.assertIsNone(PlivoTTSService.format_pronunciation("Plivo", ""))
+
+    def test_http_service_matches(self):
+        self.assertEqual(
+            PlivoHttpTTSService.format_pronunciation("Plivo", "ˈpliːvoʊ"),
+            PlivoTTSService.format_pronunciation("Plivo", "ˈpliːvoʊ"),
+        )
 
 
 class TestPronunciationTransforms(unittest.IsolatedAsyncioTestCase):

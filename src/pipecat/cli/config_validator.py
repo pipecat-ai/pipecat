@@ -221,7 +221,12 @@ def validate_and_build_config(
             errors.append("--client-framework is only available for web bots")
         if client_framework == "react":
             generate_client = True
-            if client_server and client_server not in ("vite", "nextjs"):
+            if not client_server:
+                errors.append(
+                    "--client-server is required when --client-framework is 'react' "
+                    "(vite or nextjs)"
+                )
+            elif client_server not in ("vite", "nextjs"):
                 errors.append(f"--client-server must be 'vite' or 'nextjs', got '{client_server}'")
         elif client_framework == "vanilla":
             generate_client = True
@@ -314,7 +319,7 @@ def load_config_from_file(path: Path) -> dict:
         FileNotFoundError: If the file does not exist.
         json.JSONDecodeError: If the file is not valid JSON.
     """
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 

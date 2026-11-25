@@ -201,7 +201,8 @@ class TestJevConnection(unittest.IsolatedAsyncioTestCase):
     async def test_a_second_failure_fails_the_question(self):
         judge, api = _judge([httpx.ReadTimeout("stalled")] * 2)
         verdict = await self._ask(judge)
-        self.assertEqual(verdict.reason, "judge call failed")
+        self.assertEqual(verdict.verdict, "none")
+        self.assertTrue(verdict.reason.startswith("judge call failed: "), verdict.reason)
         self.assertEqual(len(api.posts), 2)
 
     async def test_the_connection_is_opened_when_the_judge_is_created(self):
@@ -238,10 +239,9 @@ class TestJevConfig(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(judge._explainer)
         await judge.close()
 
-    async def test_the_explainer_follows_allow_continue(self):
+    async def test_allow_continue_is_read_from_the_config(self):
         judge = _config_judge(_FakeApi([]), {"factory": _FACTORY, "allow_continue": False})
         self.assertNotIn("continue", judge._reply_outcomes)
-        self.assertFalse(judge._explainer._allow_continue)
         await judge.close()
 
     def test_a_missing_api_key_is_an_error(self):

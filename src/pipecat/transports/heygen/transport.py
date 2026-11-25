@@ -164,7 +164,7 @@ class HeyGenOutputTransport(BaseOutputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        self._resampler = create_stream_resampler()
+        self._resampler = create_stream_resampler(clear_after_secs=None)
 
         self._event_id = None
 
@@ -239,6 +239,7 @@ class HeyGenOutputTransport(BaseOutputTransport):
                 self._event_id = str(frame.id)
             elif isinstance(frame, BotStoppedSpeakingFrame):
                 if self._event_id is not None:
+                    await self._send_resampler_tail(self._event_id)
                     await self._client.agent_speak_end(self._event_id)
                     self._event_id = None
         await super().push_frame(frame, direction)
@@ -263,6 +264,7 @@ class HeyGenOutputTransport(BaseOutputTransport):
         if isinstance(frame, InterruptionFrame):
             if self._event_id is not None:
                 await self._client.interrupt(self._event_id)
+            await self._resampler.reset()
             await self.push_frame(frame, direction)
         if isinstance(frame, UserStartedSpeakingFrame):
             await self._client.start_agent_listening()
@@ -289,6 +291,12 @@ class HeyGenOutputTransport(BaseOutputTransport):
             return False
         await self._client.agent_speak(bytes(audio), self._event_id)
         return True
+
+    async def _send_resampler_tail(self, event_id: str):
+        """Send the audio the resampler still holds, so the bot's speech ends whole."""
+        tail = await self._resampler.flush()
+        if tail:
+            await self._client.agent_speak(tail, event_id)
 
 
 class HeyGenParams(TransportParams):

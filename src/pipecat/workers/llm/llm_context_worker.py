@@ -58,6 +58,7 @@ class LLMContextWorker(LLMWorker):
         context: LLMContext | None = None,
         user_params: LLMUserAggregatorParams | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
+        **kwargs: Any,
     ):
         """Initialize the LLMContextWorker.
 
@@ -77,6 +78,8 @@ class LLMContextWorker(LLMWorker):
             user_params: Optional parameters for the user aggregator.
             assistant_params: Optional parameters for the assistant
                 aggregator.
+            **kwargs: Additional arguments forwarded to :class:`LLMWorker`
+                and on to ``PipelineWorker``.
         """
         self._context = context or LLMContext()
         self._aggregators = LLMContextAggregatorPair(
@@ -100,6 +103,7 @@ class LLMContextWorker(LLMWorker):
             active=active,
             bridged=bridged,
             defer_tool_frames=defer_tool_frames,
+            **kwargs,
         )
 
     @property

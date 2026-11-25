@@ -33,6 +33,7 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.context.word_timestamp_tracker import WordTime
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 #: Languages the Flash and Turbo v2.5 models accept as a ``language_code``.
@@ -405,6 +406,11 @@ def _select_alignment(
     return msg.get(alignment_key) or msg.get(normalized_key)
 
 
+def _ends_in_audio_tag(word: str) -> bool:
+    """Whether a word ends inside a bracketed audio tag, as one cut off between chunks does."""
+    return word.rfind("[") > word.rfind("]")
+
+
 def _strip_utterance_leading_spaces(
     alignment: Mapping[str, Any], keys: tuple[str, str, str], should_strip: bool
 ) -> Mapping[str, Any]:
@@ -445,7 +451,10 @@ def calculate_word_times(
     cumulative_time: float,
     partial_word: str = "",
     partial_word_start_time: float = 0.0,
-) -> tuple[list[tuple[str, float]], str, float]:
+    *,
+    audio_tags: bool = False,
+    word_ends: bool = False,
+) -> tuple[list[WordTime], str, float]:
     """Calculate word timestamps from character alignment information.
 
     Args:
@@ -453,15 +462,25 @@ def calculate_word_times(
         cumulative_time: Base time offset for this chunk.
         partial_word: Partial word carried over from previous chunk.
         partial_word_start_time: Start time of the partial word.
+        audio_tags: Whether a bracketed audio tag, such as ``[short pause]``,
+            is one word, spaces and all. Eleven v3 and v4 return the tags they
+            perform in the alignment, and a tag reported whole matches the text
+            it was sent in.
+        word_ends: Whether to report where each word ends, as the third item of
+            its tuple. A word ends where the space after it ends: that space
+            holds the pause before the next word, or the silence after the last
+            one.
 
     Returns:
         Tuple of (word_times, new_partial_word, new_partial_word_start_time):
-        - word_times: List of (word, timestamp) tuples for complete words
+        - word_times: List of (word, timestamp) tuples for complete words, or
+          (word, timestamp, end) tuples with ``word_ends``
         - new_partial_word: Incomplete word at end of chunk (empty if chunk ends with space)
         - new_partial_word_start_time: Start time of the incomplete word
     """
     chars = alignment_info["chars"]
     char_start_times_ms = alignment_info["charStartTimesMs"]
+    char_durations_ms = alignment_info.get("charDurationsMs") or []
 
     if len(chars) != len(char_start_times_ms):
         logger.error(
@@ -472,15 +491,23 @@ def calculate_word_times(
     # Build words and track their start positions
     words = []
     word_start_times = []
+    word_end_times = []
     current_word = partial_word  # Start with any partial word from previous chunk
     word_start_time = partial_word_start_time if partial_word else None
+    in_tag = audio_tags and _ends_in_audio_tag(current_word)
 
     for i, char in enumerate(chars):
-        if char == " ":
+        if audio_tags and char in "[]":
+            in_tag = char == "["
+        if char == " " and not in_tag:
             # End of current word
             if current_word:  # Only add non-empty words
                 words.append(current_word)
                 word_start_times.append(word_start_time)
+                space_ms = char_durations_ms[i] if i < len(char_durations_ms) else 0
+                word_end_times.append(
+                    cumulative_time + ((char_start_times_ms[i] + space_ms) / 1000.0)
+                )
                 current_word = ""
                 word_start_time = None
         else:
@@ -491,13 +518,32 @@ def calculate_word_times(
             current_word += char
 
     # Build result for complete words
-    word_times = list(zip(words, word_start_times))
+    if word_ends:
+        word_times: list[WordTime] = list(zip(words, word_start_times, word_end_times))
+    else:
+        word_times = list(zip(words, word_start_times))
 
     # Return any incomplete word at the end of this chunk
     new_partial_word = current_word if current_word else ""
     new_partial_word_start_time = word_start_time if word_start_time is not None else 0.0
 
     return (word_times, new_partial_word, new_partial_word_start_time)
+
+
+@dataclass
+class _WordClock:
+    """Word-timestamp state for one context's alignment stream.
+
+    Parameters:
+        cumulative_time: Seconds of this context's audio aligned so far; the
+            offset for the next chunk, whose alignment times restart at zero.
+        partial_word: A word split across alignment chunks, waiting for its end.
+        partial_word_start_time: Start time of ``partial_word``.
+    """
+
+    cumulative_time: float = 0.0
+    partial_word: str = ""
+    partial_word_start_time: float = 0.0
 
 
 @dataclass
@@ -559,13 +605,11 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         self._output_format = ""  # initialized in setup()
         self._voice_settings = self._set_voice_settings()
 
-        self._cumulative_time = 0.0
-        # Track partial words that span across alignment chunks
-        self._partial_word = ""
-        self._partial_word_start_time = 0.0
+        # Keyed by context: the server interleaves the alignment of concurrent
+        # contexts on one socket.
+        self._word_clocks: dict[str, _WordClock] = {}
 
         self._receive_task = None
-        self._keepalive_task = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -682,8 +726,8 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task(interval=10)
 
     async def _disconnect(self):
         await super()._disconnect()
@@ -692,9 +736,7 @@ class ElevenLabsTTSBase(WebsocketTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -759,14 +801,53 @@ class ElevenLabsTTSBase(WebsocketTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    def _reset_word_clock(self):
-        """Reset the running word-timestamp clock for a new context."""
-        self._cumulative_time = 0.0
-        self._partial_word = ""
-        self._partial_word_start_time = 0.0
+    def _reset_word_clock(self, context_id: str):
+        """Reset the word-timestamp clock of one context."""
+        self._word_clocks.pop(context_id, None)
+
+    def _word_times_from_alignment(
+        self,
+        context_id: str,
+        alignment: Mapping[str, Any],
+        *,
+        audio_tags: bool = False,
+    ) -> list[WordTime]:
+        """Complete words from one alignment chunk, on its context's own clock.
+
+        Args:
+            context_id: The context the chunk belongs to.
+            alignment: The chunk's alignment, in ``calculate_word_times`` shape.
+            audio_tags: Whether a bracketed audio tag is one word. See
+                :func:`calculate_word_times`.
+
+        Returns:
+            The (word, start seconds, end seconds) triples the chunk completes.
+        """
+        clock = self._word_clocks.setdefault(context_id, _WordClock())
+        word_times, clock.partial_word, clock.partial_word_start_time = calculate_word_times(
+            alignment,
+            clock.cumulative_time,
+            clock.partial_word,
+            clock.partial_word_start_time,
+            audio_tags=audio_tags,
+            word_ends=True,
+        )
+
+        # Alignment times restart at zero in every message, so the clock
+        # advances by each chunk's span. It has to advance for chunks that
+        # complete no word too — trailing punctuation arrives on its own — or
+        # every later word is timestamped early by the shortfall.
+        char_start_times_ms = alignment.get("charStartTimesMs", [])
+        char_durations_ms = alignment.get("charDurationsMs", [])
+        if char_start_times_ms and char_durations_ms:
+            clock.cumulative_time += (char_start_times_ms[-1] + char_durations_ms[-1]) / 1000.0
+        elif word_times:
+            clock.cumulative_time = word_times[-1][1]
+
+        return word_times
 
     def _reset_alignment_state(self, context_id: str):
-        self._reset_word_clock()
+        self._reset_word_clock(context_id)
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Close the ElevenLabs context when the bot is interrupted."""
@@ -778,17 +859,6 @@ class ElevenLabsTTSBase(WebsocketTTSService):
         """Reset alignment state after all audio for the context has played."""
         self._reset_alignment_state(context_id)
         await super().on_audio_context_completed(context_id)
-
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 10
-        while True:
-            await asyncio.sleep(KEEPALIVE_SLEEP)
-            try:
-                await self._send_keepalive()
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"{self} keepalive error: {e}")
-                break
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
@@ -815,7 +885,7 @@ class ElevenLabsTTSBase(WebsocketTTSService):
                     await self.create_audio_context(context_id)
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
-                    self._reset_word_clock()
+                    self._reset_word_clock(context_id)
 
                     await self._send_context_init(context_id)
                     logger.trace(f"Created new context {context_id}")

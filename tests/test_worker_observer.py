@@ -192,5 +192,29 @@ class TestWorkerObserverShutdown(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(later.cleaned_up)
 
 
+class RaisingObserver(BaseObserver):
+    def __init__(self):
+        super().__init__(observe_every_push=False)
+        self.texts: list[str] = []
+
+    async def on_push_frame(self, data: FramePushed):
+        if isinstance(data.frame, TextFrame):
+            self.texts.append(data.frame.text)
+            if len(self.texts) == 1:
+                raise RuntimeError("observer failed")
+
+
+class TestWorkerObserverErrors(unittest.IsolatedAsyncioTestCase):
+    async def test_an_observer_that_raises_keeps_receiving_frames(self):
+        observer = RaisingObserver()
+        await run_test(
+            IdentityFilter(),
+            frames_to_send=[TextFrame("one"), TextFrame("two"), SleepFrame(sleep=0.1)],
+            expected_down_frames=[TextFrame, TextFrame],
+            observers=[observer],
+        )
+        self.assertEqual(observer.texts, ["one", "two"])
+
+
 if __name__ == "__main__":
     unittest.main()

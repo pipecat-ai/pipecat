@@ -6,14 +6,19 @@
 
 """Ask a classifier about an image, such as a frame from the user's camera.
 
-By default the questions go to Cloudflare's Clef; with ``--openai`` they go
-to OpenAI's Decisions API, and with ``--llm`` to an OpenAI vision model
-through ``LLMClassifier``.
+By default the questions go to Jev; with ``--clef`` they go to Cloudflare's
+Clef, with ``--openai`` to OpenAI's Decisions API, with ``--google`` to
+Google's Decisions API, with ``--zoom`` to Zoom's Decisions API, and with
+``--llm`` to an OpenAI vision model through
+``LLMClassifier``.
 
 Usage::
 
-    CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_KEY=... python features-classifiers-images.py
+    TYPESAFE_API_KEY=... python features-classifiers-images.py
+    CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_KEY=... python features-classifiers-images.py --clef
     OPENAI_API_KEY=... python features-classifiers-images.py --openai
+    GOOGLE_API_KEY=... python features-classifiers-images.py --google
+    ZOOM_AI_API_KEY=... python features-classifiers-images.py --zoom
     OPENAI_API_KEY=... python features-classifiers-images.py --llm gpt-4.1-mini
 """
 
@@ -33,8 +38,11 @@ from pipecat.classifiers.base_classifier import (
     YesNoQuestion,
 )
 from pipecat.classifiers.cloudflare.clef.classifier import ClefClassifier
+from pipecat.classifiers.google.decisions.classifier import GoogleDecisionsClassifier
 from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.classifiers.openai.decisions.classifier import OpenAIDecisionsClassifier
+from pipecat.classifiers.typesafe.jev.classifier import JevClassifier
+from pipecat.classifiers.zoom.decisions.classifier import ZoomDecisionsClassifier
 from pipecat.frames.frames import ImageRawFrame
 from pipecat.services.openai.llm import OpenAILLMService
 
@@ -55,7 +63,7 @@ async def main(classifier: BaseClassifier):
         results = await classifier.yes_no(
             "A frame from the user's camera.",
             {"person": YesNoQuestion(instructions="Is there a person in the frame?")},
-            images=[image],
+            inputs=[image],
         )
         print(f"person: {results['person'].probability:.2f}")
 
@@ -72,7 +80,7 @@ async def main(classifier: BaseClassifier):
                     },
                 )
             },
-            images=[image],
+            inputs=[image],
         )
         subject = results["subject"]
         print(f"subject: {subject.choice} ({subject.confidence:.2f})")
@@ -85,7 +93,7 @@ async def main(classifier: BaseClassifier):
                     levels=["far away", "a few steps away", "close-up"],
                 )
             },
-            images=[image],
+            inputs=[image],
         )
         print(f"distance: {results['distance'].score:.2f} on a scale of 3")
     finally:
@@ -95,19 +103,55 @@ async def main(classifier: BaseClassifier):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--clef",
+        metavar="MODEL",
+        nargs="?",
+        const="clef",
+        help="use Clef (clef or clef-flash) instead of Jev",
+    )
+    parser.add_argument(
         "--openai",
         metavar="MODEL",
         nargs="?",
         const="gpt-6-luna",
-        help="use OpenAI's Decisions API instead of Clef",
+        help="use OpenAI's Decisions API instead of Jev",
     )
-    parser.add_argument("--llm", metavar="MODEL", help="use an OpenAI vision model instead of Clef")
+    parser.add_argument(
+        "--google",
+        metavar="MODEL",
+        nargs="?",
+        const="gemini-decision-1",
+        help="use Google's Decisions API instead of Jev",
+    )
+    parser.add_argument(
+        "--zoom",
+        metavar="MODEL",
+        nargs="?",
+        const="zoom-decisions",
+        help="use Zoom's Decisions API (zoom-decisions or zoom-decisions-pro) instead of Jev",
+    )
+    parser.add_argument("--llm", metavar="MODEL", help="use an OpenAI vision model instead of Jev")
     args = parser.parse_args()
 
-    if args.openai:
+    if args.clef:
+        classifier = ClefClassifier(
+            account_id=os.environ["CLOUDFLARE_ACCOUNT_ID"],
+            api_key=os.environ["CLOUDFLARE_API_KEY"],
+            model=args.clef,
+        )
+        asyncio.run(main(classifier))
+    elif args.openai:
         classifier = OpenAIDecisionsClassifier(
             api_key=os.environ["OPENAI_API_KEY"], model=args.openai
         )
+        asyncio.run(main(classifier))
+    elif args.google:
+        classifier = GoogleDecisionsClassifier(
+            api_key=os.environ["GOOGLE_API_KEY"], model=args.google
+        )
+        asyncio.run(main(classifier))
+    elif args.zoom:
+        classifier = ZoomDecisionsClassifier(api_key=os.environ["ZOOM_AI_API_KEY"], model=args.zoom)
         asyncio.run(main(classifier))
     elif args.llm:
         llm = OpenAILLMService(
@@ -116,8 +160,4 @@ if __name__ == "__main__":
         )
         asyncio.run(main(LLMClassifier(llm=llm)))
     else:
-        classifier = ClefClassifier(
-            account_id=os.environ["CLOUDFLARE_ACCOUNT_ID"],
-            api_key=os.environ["CLOUDFLARE_API_KEY"],
-        )
-        asyncio.run(main(classifier))
+        asyncio.run(main(JevClassifier(api_key=os.environ["TYPESAFE_API_KEY"])))

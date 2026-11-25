@@ -10,7 +10,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.evals.transport import EvalTransportParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -185,7 +185,7 @@ There is also a secret menu that changes daily. If the user asks about it, use t
     tts = InworldTTSService(
         api_key=os.getenv("INWORLD_API_KEY", ""),
         voice_id="Ashley",
-        model="inworld-tts-1",
+        model="inworld-tts-2",
         temperature=1.1,
     )
 

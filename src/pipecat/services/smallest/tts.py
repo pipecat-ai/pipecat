@@ -10,7 +10,6 @@ This module provides a WebSocket-based integration with Smallest AI's
 Waves API for real-time text-to-speech synthesis.
 """
 
-import asyncio
 import base64
 import json
 from collections.abc import AsyncGenerator
@@ -112,13 +111,28 @@ class SmallestTTSSettings(TTSSettings):
         content_filter: Check the text against Smallest's profanity word list
             before synthesis, taking this action on a match: ``"reject"`` fails
             the request with a ``CONTENT_FILTER_BLOCKED`` error and synthesizes
-            nothing; ``"flag"`` synthesizes normally and records the match. The
-            text is never rewritten. If None, the API default (off) applies.
+            nothing; ``"flag"`` synthesizes normally and records the match;
+            ``"redact"`` drops the matched term and speaks the rest, failing
+            like ``"reject"`` when nothing is left to speak. If None, the API
+            default (off) applies.
+        date_format: Order to read all-numeric dates in, independent of the
+            synthesis voice: ``"EU"`` reads ``05/03/2024`` day-first ("fifth
+            March, twenty twenty four"), ``"US"`` month-first ("May third,
+            twenty twenty four"). If None, the API default (``"US"``) applies.
+        number_pronunciation_language: Language used to read numerals, currency,
+            times and dates, independent of the synthesis language. If None, the
+            API reads them in the synthesis language.
     """
 
     speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     math_notation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    content_filter: Literal["reject", "flag"] | str | None | NotGiven = field(
+    content_filter: Literal["reject", "flag", "redact"] | str | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    date_format: Literal["EU", "US"] | str | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    number_pronunciation_language: Language | str | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -200,6 +214,8 @@ class SmallestTTSService(InterruptibleTTSService):
             speed=None,
             math_notation=None,
             content_filter=None,
+            date_format=None,
+            number_pronunciation_language=None,
         )
 
         if settings is not None:
@@ -223,7 +239,6 @@ class SmallestTTSService(InterruptibleTTSService):
         self._word_timestamps = word_timestamps
         self._max_buffer_delay_ms = max_buffer_delay_ms
         self._receive_task = None
-        self._keepalive_task = None
 
         # Word-timestamp offset tracking. Smallest sends one request per
         # run_tts() call and reports word timestamps relative to *that request's*
@@ -233,7 +248,7 @@ class SmallestTTSService(InterruptibleTTSService):
         # are detected by a change in the message ``request_id`` (Smallest emits a
         # single ``complete`` for the whole turn, not one per request). Reset per
         # turn in on_turn_context_created(). This mirrors the cumulative-offset
-        # pattern used by the Rime, Inworld, and Hume TTS services.
+        # pattern used by the Rime and Inworld TTS services.
         self._cumulative_time: float = 0.0  # offset from prior requests in the turn
         self._request_end_time: float = 0.0  # max word end seen in the in-flight request
         self._wt_request_id: str | None = None  # request_id of the in-flight request
@@ -305,6 +320,17 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._settings.content_filter is not None:
             msg["content_filter"] = {"enabled": True, "action": self._settings.content_filter}
 
+        if self._settings.date_format is not None:
+            msg["date_format"] = self._settings.date_format
+
+        npl = self._settings.number_pronunciation_language
+        if npl is not None:
+            # Unlike `language`, which the base class converts on write, this
+            # field is service-specific and is mapped here.
+            msg["number_pronunciation_language"] = (
+                self.language_to_service_language(npl) if isinstance(npl, Language) else npl
+            )
+
         if self._word_timestamps:
             msg["word_timestamps"] = True
 
@@ -349,8 +375,9 @@ class SmallestTTSService(InterruptibleTTSService):
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta.
 
-        All fields (model, speed, math_notation, content_filter, voice, language)
-        take effect on the next ``_build_msg`` call without reconnecting.
+        All fields (model, speed, math_notation, content_filter, date_format,
+        number_pronunciation_language, voice, language) take effect on the next
+        ``_build_msg`` call without reconnecting.
         """
         return await super()._update_settings(delta)
 
@@ -363,8 +390,8 @@ class SmallestTTSService(InterruptibleTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket:
+            self._create_keepalive_task(interval=30)
 
     async def _disconnect(self):
         """Disconnect from Smallest WebSocket and clean up tasks."""
@@ -374,9 +401,7 @@ class SmallestTTSService(InterruptibleTTSService):
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        await self._cancel_keepalive_task()
 
         await self._disconnect_websocket()
 
@@ -432,23 +457,15 @@ class SmallestTTSService(InterruptibleTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _keepalive_task_handler(self):
-        """Send periodic keepalive messages to prevent idle timeout."""
-        KEEPALIVE_INTERVAL = 30
-        while True:
-            await asyncio.sleep(KEEPALIVE_INTERVAL)
-            await self._send_keepalive()
-
     async def _send_keepalive(self):
         """Send a silent message to keep the WebSocket connection alive."""
-        if self._websocket and self._websocket.state is State.OPEN:
-            msg = {
-                "text": " ",
-                "voice_id": self._settings.voice,
-                "model": self._settings.model,
-                "language": self._settings.language,
-            }
-            await self._websocket.send(json.dumps(msg))
+        msg = {
+            "text": " ",
+            "voice_id": self._settings.voice,
+            "model": self._settings.model,
+            "language": self._settings.language,
+        }
+        await self._get_websocket().send(json.dumps(msg))
 
     def _advance_word_timestamp_request(self, request_id: str | None):
         """Roll the turn offset forward when word timestamps cross into a new request.

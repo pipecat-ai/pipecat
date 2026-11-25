@@ -112,7 +112,7 @@ Context:     <code>npm install</code>   ← WRONG: arrived first
 
 ### The model: an ordered slot queue
 
-**Every** frame passing through `_push_tts_frames` takes a slot, whether or not it is
+**Every** frame passing through `_handle_aggregated_text` takes a slot, whether or not it is
 spoken. **A skipped frame waits in the queue at its correct position.**
 
 ```

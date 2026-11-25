@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 
 from rich.console import Console
+from typer.testing import CliRunner
 
 from pipecat.cli.commands.eval import (
     _build_scenario_runs,
@@ -26,6 +27,7 @@ from pipecat.cli.commands.eval import (
     _print_progress,
     _rate_level,
     _turn_tally,
+    eval_app,
 )
 from pipecat.evals.results import (
     EvalScriptResult,
@@ -136,6 +138,30 @@ class TestScenarioRuns(unittest.TestCase):
         self.assertEqual([r.scenario for r in runs], ["g/a", "g/b", "single/single"])
         self.assertEqual([r.scenario_path for r in runs], [group, group, single])
         self.assertTrue(all(r.bot_url == "ws://bot" for r in runs))
+
+    def test_a_rubric_entry_has_nothing_to_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mixed = Path(tmp) / "mixed.yaml"
+            mixed.write_text(
+                "name: m\nscenarios:\n  - name: a\n    turns: []\n"
+                "  - name: production\n    success: the bot booked a table\n"
+            )
+
+            runs = _build_scenario_runs([mixed], "ws://bot")
+
+        self.assertEqual([r.scenario for r in runs], ["m/a"])
+
+    def test_paths_with_nothing_to_run_fail_the_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rubrics = Path(tmp) / "rubrics.yaml"
+            rubrics.write_text("name: r\nscenarios:\n  - name: production\n    success: booked\n")
+
+            result = CliRunner().invoke(
+                eval_app, ["run", str(rubrics), "--bot-url", "ws://localhost:0"]
+            )
+
+        self.assertEqual(result.exit_code, 1, result.output)
+        self.assertIn("Nothing to run", result.output)
 
     def test_a_file_that_fails_to_load_is_one_failed_run(self):
         with tempfile.TemporaryDirectory() as tmp:
