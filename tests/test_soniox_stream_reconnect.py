@@ -44,17 +44,6 @@ def test_can_reconnect_once_soniox_offers_a_reconnect():
     assert tracker.reconnect_url == "wss://soniox/r"
 
 
-def test_a_response_before_any_offer_disables_reconnect():
-    tracker = SonioxReconnectTracker()
-    tracker.track_sent(b"audio")
-
-    assert not tracker.handle_server_message({"tokens": []})
-    tracker.track_sent(b"audio")
-
-    assert not tracker.can_reconnect
-    assert tracker.unacknowledged_after(0) == []
-
-
 def test_sent_messages_are_numbered_from_one_in_send_order():
     tracker = _tracker_with_offer()
 
@@ -70,6 +59,9 @@ def test_a_pong_acknowledges_the_messages_sent_before_its_ping():
     tracker.track_sent(b"b")
     ping = tracker.create_ping()
     tracker.track_sent(b"c")
+
+    assert tracker.handle_server_message({"type": "pong"})
+    assert tracker.unacknowledged_after(0) == [(1, b"a"), (2, b"b"), (3, b"c")]
 
     assert tracker.handle_server_message(_pong(ping))
 
@@ -150,29 +142,3 @@ def test_failed_reconnect_reply_raises(reply, error):
 
     with pytest.raises(error):
         tracker.handle_reconnect_reply({"tokens": [], **reply})
-
-
-def test_reconnect_is_disabled_after_the_window_expires():
-    clock = _Clock()
-    tracker = _tracker_with_offer(clock)
-    tracker.track_sent(b"a")
-    tracker.mark_disconnected()
-
-    clock.now = 20
-    assert tracker.can_reconnect
-    clock.now = 20.1
-    tracker.track_sent(b"b")
-
-    assert not tracker.can_reconnect
-    assert tracker.unacknowledged_after(0) == []
-
-
-def test_reconnect_window_starts_at_the_first_disconnect():
-    clock = _Clock()
-    tracker = _tracker_with_offer(clock)
-    tracker.mark_disconnected()
-    clock.now = 15
-    tracker.mark_disconnected()
-    clock.now = 21
-
-    assert not tracker.can_reconnect

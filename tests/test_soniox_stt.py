@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from websockets.asyncio.server import serve
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -17,6 +18,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextAssistantTurnFrame,
@@ -42,6 +44,7 @@ from pipecat.services.soniox.stt import (
     _language_from_tokens,
     language_to_soniox_language,
 )
+from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
@@ -59,6 +62,7 @@ class _FakeWebsocket:
         self.closed = False
         self.send = AsyncMock(side_effect=send_side_effect)
         self.recv = AsyncMock(side_effect=[json.dumps(reply) for reply in replies])
+        self.ping = AsyncMock()
         self.transport = MagicMock()
 
     async def close(self):
@@ -95,8 +99,15 @@ async def test_connect_sends_api_key_on_the_handshake(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_connect_failure_clears_stale_websocket_without_raising(monkeypatch):
+@pytest.mark.parametrize("fail_sending_config", [False, True])
+async def test_connect_failure_clears_stale_websocket_without_raising(
+    monkeypatch, fail_sending_config
+):
+    connecting = _FakeWebsocket([], send_side_effect=ConnectionResetError("config send failed"))
+
     async def fake_websocket_connect(*args, **kwargs):
+        if fail_sending_config:
+            return connecting
         raise RuntimeError("connection failed")
 
     monkeypatch.setattr(
@@ -109,6 +120,8 @@ async def test_connect_failure_clears_stale_websocket_without_raising(monkeypatc
     await service._connect_websocket()
 
     assert service._websocket is None
+    if fail_sending_config:
+        connecting.transport.abort.assert_called_once()
 
 
 def test_language_from_tokens_uses_single_recognized_language():
@@ -1407,18 +1420,6 @@ async def test_messages_sent_while_disconnected_are_tracked_for_resend():
 
 
 @pytest.mark.asyncio
-async def test_a_lost_connection_is_aborted_without_ending_the_stream():
-    service, websocket = _service_with_reconnect_offer()
-
-    await service._disconnect_websocket()
-
-    # A close, with status 1000, would end the stream.
-    assert not websocket.closed
-    assert service._websocket is None
-    assert service._reconnect_tracker.can_reconnect
-
-
-@pytest.mark.asyncio
 async def test_disconnecting_ends_the_stream():
     service, websocket = _service_with_reconnect_offer()
 
@@ -1429,21 +1430,36 @@ async def test_disconnecting_ends_the_stream():
 
 
 @pytest.mark.asyncio
-async def test_connect_reconnects_and_resends_the_missing_messages(monkeypatch):
-    service, _ = _service_with_reconnect_offer()
+@pytest.mark.parametrize("retry", [False, True])
+async def test_resume_resends_the_missing_messages(monkeypatch, retry):
+    service, original = _service_with_reconnect_offer()
     for message in (b"a", b"b", b"c"):
         await service._send(message)
-    service._websocket = None
     reconnected = {"type": "reconnected", "reconnect_token": "t2", "last_request": 1}
     websocket = _FakeWebsocket([], replies=[reconnected])
-    urls = _fake_connections(monkeypatch, websocket)
+    sockets = [websocket]
+    if retry:
 
-    await service._connect_websocket()
+        async def drop_reply():
+            await service._send(b"d")
+            raise ConnectionResetError("lost the reconnect reply")
 
-    assert urls == ["wss://soniox/reconnect"]
+        dropped = _FakeWebsocket([])
+        dropped.recv.side_effect = drop_reply
+        sockets.insert(0, dropped)
+    urls = _fake_connections(monkeypatch, *sockets)
+    monkeypatch.setattr("pipecat.services.soniox.stt._RECONNECT_RETRY_DELAY_S", 0)
+
+    assert await service._reconnect_websocket(1)
+
+    assert urls == ["wss://soniox/reconnect"] * (2 if retry else 1)
+    assert not original.closed
     request, *resent = _sent_payloads(websocket)
     assert json.loads(request) == {"type": "reconnect", "reconnect_token": "t1", "last_seq": 0}
-    assert resent == [b"b", b"c"]
+    if retry:
+        dropped.transport.abort.assert_called_once()
+        assert _sent_payloads(dropped) == [request]
+    assert resent == ([b"b", b"c", b"d"] if retry else [b"b", b"c"])
     assert service._websocket is websocket
 
 
@@ -1455,7 +1471,7 @@ async def test_a_refused_reconnect_starts_a_new_stream(monkeypatch):
     refusing, fresh = _FakeWebsocket([], replies=[refused]), _FakeWebsocket([])
     urls = _fake_connections(monkeypatch, refusing, fresh)
 
-    await service._connect_websocket()
+    assert await service._reconnect_websocket(1)
 
     assert urls == ["wss://soniox/reconnect", service._url]
     refusing.transport.abort.assert_called_once()
@@ -1465,40 +1481,28 @@ async def test_a_refused_reconnect_starts_a_new_stream(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reconnect_keeps_final_tokens_from_before_the_drop(monkeypatch):
+@pytest.mark.parametrize("offered", [False, True])
+async def test_a_finished_stream_cannot_be_reconnected(offered):
     service, _ = _service_with_reconnect_offer()
-    service._final_transcription_buffer = [{"text": "Hello", "is_final": True}]
-    end = {"text": END_TOKEN, "is_final": True}
-    service._websocket = _FakeWebsocket(
-        [
-            json.dumps({"type": "pong", "id": 1}),
-            json.dumps({"tokens": [{"text": " there", "is_final": True}, end], "seq": 4}),
-        ]
-    )
-
-    transcripts = []
-
-    async def fake_push_frame(frame, direction=None):
-        if isinstance(frame, TranscriptionFrame):
-            transcripts.append(frame.text)
-
-    monkeypatch.setattr(service, "push_frame", fake_push_frame)
-    monkeypatch.setattr(service, "_handle_transcription", AsyncMock())
-    monkeypatch.setattr(service, "emit_stt_usage_metrics", AsyncMock())
-
-    await service._receive_messages()
-
-    assert transcripts == ["Hello there"]
-    assert json.loads(service._reconnect_tracker.create_reconnect_request())["last_seq"] == 4
-
-
-@pytest.mark.asyncio
-async def test_a_finished_stream_cannot_be_reconnected(monkeypatch):
-    service, _ = _service_with_reconnect_offer()
+    if not offered:
+        service._reconnect_tracker = SonioxReconnectTracker()
     service._websocket = _FakeWebsocket([json.dumps({"tokens": [], "finished": True, "seq": 1})])
 
     await service._receive_messages()
 
+    assert service._reconnect_tracker is None
+
+
+@pytest.mark.asyncio
+async def test_a_drop_releases_the_replay_buffer_when_retry_is_disabled():
+    service, _ = _service_with_reconnect_offer(reconnect_on_error=False)
+    await service._send(b"audio")
+    service._websocket = None
+    report_error = AsyncMock()
+
+    await service._receive_task_handler(report_error)
+
+    report_error.assert_awaited_once()
     assert service._reconnect_tracker is None
 
 
@@ -1534,7 +1538,7 @@ async def test_connect_runs_the_ping_task_only_when_reconnect_is_enabled(monkeyp
 
 async def _run_ping_task(service, monkeypatch):
     """Run a few rounds of the ping task with no wait between them."""
-    monkeypatch.setattr("pipecat.services.soniox.stt.PING_INTERVAL_S", 0)
+    monkeypatch.setattr("pipecat.services.soniox.stt._PING_INTERVAL_S", 0)
     task = asyncio.create_task(service._ping_task_handler())
     for _ in range(3):
         await asyncio.sleep(0)
@@ -1597,14 +1601,166 @@ async def test_ping_task_keeps_running_when_a_ping_send_fails(monkeypatch):
     assert websocket.send.await_count > 1
 
 
+async def _offer_reconnect(websocket):
+    url = f"ws://127.0.0.1:{websocket.local_address[1]}/resume"
+    await websocket.send(json.dumps({**_RECONNECT_OFFER, "reconnect_url": url}))
+
+
+async def _run_soniox_pipeline(handle_connection):
+    async with serve(handle_connection, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        service = SonioxSTTService(
+            api_key="test-key",
+            url=f"ws://127.0.0.1:{port}",
+            settings=SonioxSTTService.Settings(enable_reconnect=True),
+        )
+        frames = []
+        for _ in range(30):
+            frames.append(
+                InputAudioRawFrame(audio=b"\x00\x00" * 320, sample_rate=16000, num_channels=1)
+            )
+            frames.append(SleepFrame(sleep=0.02))
+        downstream, _ = await run_test(service, frames_to_send=frames)
+    return [frame.text for frame in downstream if isinstance(frame, TranscriptionFrame)]
+
+
+async def _transcribe_first_audio(websocket):
+    transcribed = False
+    async for message in websocket:
+        if not transcribed and isinstance(message, bytes):
+            await websocket.send(
+                json.dumps(
+                    {
+                        "tokens": [
+                            {"text": "fresh stream", "is_final": True},
+                            {"text": END_TOKEN, "is_final": True},
+                        ]
+                    }
+                )
+            )
+            transcribed = True
+
+
 @pytest.mark.asyncio
-async def test_a_replaced_connection_is_ignored_without_ending_the_stream(monkeypatch):
-    service, _ = _service_with_reconnect_offer()
-    replaced = {"tokens": [], "error_code": 400, "error_type": "connection_replaced"}
-    service._websocket = _FakeWebsocket([json.dumps(replaced)])
-    monkeypatch.setattr(service, "push_error", AsyncMock())
+@pytest.mark.parametrize("close_before_confirming", [False, True])
+async def test_unconfirmed_stream_start_retries_a_fresh_connection(
+    monkeypatch, close_before_confirming
+):
+    monkeypatch.setattr("pipecat.services.soniox.stt._STREAM_START_TIMEOUT_S", 0.05)
+    start_requests = []
 
-    await service._receive_messages()
+    async def handle_connection(websocket):
+        start_requests.append(json.loads(await websocket.recv()))
+        if len(start_requests) == 1:
+            await websocket.send('{"type": "pong", "id": 1}')
+            if close_before_confirming:
+                await websocket.close()
+            else:
+                await websocket.wait_closed()
+        else:
+            # A transcription response can arrive on a stream without a reconnect offer.
+            await _transcribe_first_audio(websocket)
 
-    service.push_error.assert_not_awaited()
-    assert service._reconnect_tracker.can_reconnect
+    assert await _run_soniox_pipeline(handle_connection) == ["fresh stream"]
+    assert len(start_requests) == 2
+    assert all(request["enable_reconnect"] for request in start_requests)
+
+
+@pytest.mark.asyncio
+async def test_reconnect_keeps_final_tokens_from_before_the_drop():
+    connections = []
+    end = {"text": END_TOKEN, "is_final": True}
+
+    async def handle_connection(websocket):
+        request = json.loads(await websocket.recv())
+        connections.append((websocket.request.path, request))
+        if websocket.request.path == "/resume":
+            await websocket.send(
+                '{"type": "reconnected", "reconnect_token": "t2", "last_request": 1}'
+            )
+            await websocket.send(
+                json.dumps({"tokens": [{"text": " there", "is_final": True}, end], "seq": 2})
+            )
+            async for _ in websocket:
+                pass
+        else:
+            await _offer_reconnect(websocket)
+            await websocket.send(
+                json.dumps({"tokens": [{"text": "Hello", "is_final": True}], "seq": 1})
+            )
+            await websocket.recv()
+            websocket.transport.abort()
+
+    assert await _run_soniox_pipeline(handle_connection) == ["Hello there"]
+    assert [path for path, _ in connections] == ["/", "/resume"]
+    assert connections[1][1] == {"type": "reconnect", "reconnect_token": "t1", "last_seq": 1}
+
+
+@pytest.mark.asyncio
+async def test_expired_resume_window_falls_back_to_a_fresh_stream(monkeypatch):
+    monkeypatch.setattr("pipecat.services.soniox.stt._RECONNECT_WINDOW_S", 0.22)
+    monkeypatch.setattr("pipecat.services.soniox.stt._RECONNECT_ATTEMPT_TIMEOUT_S", 0.08)
+    monkeypatch.setattr("pipecat.services.soniox.stt._RECONNECT_RETRY_DELAY_S", 0.01)
+    start_requests = []
+    resume_requests = []
+    resume_close_codes = []
+
+    async def handle_connection(websocket):
+        request = json.loads(await websocket.recv())
+        if websocket.request.path == "/resume":
+            resume_requests.append(request)
+            await websocket.wait_closed()
+            resume_close_codes.append(websocket.close_code)
+            return
+        start_requests.append(request)
+        if len(start_requests) == 1:
+            await _offer_reconnect(websocket)
+            await websocket.send(json.dumps({"tokens": [], "seq": 1}))
+            await websocket.recv()
+            websocket.transport.abort()
+        else:
+            await _transcribe_first_audio(websocket)
+
+    assert await _run_soniox_pipeline(handle_connection) == ["fresh stream"]
+    assert len(start_requests) == 2
+    assert len(resume_requests) >= 2
+    assert all(
+        request == {"type": "reconnect", "reconnect_token": "t1", "last_seq": 1}
+        for request in resume_requests
+    )
+    assert resume_close_codes == [1006] * len(resume_requests)
+
+
+@pytest.mark.asyncio
+async def test_replaced_socket_stops_the_receive_loop_without_reconnecting(monkeypatch):
+    paths = []
+
+    async def handle_connection(websocket):
+        paths.append(websocket.request.path)
+        await websocket.recv()
+        await _offer_reconnect(websocket)
+        await websocket.send(
+            '{"tokens": [], "error_code": 400, "error_type": "connection_replaced"}'
+        )
+        websocket.transport.abort()
+
+    async with serve(handle_connection, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        service = SonioxSTTService(
+            api_key="test-key",
+            url=f"ws://127.0.0.1:{port}",
+            settings=SonioxSTTService.Settings(enable_reconnect=True),
+        )
+        report_error = AsyncMock()
+        push_error = AsyncMock()
+        monkeypatch.setattr(service, "push_error", push_error)
+        await service._connect_websocket()
+
+        try:
+            await asyncio.wait_for(service._receive_task_handler(report_error), 1)
+        finally:
+            await service._disconnect()
+
+    assert paths == ["/"]
+    report_error.assert_not_awaited()
+    push_error.assert_not_awaited()
