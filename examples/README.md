@@ -127,7 +127,7 @@ Transport layer examples (WebRTC, Daily, LiveKit).
 
 ### [`video-avatar/`](./video-avatar/)
 
-Video avatar integrations (Tavus, HeyGen, Simli, LemonSlice).
+Video avatar integrations (Tavus, HeyGen, Simli, LemonSlice, Keyframe).
 
 ### [`video-processing/`](./video-processing/)
 
