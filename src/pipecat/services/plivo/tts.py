@@ -86,7 +86,7 @@ class PlivoTTSSettings(TTSSettings):
 
     Parameters:
         model: TTS model to use. Defaults to ``"koyal-v1"``.
-        voice: ID of the voice.
+        voice: ID of the voice. Defaults to ``"lC7qzMoRE7SSjaNCVeff"`` (Hailey, US English).
         language: Language of the text, such as ``Language.HI`` or ``Language.EN_IN``. For
             English, the region (``Language.EN_IN``, ``Language.EN_US``, ``Language.EN_GB`` or
             ``Language.EN_AU``) sets how numbers and dates are normalized; the voice keeps its
@@ -121,7 +121,7 @@ def _default_settings(settings: PlivoTTSSettings | None) -> PlivoTTSSettings:
     """Return the default settings, updated with those given."""
     defaults = PlivoTTSSettings(
         model="koyal-v1",
-        voice=None,
+        voice="lC7qzMoRE7SSjaNCVeff",
         language=None,
         speed=None,
         volume=None,
