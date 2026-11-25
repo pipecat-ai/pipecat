@@ -223,7 +223,7 @@ class WordCompletionTracker:
         self._user_facing_pos = len(self._user_facing_text)
         if self._llm_text is not None:
             # The whole remainder is this frame's by definition, tags included.
-            self._llm_consumed = self._llm_text[self._llm_spoken_pos :]
+            self._llm_consumed = self._llm_text[self._llm_pos :]
             self._llm_pos = len(self._llm_text)
             self._llm_spoken_pos = len(self._llm_text)
         self._force_completed = True
@@ -302,6 +302,11 @@ class WordCompletionTracker:
         if not strip_complete_markup(self._tts_text).strip():
             return False
         return self._segment_map.word_belongs_current_segment(word)
+
+    @property
+    def remaining_has_transformed_segment(self) -> bool:
+        """True when any rewritten segment overlaps the unspoken TTS text."""
+        return self._segment_map.remaining_has_transformed_segment
 
     def suppress_in_context(self) -> bool:
         """True when the last word must not be written to the conversation context.
@@ -414,15 +419,17 @@ class WordCompletionTracker:
         return remaining.strip() if strip else remaining
 
     def get_remaining_llm_text(self) -> str | None:
-        """Return what this frame still has left to speak, as the LLM wrote it.
+        """Return what this frame still has left to record, as the LLM wrote it.
 
         The companion to :meth:`get_remaining_tts_text` when ending a frame
-        early: that supplies the text to emit, this the text to record. None
-        without an ``llm_text``, or when nothing is left.
+        early: that supplies the text to emit, this the text to record. It starts
+        at the attributed cursor, so punctuation already recorded with a spoken
+        word is not recorded again. None without an ``llm_text``, or when nothing
+        is left.
         """
         if self._llm_text is None:
             return None
-        remaining = self._llm_text[self._llm_spoken_pos :].strip()
+        remaining = self._llm_text[self._llm_pos :].strip()
         return remaining if remaining else None
 
     @property

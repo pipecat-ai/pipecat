@@ -2473,5 +2473,82 @@ class TestUnmatchedSymbolDoesNotDesyncTheTurn(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class TestForceCompleteTransformedText(unittest.IsolatedAsyncioTestCase):
+    """A forced tail records the LLM's text, not the transformed TTS text."""
+
+    async def _frames_after_words(
+        self,
+        llm_text: str,
+        tts_text: str,
+        words: list[str],
+        *,
+        includes_inter_frame_spaces: bool = False,
+    ) -> list:
+        seq = _seq()
+        frames = await seq.register_spoken(
+            _spoken_frame(llm_text, raw_text=llm_text),
+            "ctx1",
+            tts_text,
+            True,
+            includes_inter_frame_spaces=includes_inter_frame_spaces,
+        )
+        for i, word in enumerate(words):
+            frames.extend(seq.process_word(word, pts=(i + 1) * 100, context_id="ctx1"))
+        frames.extend(seq.force_complete("ctx1", last_word_pts=(len(words) + 1) * 100))
+        return frames
+
+    @staticmethod
+    def _context_text(frames: list) -> str:
+        parts = [
+            TextPartForConcatenation(
+                frame.raw_text or frame.text,
+                includes_inter_part_spaces=frame.includes_inter_frame_spaces,
+            )
+            for frame in frames
+            if isinstance(frame, TTSTextFrame) and frame.append_to_context
+        ]
+        return concatenate_aggregated_text(parts)
+
+    async def test_transformed_markup_never_reaches_context(self):
+        llm_text = "A-B-C."
+        tts_text = 'A<break time="300ms"/>B<break time="300ms"/>C.'
+
+        frames = await self._frames_after_words(
+            llm_text, tts_text, ["A"], includes_inter_frame_spaces=True
+        )
+
+        self.assertEqual(self._context_text(frames), llm_text)
+        self.assertNotIn("<break", self._context_text(frames))
+
+    async def test_a_dropped_word_still_leaves_the_original_text_in_context(self):
+        llm_text = "A-B-C."
+        tts_text = 'A<break time="300ms"/>B<break time="300ms"/>C.'
+
+        frames = await self._frames_after_words(
+            llm_text, tts_text, ["A", "X"], includes_inter_frame_spaces=True
+        )
+
+        self.assertEqual(self._context_text(frames), llm_text)
+
+    async def test_punctuation_attributed_to_a_word_is_not_repeated(self):
+        frames = await self._frames_after_words(
+            "A-B-C.", "A-B-C.", ["A"], includes_inter_frame_spaces=True
+        )
+
+        self.assertEqual(self._context_text(frames), "A-B-C.")
+
+    async def test_rewritten_text_is_forced_back_to_the_llm_text(self):
+        llm_text = "Your balance is $5, due on 3/15."
+        tts_text = "Your balance is five dollars, due on 3/15."
+
+        frames = await self._frames_after_words(
+            llm_text, tts_text, ["Your", "balance", "is", "five"]
+        )
+
+        self.assertEqual(self._context_text(frames), llm_text)
+        forced = [f for f in frames if isinstance(f, TTSTextFrame)][-1]
+        self.assertTrue((forced.raw_text or "").startswith("$5,"), forced.raw_text)
+
+
 if __name__ == "__main__":
     unittest.main()

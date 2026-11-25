@@ -954,10 +954,8 @@ class TextSegmentMap:
     def llm_spoken_pos(self) -> int:
         """How far into the LLM's text the provider has actually reported speaking.
 
-        What a caller showing progress, or ending a frame early, should read:
-        text past this point has had no word event, so it still belongs to what
-        is left to say even when :attr:`llm_pos` has already credited it to a
-        word.
+        This can trail :attr:`llm_pos` when a word was credited with punctuation
+        no provider event reported.
         """
         return self._llm_spoken_pos
 
@@ -1045,6 +1043,18 @@ class TextSegmentMap:
 
         seg = self._segments[self._seg_idx]
         return seg.is_transformed and self._seg_raw_pos > 0
+
+    @property
+    def remaining_has_transformed_segment(self) -> bool:
+        """True when any rewritten segment overlaps the unspoken TTS text."""
+        start = self.raw_pos
+        pos = 0
+        for seg in self._segments:
+            end = pos + len(seg.tts)
+            if end > start and seg.is_transformed:
+                return True
+            pos = end
+        return False
 
     @property
     def last_completed_segment(self) -> TextSegment | None:

@@ -2989,8 +2989,9 @@ class TestPunctuationReportedOnItsOwn(unittest.TestCase):
     """A provider that reports a punctuation mark as its own word-timestamp entry.
 
     ``advance_by_alnums`` pulls trailing punctuation along with the word before it,
-    so by the time the mark's own event arrives the llm cursor is already past it.
-    Both cursors have to stay in step, and the unspoken tail has to keep the mark.
+    so the attributed cursor can be past a mark before the mark's own event arrives.
+    The TTS remainder keeps that unspoken mark, while the LLM remainder does not
+    record it a second time.
     """
 
     def test_mark_alone_leaves_the_two_remainders_in_step(self):
@@ -3011,19 +3012,14 @@ class TestPunctuationReportedOnItsOwn(unittest.TestCase):
         self.assertEqual(tracker.get_remaining_tts_text(), "and more text")
         self.assertEqual(tracker.get_remaining_llm_text(), "and more text")
 
-    def test_a_mark_not_yet_reported_stays_in_the_remainder(self):
-        """Ending the frame before the mark arrives: it is still unspoken.
-
-        Nothing has reported the mark, so it belongs to the text left to say. This
-        is the case a caller ending a frame early emits, and dropping it there
-        loses the tail from the conversation context.
-        """
+    def test_a_mark_not_yet_reported_is_not_recorded_twice(self):
+        """The mark is unspoken but was already attributed to the previous word."""
         text = "It is done. Next sentence here."
         tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
         for word in ("It", "is", "done"):
             tracker.add_word_and_check_complete(word)
         self.assertEqual(tracker.get_remaining_tts_text(), ". Next sentence here.")
-        self.assertEqual(tracker.get_remaining_llm_text(), ". Next sentence here.")
+        self.assertEqual(tracker.get_remaining_llm_text(), "Next sentence here.")
 
     def test_a_mark_the_provider_spoke_is_not_owed_back(self):
         """The usual case: the mark arrives inside its word, so nothing is outstanding.
@@ -3063,24 +3059,20 @@ class TestPunctuationReportedOnItsOwn(unittest.TestCase):
         ):
             tracker.add_word_and_check_complete(word)
         self.assertEqual(tracker.get_remaining_tts_text(), "、ゼロ")
-        self.assertEqual(tracker.get_remaining_llm_text(), "、ゼロ")
+        self.assertEqual(tracker.get_remaining_llm_text(), "ゼロ")
         self.assertEqual(
             tracker.get_accumulated_llm_text(),
             "確認いたします…ゼロ、きゅう",
         )
 
     def test_cjk_frame_ended_before_the_mark_is_reported(self):
-        """The provider stops reporting mid-turn, one character short of the mark.
-
-        The mark travelled with the character before it, so without it being owed
-        back the tail loses it and force_complete discards the whole tail.
-        """
+        """The unspoken mark stays in the TTS tail without repeated context text."""
         text = "確認いたします…ゼロ、いち"
         tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
         for word in ("確", "認", "い", "た", "し", "ま", "す"):
             tracker.add_word_and_check_complete(word)
         self.assertEqual(tracker.get_remaining_tts_text(), "…ゼロ、いち")
-        self.assertEqual(tracker.get_remaining_llm_text(), "…ゼロ、いち")
+        self.assertEqual(tracker.get_remaining_llm_text(), "ゼロ、いち")
 
 
 class TestWordCompletionTrackerMarkdownTokens(unittest.TestCase):
