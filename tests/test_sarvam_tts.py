@@ -5,6 +5,7 @@
 #
 
 import json
+import re
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
@@ -291,3 +292,65 @@ async def test_an_error_carries_its_request_id(request_id, expected):
     service.push_error.assert_awaited_once_with(error_msg=expected)
     error_frame = service.append_to_audio_context.await_args.args[1]
     assert error_frame.error == expected
+
+
+def _construct(service_cls, **kwargs):
+    if service_cls is SarvamHttpTTSService:
+        kwargs["aiohttp_session"] = _FakeSession()
+    return service_cls(api_key="test-key", **kwargs)
+
+
+@pytest.mark.parametrize("service_cls", [SarvamTTSService, SarvamHttpTTSService])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("voice", "anushka"),
+        ("language", "hi-IN"),
+        ("pace", 1.5),
+    ],
+)
+def test_settings_fields_cannot_be_constructor_kwargs(service_cls, field, value):
+    """``BaseObject`` drops unknown kwargs, so these would be ignored silently."""
+    with pytest.raises(TypeError, match=rf"{field} must be passed via settings="):
+        _construct(service_cls, **{field: value})
+
+
+@pytest.mark.parametrize("service_cls", [SarvamTTSService, SarvamHttpTTSService])
+@pytest.mark.parametrize(
+    ("kwargs", "names", "canonical"),
+    [
+        ({"speaker": "anushka"}, "speaker", "voice=..."),
+        ({"target_language_code": "hi-IN"}, "target_language_code", "language=..."),
+        (
+            {"speaker": "anushka", "target_language_code": "hi-IN"},
+            "speaker, target_language_code",
+            "voice=..., language=...",
+        ),
+    ],
+)
+def test_settings_aliases_cannot_be_constructor_kwargs(service_cls, kwargs, names, canonical):
+    """Sarvam's API names are ``Settings`` aliases, and would be dropped the same way."""
+    expected = (
+        f"{names} must be passed via settings={service_cls.__name__}.Settings({canonical}), "
+        "not as constructor kwargs"
+    )
+    with pytest.raises(TypeError, match=re.escape(expected)):
+        _construct(service_cls, **kwargs)
+
+
+@pytest.mark.parametrize("service_cls", [SarvamTTSService, SarvamHttpTTSService])
+def test_base_class_kwargs_are_still_accepted(service_cls):
+    service = _construct(service_cls, name="my-tts", append_trailing_space=True)
+
+    assert service.name == "my-tts"
+
+
+@pytest.mark.parametrize("service_cls", [SarvamTTSService, SarvamHttpTTSService])
+def test_deprecated_voice_id_and_model_still_apply(service_cls):
+    with pytest.warns(DeprecationWarning) as record:
+        service = _construct(service_cls, voice_id="priya", model=V4_FLASH)
+
+    messages = " ".join(str(warning.message) for warning in record)
+    assert "voice_id" in messages and "model" in messages
+    assert service._settings.voice == "priya"
+    assert service._settings.model == V4_FLASH
