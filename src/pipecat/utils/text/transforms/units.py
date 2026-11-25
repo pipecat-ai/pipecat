@@ -65,7 +65,7 @@ _AMBIGUOUS_UNIT_RE = re.compile(
 
 # Degrees: "25°C", "72 °F", "a 90° turn". The degree sign is not a word, so a TTS
 # engine may skip it or read the scale letter on its own ("twenty-five C").
-_DEGREE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*°(?:\s*([CF])(?![a-zA-Z])|(?![a-zA-Z]))")
+_DEGREE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*°(?:\s*([CF])(?![a-zA-Z])|(?![a-zA-Z\d]))")
 _DEGREE_SCALES = {"C": " Celsius", "F": " Fahrenheit"}
 
 
