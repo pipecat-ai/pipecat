@@ -139,12 +139,7 @@ def test_sarvam_wiki_grounding_does_not_modify_settings_extra():
             model="sarvam-105b", wiki_grounding=True, extra={"extra_body": user_extra_body}
         ),
     )
-    # sarvam-105b's reasoning default travels in extra_body too.
-    assert params["extra_body"] == {
-        "wiki_grounding": True,
-        "user_field": 1,
-        "reasoning_effort": "none",
-    }
+    assert params["extra_body"] == {"wiki_grounding": True, "user_field": 1}
     assert user_extra_body == {"user_field": 1}
 
 
@@ -157,7 +152,7 @@ def test_sarvam_user_extra_body_wins():
             extra={"extra_body": {"wiki_grounding": False}},
         ),
     )
-    assert params["extra_body"] == {"wiki_grounding": False, "reasoning_effort": "none"}
+    assert params["extra_body"] == {"wiki_grounding": False}
 
 
 def test_openrouter_provider_unset_by_default():
