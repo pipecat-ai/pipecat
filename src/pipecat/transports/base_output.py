@@ -918,7 +918,10 @@ class BaseOutputTransport(FrameProcessor):
                 frame: The frame to handle.
             """
             if isinstance(frame, OutputAudioRawFrame):
-                await self._handle_bot_speech(frame)
+                # With a mixer, the bot's speech is handled before its audio is
+                # mixed (see _next_frame()).
+                if not self._mixer:
+                    await self._handle_bot_speech(frame)
             elif isinstance(frame, OutputImageRawFrame):
                 await self._set_video_image(frame)
             elif isinstance(frame, SpriteFrame):
@@ -990,6 +993,10 @@ class BaseOutputTransport(FrameProcessor):
                         await self._filter_audio(frame)
                         self._apply_volume(frame)
                         if isinstance(frame, OutputAudioRawFrame):
+                            # Silence in a speech stream is judged on the bot's
+                            # audio alone: the mixed-in sound is never silent.
+                            if frame.audio:
+                                await self._handle_bot_speech(frame)
                             frame.audio = await mixer.mix(frame.audio)
                             last_frame_time = time.time()
                         yield frame

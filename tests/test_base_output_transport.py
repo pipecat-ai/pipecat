@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
+    SpeechOutputAudioRawFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -59,6 +60,14 @@ class _PassthroughMixer(BaseAudioMixer):
 
     async def mix(self, audio: bytes) -> bytes:
         return audio
+
+
+class _BackgroundSoundMixer(_PassthroughMixer):
+    """Mixer that adds a quiet constant background sound to every sample."""
+
+    async def mix(self, audio: bytes) -> bytes:
+        samples = np.frombuffer(audio, dtype=np.int16).astype(np.int32) + 100
+        return np.clip(samples, -32768, 32767).astype(np.int16).tobytes()
 
 
 class _InvertingFilter(BaseAudioFilter):
@@ -484,6 +493,39 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             # though no full chunk was ever queued for this turn.
             pushed_types = [call.args[0].__class__ for call in transport.push_frame.call_args_list]
             self.assertIn(BotStartedSpeakingFrame, pushed_types)
+            self.assertIn(BotStoppedSpeakingFrame, pushed_types)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_speech_stream_stops_speaking_on_silence_under_mixer_sound(self):
+        """Silence in a speech stream stops the bot speaking even while the
+        mixer plays a background sound over it."""
+        transport = await _make_transport(mixer=_BackgroundSoundMixer())
+        try:
+            sender = transport._media_senders[None]
+            chunk_size = sender.audio_chunk_size
+
+            def speech_frame(audio: bytes) -> SpeechOutputAudioRawFrame:
+                return SpeechOutputAudioRawFrame(
+                    audio=audio, sample_rate=sender.sample_rate, num_channels=1
+                )
+
+            await transport.process_frame(
+                speech_frame(b"\x00\x10" * (chunk_size // 2)), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.1)
+            self.assertTrue(sender._bot_speaking)
+
+            # Silence lasting longer than BOT_VAD_STOP_SECS.
+            for _ in range(3):
+                await asyncio.sleep(0.2)
+                await transport.process_frame(
+                    speech_frame(b"\x00" * chunk_size), FrameDirection.DOWNSTREAM
+                )
+            await asyncio.sleep(0.1)
+
+            self.assertFalse(sender._bot_speaking)
+            pushed_types = [call.args[0].__class__ for call in transport.push_frame.call_args_list]
             self.assertIn(BotStoppedSpeakingFrame, pushed_types)
         finally:
             await transport.cancel(CancelFrame())
