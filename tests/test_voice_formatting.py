@@ -365,6 +365,10 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_units("72 °F", "*"), "72 degrees Fahrenheit")
         self.assertEqual(await expand_units("1°C warmer", "*"), "1 degree Celsius warmer")
         self.assertEqual(await expand_units("a 90° turn", "*"), "a 90 degrees turn")
+        self.assertEqual(await expand_units("1.0°C", "*"), "1.0 degrees Celsius")
+        self.assertEqual(await expand_units("-1°C", "*"), "-1 degree Celsius")
+        self.assertEqual(await expand_units("-5°C", "*"), "-5 degrees Celsius")
+        self.assertEqual(await expand_units("72 ° F", "*"), "72 degrees Fahrenheit")
         # A degree sign directly followed by another word is left alone.
         self.assertEqual(await expand_units("40°N", "*"), "40°N")
         # Degrees-minutes coordinates are left alone.
