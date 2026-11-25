@@ -616,6 +616,53 @@ class TestRunnerRun(unittest.TestCase):
         self.assertIn("   → Open: http://localhost:7860\n", output)
         self.assertNotIn("/daily in your browser", output)
 
+    def test_startup_message_loopback_host_prints_no_mobile_link(self):
+        args = argparse.Namespace(
+            transport="webrtc", host="127.0.0.1", port=7860, esp32=False, whatsapp=False
+        )
+
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            output = self._capture_startup_message(args)
+
+        self.assertNotIn("Mobile", output)
+
+    def test_startup_message_network_host_prints_mobile_link_and_qr(self):
+        args = argparse.Namespace(
+            transport="webrtc", host="192.168.1.20", port=7860, esp32=False, whatsapp=False
+        )
+
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            output = self._capture_startup_message(args)
+
+        self.assertIn(
+            "   → Mobile: pipecat://connect?url=http://192.168.1.20:7860&transport=smallwebrtc\n",
+            output,
+        )
+        self.assertIn("▄", output)
+
+    def test_startup_message_all_interfaces_uses_lan_address(self):
+        args = argparse.Namespace(
+            transport=None, host="0.0.0.0", port=7860, ws_auth="none", allowed_origins=[]
+        )
+
+        with (
+            patch("pipecat.runner.run._transport_routes_enabled", return_value=True),
+            patch("pipecat.runner.run.socket.socket") as socket_factory,
+        ):
+            sock = socket_factory.return_value.__enter__.return_value
+            sock.getsockname.return_value = ("10.0.0.5", 50000)
+            output = self._capture_startup_message(args)
+
+        self.assertIn("   → Mobile: pipecat://connect?url=http://10.0.0.5:7860\n", output)
+
+    def test_startup_message_daily_mobile_link_names_daily(self):
+        args = argparse.Namespace(transport="daily", host="192.168.1.20", port=7860, dialin=False)
+
+        with patch("pipecat.runner.run._transport_routes_enabled", return_value=True):
+            output = self._capture_startup_message(args)
+
+        self.assertIn("&transport=daily\n", output)
+
     def test_startup_message_telephony_keeps_provider_endpoint_details(self):
         args = argparse.Namespace(
             transport="twilio",
