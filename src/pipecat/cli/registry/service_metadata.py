@@ -1038,6 +1038,15 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="plivo_tts",
+            label="Plivo",
+            package="pipecat-ai[plivo]",
+            class_name=["PlivoTTSService"],
+            env_prefix="PLIVO",
+            include_params=["auth_id", "auth_token"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
             value="pockettts_tts",
             label="Pocket TTS",
             package="pipecat-ai[pocket-tts]",

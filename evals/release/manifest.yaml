@@ -146,6 +146,10 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-piper.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-plivo.py
+    scenarios: [scripted/capital_question]
+  - bot: voice/voice-plivo-http.py
+    scenarios: [scripted/capital_question]
   - bot: voice/voice-resemble.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-rime.py
