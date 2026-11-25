@@ -384,6 +384,11 @@ class _BaseOpenAIResponsesLLMService(LLMService[OpenAIResponsesLLMAdapter]):
             default_headers=default_headers,
         )
 
+    async def cleanup(self):
+        """Release service resources and close the OpenAI client."""
+        await super().cleanup()
+        await self._client.close()
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
         return True
