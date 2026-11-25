@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -299,15 +299,15 @@ wheels = [
 
 [[package]]
 name = "aioice"
-version = "0.13.0"
+version = "0.15.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dnspython" },
     { name = "ifaddr" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4a/16/fd4e7d1ccab77b6ae655bf6e796161586eeab18f5047c584bbedea846d66/aioice-0.13.0.tar.gz", hash = "sha256:02c2dee812f1a68602689a444bd5125a144b6ee43bca74229a1e0f7842d1897c", size = 68714, upload-time = "2026-11-05T17:01:35.933Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/6f/84961dbeecaed4f298c762556748303da302b5823dc3cdcf2434ba88c6f5/aioice-0.15.1.tar.gz", hash = "sha256:c585e0cfa66646a617153d5f111814a4ec47dfbe1ccfa4d7c1f6158866dee78f", size = 72498, upload-time = "2026-11-25T09:30:21.579Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/06/64a79f0b7d730fc10b35fe31a396816030c0ab635be221c6c8587b00fc7f/aioice-0.13.0-py3-none-any.whl", hash = "sha256:15937b43f5f7a3587148049f1c93ff95fe4add1b7e0f5931eeec6408bc188d06", size = 29732, upload-time = "2026-11-05T17:01:34.897Z" },
+    { url = "https://files.pythonhosted.org/packages/af/37/66a9f0298c5e4012bc5f71ef05b541d3d33eed76999db4e78fc7507f5282/aioice-0.15.1-py3-none-any.whl", hash = "sha256:f1830fde71051f2cd91405c8a306a263be55967c65da248495380f53c56aca55", size = 31023, upload-time = "2026-11-25T09:30:20.337Z" },
 ]
 
 [[package]]
@@ -321,7 +321,7 @@ wheels = [
 
 [[package]]
 name = "aiortc"
-version = "1.16.0"
+version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aioice" },
@@ -334,9 +334,9 @@ dependencies = [
     { name = "pylibsrtp" },
     { name = "pyopenssl" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d6/19/4deceaea278a70c57c9b045ecc3a5a85ce37d3e6679195b1d2161694d577/aiortc-1.16.0.tar.gz", hash = "sha256:892a1d22ec500a41c6a2377a372db575929d9e9f614e9a2276b145cf40924798", size = 1196535, upload-time = "2026-11-06T09:10:23.343Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/04/f0/7ea7fd109ddb1fd347c071ebb1e626f92adf24999231b5d8019ea3bccea8/aiortc-1.17.0.tar.gz", hash = "sha256:69c14be1699839b36ab8d8910b155cd95882f31e94b52edfb293cd827164df54", size = 1235508, upload-time = "2026-11-25T17:19:30.555Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/47/1c/3d2560721f57d6adfdfcde2f24504a6b77b9bcc7e8ea6946c80c26bd8806/aiortc-1.16.0-py3-none-any.whl", hash = "sha256:084844ba0542fc9f9a41d135e2c718c2122746e2d70e62974435de9b98ec92b2", size = 97125, upload-time = "2026-11-06T09:10:21.718Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/e8/023c8d0258ab3e59150c356050bd570b36874433b129405136c04e512840/aiortc-1.17.0-py3-none-any.whl", hash = "sha256:b9c24008d90313de290a9876e11940f5c44bb29ae9cd256b32afa88f149bdb5a", size = 110993, upload-time = "2026-11-25T17:19:29.057Z" },
 ]
 
 [[package]]
@@ -932,7 +932,7 @@ name = "build"
 version = "1.4.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "os_name == 'nt'" },
+    { name = "colorama", marker = "(python_full_version != '3.13.*' and os_name == 'nt') or (os_name == 'nt' and sys_platform != 'linux')" },
     { name = "packaging" },
     { name = "pyproject-hooks" },
 ]
@@ -6374,7 +6374,7 @@ requires-dist = [
     { name = "aiobotocore", marker = "extra == 'aws'", specifier = ">=3,<4" },
     { name = "aiofiles", specifier = ">=24.1.0,<27" },
     { name = "aiohttp", specifier = ">=3.14.4,<4" },
-    { name = "aiortc", marker = "extra == 'webrtc'", specifier = ">=1.14.0,<2" },
+    { name = "aiortc", marker = "extra == 'webrtc'", specifier = ">=1.17.0,<2" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.49.0,<2" },
     { name = "asyncpg", marker = "extra == 'pgmq'", specifier = ">=0.30.0" },
     { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = ">=0.6.0,<0.10" },
