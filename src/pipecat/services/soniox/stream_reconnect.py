@@ -16,6 +16,13 @@ from collections import deque
 from collections.abc import Callable
 from typing import Any
 
+# How long Soniox keeps a dropped stream open for a reconnect (its default idle timeout).
+RECONNECT_WINDOW_S = 20.0
+
+# Soniox recommends a quarter of the reconnect window for each of these.
+PING_INTERVAL_S = RECONNECT_WINDOW_S / 4
+RECONNECT_TIMEOUT_S = RECONNECT_WINDOW_S / 4
+
 ClientMessage = str | bytes
 
 
@@ -33,12 +40,19 @@ class SonioxReconnectTracker:
     acknowledges them. This class does no I/O.
     """
 
-    def __init__(self, *, clock: Callable[[], float] = time.monotonic):
+    def __init__(
+        self,
+        *,
+        reconnect_window: float = RECONNECT_WINDOW_S,
+        clock: Callable[[], float] = time.monotonic,
+    ):
         """Initialize the tracker.
 
         Args:
+            reconnect_window: Seconds Soniox keeps a dropped stream open.
             clock: Monotonic time source, in seconds.
         """
+        self._reconnect_window = reconnect_window
         self._clock = clock
         self._reconnect_url: str | None = None
         self._reconnect_token: str | None = None
@@ -48,6 +62,8 @@ class SonioxReconnectTracker:
         # Ping id -> (sent count when pinged, time pinged).
         self._pending_pings: dict[int, tuple[int, float]] = {}
         self._ping_ids = itertools.count(1)
+        self._disconnected_at: float | None = None
+        self._disabled = False
 
     @property
     def reconnect_url(self) -> str | None:
@@ -56,15 +72,19 @@ class SonioxReconnectTracker:
 
     @property
     def can_reconnect(self) -> bool:
-        """Whether Soniox offered a reconnect."""
-        return self._reconnect_token is not None
+        """Whether Soniox offered a reconnect and the reconnect window is still open."""
+        self._disable_if_window_expired()
+        return not self._disabled and self._reconnect_token is not None
 
-    def track_sent(self, message: ClientMessage) -> None:
+    def track_sent(self, message: ClientMessage):
         """Number a sent message and keep it until Soniox acknowledges it.
 
         Args:
             message: A client message other than a ping.
         """
+        self._disable_if_window_expired()
+        if self._disabled:
+            return
         self._sent_count += 1
         self._unacknowledged.append((self._sent_count, message))
 
@@ -99,6 +119,9 @@ class SonioxReconnectTracker:
             return True
         if (seq := content.get("seq")) is not None:
             self._last_seq = seq
+        elif self._reconnect_token is None and "error_code" not in content:
+            # A response before any reconnect offer: reconnect is unavailable.
+            self._disable()
         return False
 
     def create_ping(self) -> str:
@@ -122,6 +145,11 @@ class SonioxReconnectTracker:
         """
         now = self._clock()
         return any(now - pinged_at >= timeout for _, pinged_at in self._pending_pings.values())
+
+    def mark_disconnected(self):
+        """Start the reconnect window, unless already started."""
+        if self._disconnected_at is None:
+            self._disconnected_at = self._clock()
 
     def create_reconnect_request(self) -> str:
         """Create the first message for a reconnect connection.
@@ -155,15 +183,14 @@ class SonioxReconnectTracker:
                 raise SonioxReconnectRefusedError(error)
             raise ConnectionError(f"Soniox reconnect failed ({error})")
         self._reconnect_token = reply["reconnect_token"]
+        self._disconnected_at = None
         # Soniox never sends pongs lost with the old connection.
         self._pending_pings.clear()
         received_count = reply["last_request"]
         self._acknowledge(received_count)
         return received_count
 
-    def _handle_pong(self, ping_id: int | None) -> None:
-        if ping_id is None:
-            return
+    def _handle_pong(self, ping_id: Any):
         ping = self._pending_pings.pop(ping_id, None)
         if not ping:
             return
@@ -176,6 +203,18 @@ class SonioxReconnectTracker:
         }
         self._acknowledge(sent_count)
 
-    def _acknowledge(self, count: int) -> None:
+    def _acknowledge(self, count: int):
         while self._unacknowledged and self._unacknowledged[0][0] <= count:
             self._unacknowledged.popleft()
+
+    def _disable_if_window_expired(self):
+        if (
+            self._disconnected_at is not None
+            and self._clock() - self._disconnected_at > self._reconnect_window
+        ):
+            self._disable()
+
+    def _disable(self):
+        self._disabled = True
+        self._unacknowledged.clear()
+        self._pending_pings.clear()

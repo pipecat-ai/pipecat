@@ -37,12 +37,13 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.services.settings import STTSettings
 from pipecat.services.soniox.errors import classify_error_code
 from pipecat.services.soniox.stream_reconnect import (
+    PING_INTERVAL_S,
+    RECONNECT_TIMEOUT_S,
     SonioxReconnectRefusedError,
     SonioxReconnectTracker,
 )
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
-from pipecat.services.websocket_service import ReportErrorCallback
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated
@@ -65,14 +66,6 @@ _VERSIONED_MODEL = re.compile(r"stt-rt-v(\d+)")
 
 # The first real-time model version that accepts agent text input.
 _AGENT_TEXT_INPUT_MIN_VERSION = 6
-
-# Soniox's default idle timeout also bounds how long a dropped stream can resume.
-_RECONNECT_WINDOW_S = 20.0
-_PING_INTERVAL_S = _RECONNECT_WINDOW_S / 4
-_PONG_TIMEOUT_S = _PING_INTERVAL_S
-_RECONNECT_ATTEMPT_TIMEOUT_S = _RECONNECT_WINDOW_S / 4
-_RECONNECT_RETRY_DELAY_S = 1.0
-_STREAM_START_TIMEOUT_S = 5.0
 
 
 class SonioxContextGeneralItem(BaseModel):
@@ -291,8 +284,8 @@ class SonioxSTTSettings(STTSettings):
             TTS service that reports word timestamps.
         enable_reconnect: Whether to reconnect a dropped connection to the same
             Soniox stream, keeping the transcript and the audio sent around the
-            drop. Soniox bills for the time it holds a dropped stream for
-            reconnect, up to 20 seconds. Defaults to False.
+            drop. Soniox bills the up to 20 s a dropped stream waits for the
+            reconnect. Defaults to False.
         speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
             speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
             speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
@@ -496,7 +489,6 @@ class SonioxSTTService(WebsocketSTTService):
         # Set while `enable_reconnect` is on and the stream is live.
         self._reconnect_tracker: SonioxReconnectTracker | None = None
         self._ping_task: asyncio.Task | None = None
-        self._connection_replaced = False
 
         if is_given(lead := default_settings.agent_text_lead_ms) and lead < 0:
             raise ValueError(f"agent_text_lead_ms cannot be negative, but got {lead}")
@@ -638,7 +630,7 @@ class SonioxSTTService(WebsocketSTTService):
 
         yield None
 
-    async def _send(self, message: str | bytes, label: str = "send") -> None:
+    async def _send(self, message: str | bytes, label: str = "send"):
         """Send a client message, tracking it for reconnect when enabled.
 
         Every client message except a ping goes through here. A tracked message
@@ -881,18 +873,32 @@ class SonioxSTTService(WebsocketSTTService):
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._api_key}"}
 
-    async def _connect_websocket(self) -> None:
-        """Open a websocket and start a new Soniox stream."""
-        websocket: ClientConnection | None = None
+    async def _connect_websocket(self):
+        """Connect to Soniox, reconnecting to the current stream when possible."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
+            if self._reconnect_tracker and self._reconnect_tracker.can_reconnect:
+                try:
+                    await self._reconnect_stream(self._reconnect_tracker)
+                    await self._call_event_handler("on_connected")
+                    return
+                except SonioxReconnectRefusedError as e:
+                    logger.warning(
+                        f"{self}: Soniox refused the reconnect ({e}), starting a new stream"
+                    )
+                    self._reconnect_tracker = None
+
             logger.debug("Connecting to Soniox STT")
 
-            websocket = await self._websocket_connect(
+            self._websocket = await self._websocket_connect(
                 self._url, additional_headers=self._auth_headers()
             )
+
+            if not self._websocket:
+                await self.push_error(error_msg=f"Unable to connect to Soniox API at {self._url}")
+                raise Exception(f"Unable to connect to Soniox API at {self._url}")
 
             s = self._settings
 
@@ -923,12 +929,15 @@ class SonioxSTTService(WebsocketSTTService):
             # Left out unless enabled: older models reject the field.
             if self._agent_text_input_enabled():
                 config["enable_agent_text_input"] = True
-            if s.enable_reconnect:
+            if self._settings.enable_reconnect:
                 config["enable_reconnect"] = True
 
-            await websocket.send(json.dumps(config))
+            # Send the configuration message.
+            await self._websocket.send(json.dumps(config))
             # Soniox counts client messages from the one after the config.
-            self._reconnect_tracker = SonioxReconnectTracker() if s.enable_reconnect else None
+            self._reconnect_tracker = (
+                SonioxReconnectTracker() if self._settings.enable_reconnect else None
+            )
             # Final tokens from the old stream do not belong to the new one.
             self._final_transcription_buffer = []
             # The new session has no open segment, and words timed against the
@@ -936,85 +945,40 @@ class SonioxSTTService(WebsocketSTTService):
             # where they can cancel the caller's own speech.
             self._agent_text_segment_open = False
             self._drop_agent_text_words()
-            self._connection_replaced = False
-            self._websocket = websocket
-            websocket = None
 
             await self._call_event_handler("on_connected")
             logger.debug("Connected to Soniox STT")
         except Exception as e:
             self._websocket = None
-            self._reconnect_tracker = None
             await self.push_error(error_msg=f"Unable to connect to Soniox: {e}", exception=e)
-        finally:
-            if websocket is not None:
-                websocket.transport.abort()
 
-    async def _disconnect_websocket(self) -> None:
-        """Close the websocket and discard the stream state."""
-        websocket = self._websocket
+    async def _disconnect_websocket(self):
+        """Close the websocket connection to Soniox.
+
+        A lost connection that can be reconnected is aborted instead, since a
+        close with status 1000 makes Soniox end the stream.
+        """
+        keep_stream = (
+            bool(self._reconnect_tracker and self._reconnect_tracker.can_reconnect)
+            and not self._disconnecting
+        )
         try:
-            if websocket:
+            if self._websocket and not keep_stream:
                 logger.debug("Disconnecting from Soniox STT")
-                await websocket.close()
+                await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
+            # Clearing the connection aborts it if still open.
             self._websocket = None
-            self._reconnect_tracker = None
-            self._drop_agent_text_words()
-            if websocket is not None:
-                await self._call_event_handler("on_disconnected")
+            if keep_stream and self._reconnect_tracker:
+                self._reconnect_tracker.mark_disconnected()
+            else:
+                self._reconnect_tracker = None
+                self._drop_agent_text_words()
+            await self._call_event_handler("on_disconnected")
 
-    async def _maybe_try_reconnect(
-        self,
-        error_message: str,
-        report_error: ReportErrorCallback,
-        error: Exception | None = None,
-    ) -> bool:
-        """Retry a dropped connection while this service still owns the stream."""
-        if self._connection_replaced:
-            return False
-
-        reconnected = await super()._maybe_try_reconnect(error_message, report_error, error)
-        if not reconnected:
-            self._reconnect_tracker = None
-        return reconnected
-
-    async def _reconnect_websocket(self, attempt_number: int) -> bool:
-        """Try to resume the Soniox stream before opening a fresh one."""
-        tracker = self._reconnect_tracker
-        if tracker and tracker.can_reconnect:
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + _RECONNECT_WINDOW_S
-
-            # Clearing the socket aborts it. A normal close would end the stream.
-            if self._websocket is not None:
-                self._websocket = None
-                await self._call_event_handler("on_disconnected")
-
-            while (remaining := deadline - loop.time()) > 0:
-                try:
-                    async with asyncio.timeout(min(_RECONNECT_ATTEMPT_TIMEOUT_S, remaining)):
-                        await self._reconnect_stream(tracker)
-                except SonioxReconnectRefusedError as e:
-                    logger.warning(f"{self}: Soniox refused the reconnect ({e})")
-                    break
-                except Exception as e:
-                    logger.debug(f"{self}: Soniox reconnect attempt failed: {e!r}")
-                    remaining = deadline - loop.time()
-                    if remaining > 0:
-                        await asyncio.sleep(min(_RECONNECT_RETRY_DELAY_S, remaining))
-                else:
-                    await self._call_event_handler("on_connected")
-                    return True
-
-            logger.warning(f"{self}: Soniox stream could not be resumed, starting a new stream")
-            self._reconnect_tracker = None
-
-        return await super()._reconnect_websocket(attempt_number)
-
-    async def _reconnect_stream(self, tracker: SonioxReconnectTracker) -> None:
+    async def _reconnect_stream(self, tracker: SonioxReconnectTracker):
         """Reconnect to the current Soniox stream on a new connection.
 
         Messages Soniox is missing are resent before the new connection is used,
@@ -1027,40 +991,40 @@ class SonioxSTTService(WebsocketSTTService):
             SonioxReconnectRefusedError: If Soniox refused the reconnect.
             ConnectionError: If the reconnect failed and can be retried.
         """
-        reconnect_url = tracker.reconnect_url
-        assert reconnect_url
+        assert tracker.reconnect_url
         logger.debug(f"{self}: reconnecting to the Soniox stream")
         websocket: ClientConnection | None = None
         try:
-            websocket = await self._websocket_connect(
-                reconnect_url, additional_headers=self._auth_headers()
-            )
-            await websocket.send(tracker.create_reconnect_request())
-            resent_count = tracker.handle_reconnect_reply(json.loads(await websocket.recv()))
+            async with asyncio.timeout(RECONNECT_TIMEOUT_S):
+                websocket = await self._websocket_connect(
+                    tracker.reconnect_url, additional_headers=self._auth_headers()
+                )
+                await websocket.send(tracker.create_reconnect_request())
+                resent_count = tracker.handle_reconnect_reply(json.loads(await websocket.recv()))
             while missing := tracker.unacknowledged_after(resent_count):
                 for resent_count, message in missing:
                     await websocket.send(message)
-            self._websocket = websocket
-            websocket = None
-        finally:
-            # A failed attempt may already have taken over the stream.
-            if websocket is not None:
+        except BaseException:
+            # Abort rather than close: a close with status 1000 ends the stream.
+            if websocket:
                 websocket.transport.abort()
+            raise
+        self._websocket = websocket
         logger.debug(f"{self}: reconnected to the Soniox stream")
 
-    async def _ping_task_handler(self) -> None:
+    async def _ping_task_handler(self):
         """Ping Soniox periodically and abort the connection when a pong is late.
 
         The receive loop then reconnects to the stream.
         """
         while True:
-            await asyncio.sleep(_PING_INTERVAL_S)
+            await asyncio.sleep(PING_INTERVAL_S)
             tracker, websocket = self._reconnect_tracker, self._websocket
             if not (
                 tracker and tracker.can_reconnect and websocket and websocket.state is State.OPEN
             ):
                 continue
-            if tracker.is_pong_overdue(_PONG_TIMEOUT_S):
+            if tracker.is_pong_overdue(RECONNECT_TIMEOUT_S):
                 logger.warning(f"{self}: Soniox pong overdue, reconnecting")
                 websocket.transport.abort()
                 continue
@@ -1082,15 +1046,15 @@ class SonioxSTTService(WebsocketSTTService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _receive_messages(self) -> None:
-        """Receive Soniox messages, bounding the wait for a fresh stream to start."""
+    async def _receive_messages(self):
+        """Receive and process websocket messages.
+
+        Continuously processes messages from the websocket connection.
+        """
         # Final tokens wait in `_final_transcription_buffer` for the endpoint,
         # including across a reconnect.
-        messages = aiter(self._get_websocket())
-        confirmed = asyncio.Event()
-        finished = False
 
-        async def send_endpoint_transcript() -> None:
+        async def send_endpoint_transcript():
             if self._final_transcription_buffer:
                 tokens = self._final_transcription_buffer
                 text = "".join(map(lambda token: token["text"], tokens))
@@ -1110,37 +1074,24 @@ class SonioxSTTService(WebsocketSTTService):
                 await self._handle_transcription(text, is_final=True, language=language)
                 self._final_transcription_buffer = []
 
-        async def finalize_turn() -> None:
+        async def finalize_turn():
             await send_endpoint_transcript()
             await self._user_turn_stopped()
 
-        async def handle_message(message: str | bytes) -> None:
-            nonlocal finished
+        async for message in self._get_websocket():
             try:
                 content = json.loads(message)
 
+                if self._reconnect_tracker and self._reconnect_tracker.handle_server_message(
+                    content
+                ):
+                    continue
+
                 if content.get("error_type") == "connection_replaced":
                     logger.debug(f"{self}: connection replaced by a reconnect")
-                    self._connection_replaced = True
-                    self._reconnect_tracker = None
-                    self._websocket = None
-                    self._drop_agent_text_words()
-                    finished = True
-                    confirmed.set()
-                    await self._call_event_handler("on_disconnected")
-                    return
-
-                tracker = self._reconnect_tracker
-                if tracker and tracker.handle_server_message(content):
-                    if tracker.can_reconnect:
-                        confirmed.set()
-                    return
+                    continue
 
                 tokens = content["tokens"]
-                if tracker and not tracker.can_reconnect:
-                    # The offer precedes the first transcription response.
-                    self._reconnect_tracker = None
-                confirmed.set()
 
                 if tokens:
                     if len(tokens) == 1 and tokens[0]["text"] == FINALIZED_TOKEN:
@@ -1201,32 +1152,19 @@ class SonioxSTTService(WebsocketSTTService):
                         category=classify_error_code(error_code),
                     )
 
-                if content.get("finished"):
-                    finished = True
+                finished = content.get("finished")
+                if finished:
                     self._reconnect_tracker = None
                     # When finished, still send the final transcript (if any remaining
                     # in the buffer) and close any open user turn.
                     await finalize_turn()
                     logger.debug("Transcription finished.")
+                    return
 
             except json.JSONDecodeError:
                 logger.warning(f"Received non-JSON message: {message}")
             except Exception as e:
                 logger.warning(f"Error processing message: {e}")
-
-        tracker = self._reconnect_tracker
-        if tracker and not tracker.can_reconnect:
-            if not await self._receive_until_confirmed(
-                messages, confirmed, handle_message, _STREAM_START_TIMEOUT_S
-            ):
-                return
-            if finished:
-                return
-
-        async for message in messages:
-            await handle_message(message)
-            if finished:
-                return
 
     async def _send_keepalive(self, silence: bytes):
         """Send a Soniox protocol-level keepalive message.
