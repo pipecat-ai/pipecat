@@ -138,6 +138,17 @@ def is_end_token(token: dict) -> bool:
     return token["text"] == END_TOKEN or token["text"] == FINALIZED_TOKEN
 
 
+def _answers_finalize(tokens: list[dict]) -> bool:
+    """Whether tokens starting at an end token are Soniox's answer to a finalize.
+
+    Soniox answers with ``<fin>``, alone or right after the ``<end>`` it closes
+    the same text with.
+    """
+    return all(is_end_token(token) for token in tokens) and any(
+        token["text"] == FINALIZED_TOKEN for token in tokens
+    )
+
+
 def language_to_soniox_language(language: Language) -> str:
     """Convert a Pipecat Language to a Soniox language code.
 
@@ -643,6 +654,8 @@ class SonioxSTTService(WebsocketSTTService):
         elif isinstance(frame, VADUserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
             # Send finalize message to Soniox so we get the final tokens asap.
             if self._websocket and self._websocket.state is State.OPEN:
+                # Soniox confirms it with a <fin> token.
+                self.request_finalize()
                 await self._websocket.send(FINALIZE_MESSAGE)
                 logger.debug(f"Triggered finalize event on: {frame.name=}, {direction=}")
 
@@ -947,13 +960,22 @@ class SonioxSTTService(WebsocketSTTService):
                 # Report usage before the transcription frame so tracing can
                 # attach it to the STT span the frame closes.
                 await self.emit_stt_usage_metrics()
-                # Soniox only pushes TranscriptionFrame when an end token is received,
-                # so every TranscriptionFrame is inherently finalized
+                # In Soniox turn mode an endpoint ends the utterance. In Pipecat
+                # mode only the answer to a finalize does, which confirm_finalize
+                # marks: an endpoint there can come mid-utterance.
                 await self._push_transcription_runs(
-                    runs, language=language, result=tokens, finalized=True
+                    runs,
+                    language=language,
+                    result=tokens,
+                    finalized=not self._vad_force_turn_endpoint,
                 )
                 await self._handle_transcription(text, is_final=True, language=language)
                 self._final_transcription_buffer = []
+            else:
+                # Endpoint detection already sent the text, before Soniox was asked
+                # to finalize, so its confirmation has no text to carry. Push it on
+                # its own: that finalizes those transcripts for the pipeline.
+                await self._push_transcription_finalized()
 
         async def finalize_turn():
             await send_endpoint_transcript()
@@ -976,7 +998,7 @@ class SonioxSTTService(WebsocketSTTService):
                 # We will only send the final tokens after we get the "endpoint" event.
                 non_final_transcription = []
 
-                for token in tokens:
+                for index, token in enumerate(tokens):
                     if not is_end_token(token):
                         # In Soniox turn-detection mode, the first token of a new
                         # turn opens it (no-op in Pipecat mode or when a VAD
@@ -984,6 +1006,8 @@ class SonioxSTTService(WebsocketSTTService):
                         await self._user_turn_started()
                     if token["is_final"]:
                         if is_end_token(token):
+                            if _answers_finalize(tokens[index:]):
+                                self.confirm_finalize()
                             # Found an endpoint, tokens until here will be sent as transcript,
                             # the rest will be sent as interim tokens (even final tokens).
                             await finalize_turn()
