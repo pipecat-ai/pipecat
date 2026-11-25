@@ -488,22 +488,26 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
     ),
     _server(
         RTVI.UserAudioLevelMessage,
-        "How loud the user's audio is, from 0 (quiet) to 1 (loud), sent regularly while "
-        "the user's audio comes in.",
+        "How loud the user's audio is, from 0 (quiet) to 1 (loud), as the server's pipeline "
+        "receives it, sent regularly while the user's audio comes in.",
         {"value": 0.3},
         enabled_by="user_audio_level_enabled",
         details=(
-            "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting."
+            "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting. "
+            "The server measures the level, so it isn't the level a client measures on the "
+            "device, such as the one its transport reports for the microphone."
         ),
     ),
     _server(
         RTVI.BotAudioLevelMessage,
-        "How loud the bot's audio is, from 0 (quiet) to 1 (loud), sent regularly while "
-        "the bot speaks.",
+        "How loud the bot's audio is, from 0 (quiet) to 1 (loud), as the server's pipeline "
+        "produces it, sent regularly while the bot speaks.",
         {"value": 0.5},
         enabled_by="bot_audio_level_enabled",
         details=(
-            "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting."
+            "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting. "
+            "The server measures the level, so it isn't the level a client measures on the "
+            "device, such as the one its transport reports for the audio it plays."
         ),
     ),
     # -- Server to client: what the user said --
