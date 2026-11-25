@@ -47,7 +47,7 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
-    "plivo": lambda: FastAPIWebsocketParams(
+    "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
