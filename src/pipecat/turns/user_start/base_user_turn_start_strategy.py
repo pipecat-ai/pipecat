@@ -11,7 +11,11 @@ from dataclasses import dataclass
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
-from pipecat.turns.types import ProcessFrameResult
+from pipecat.turns.types import (
+    InterruptionMode,
+    ProcessFrameResult,
+    resolve_interruption_mode,
+)
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 
@@ -29,16 +33,30 @@ class UserTurnStartedParams:
     aggregator.
 
     Parameters:
+        enable_interruptions: Whether the turn may interrupt the bot
+            (``True`` for ``IMMEDIATE`` and ``HOLD``, ``False`` for ``NONE``).
         enable_user_speaking_frames: Whether to emit
             :class:`~pipecat.frames.frames.UserStartedSpeakingFrame` for this
             turn. False when the turn was already announced elsewhere — by a
             shared :class:`~pipecat.turns.user_turn_processor.UserTurnProcessor`,
             or by a service that emits turn frames rather than proposing them.
+        interruption_mode: Configured :class:`InterruptionMode` for the turn.
+            Synchronized with ``enable_interruptions`` when omitted.
 
     """
 
     enable_interruptions: bool
     enable_user_speaking_frames: bool
+    interruption_mode: InterruptionMode | None = None
+
+    def __post_init__(self):
+        """Keep ``enable_interruptions`` and ``interruption_mode`` consistent."""
+        if self.interruption_mode is None:
+            self.interruption_mode = (
+                InterruptionMode.IMMEDIATE if self.enable_interruptions else InterruptionMode.NONE
+            )
+        else:
+            self.enable_interruptions = self.interruption_mode != InterruptionMode.NONE
 
 
 class BaseUserTurnStartStrategy(BaseObject):
@@ -66,15 +84,22 @@ class BaseUserTurnStartStrategy(BaseObject):
     def __init__(
         self,
         *,
-        enable_interruptions: bool = True,
+        interruptions: InterruptionMode | None = None,
+        enable_interruptions: bool | None = None,
         enable_user_speaking_frames: bool | None = None,
         **kwargs,
     ):
         """Initialize the base user turn start strategy.
 
         Args:
-            enable_interruptions: If True, the user aggregator will emit an
-                interruption frame when the user turn starts.
+            interruptions: How starting a user turn handles an in-progress bot
+                response (:attr:`~pipecat.turns.types.InterruptionMode.IMMEDIATE`,
+                :attr:`~pipecat.turns.types.InterruptionMode.NONE`, or
+                :attr:`~pipecat.turns.types.InterruptionMode.HOLD`). Cannot be
+                combined with ``enable_interruptions``.
+            enable_interruptions: Backward-compatible alias for
+                ``interruptions`` (``True`` maps to ``IMMEDIATE``, ``False``
+                maps to ``NONE``).
             enable_user_speaking_frames: Whether to emit
                 :class:`~pipecat.frames.frames.UserStartedSpeakingFrame` when a
                 turn starts, unless :meth:`report_user_turn_started` overrides
@@ -88,7 +113,8 @@ class BaseUserTurnStartStrategy(BaseObject):
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
-        self._enable_interruptions = enable_interruptions
+        self._interruption_mode = resolve_interruption_mode(interruptions, enable_interruptions)
+        self._enable_interruptions = self._interruption_mode != InterruptionMode.NONE
         if enable_user_speaking_frames is not None:
             warn_deprecated(
                 "`BaseUserTurnStartStrategy.enable_user_speaking_frames` is deprecated "
@@ -103,6 +129,11 @@ class BaseUserTurnStartStrategy(BaseObject):
         self._register_event_handler("on_broadcast_frame", sync=True)
         self._register_event_handler("on_user_turn_started", sync=True)
         self._register_event_handler("on_reset_aggregation", sync=True)
+
+    @property
+    def interruption_mode(self) -> InterruptionMode:
+        """The configured interruption mode for this start strategy."""
+        return self._interruption_mode
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -221,6 +252,7 @@ class BaseUserTurnStartStrategy(BaseObject):
         *,
         enable_interruptions: bool | None = None,
         enable_user_speaking_frames: bool | None = None,
+        interruption_mode: InterruptionMode | None = None,
     ):
         """Report that the user started, by firing ``on_user_turn_started``.
 
@@ -236,6 +268,8 @@ class BaseUserTurnStartStrategy(BaseObject):
                 :class:`~pipecat.frames.frames.UserStartedSpeakingFrame` for this
                 turn. Pass False when something else in the pipeline has already
                 emitted it.
+            interruption_mode: Optional :class:`InterruptionMode` override for
+                this turn.
         """
         # Backward compatibility: a custom strategy may still override the
         # deprecated trigger_user_turn_started(), so its override gets the
@@ -251,7 +285,9 @@ class BaseUserTurnStartStrategy(BaseObject):
             finally:
                 _running_override.reset(token)
         else:
-            await self._fire_user_turn_started(enable_interruptions, enable_user_speaking_frames)
+            await self._fire_user_turn_started(
+                enable_interruptions, enable_user_speaking_frames, interruption_mode
+            )
 
     @deprecated(
         "`BaseUserTurnStartStrategy.trigger_user_turn_started` is deprecated since 1.15.0 and "
@@ -291,20 +327,24 @@ class BaseUserTurnStartStrategy(BaseObject):
         await self._call_event_handler("on_reset_aggregation")
 
     async def _fire_user_turn_started(
-        self, enable_interruptions: bool | None, enable_user_speaking_frames: bool | None
+        self,
+        enable_interruptions: bool | None,
+        enable_user_speaking_frames: bool | None,
+        interruption_mode: InterruptionMode | None = None,
     ):
+        if interruption_mode is None and enable_interruptions is None:
+            mode = self._interruption_mode
+        else:
+            mode = resolve_interruption_mode(interruption_mode, enable_interruptions)
         await self._call_event_handler(
             "on_user_turn_started",
             UserTurnStartedParams(
-                enable_interruptions=(
-                    self._enable_interruptions
-                    if enable_interruptions is None
-                    else enable_interruptions
-                ),
+                enable_interruptions=mode != InterruptionMode.NONE,
                 enable_user_speaking_frames=(
                     self._enable_user_speaking_frames
                     if enable_user_speaking_frames is None
                     else enable_user_speaking_frames
                 ),
+                interruption_mode=mode,
             ),
         )

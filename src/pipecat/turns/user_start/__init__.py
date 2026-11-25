@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+from pipecat.turns.types import InterruptionMode
+
 from .base_user_turn_start_strategy import BaseUserTurnStartStrategy, UserTurnStartedParams
 from .external_user_turn_start_strategy import ExternalUserTurnStartStrategy
 from .min_words_user_turn_start_strategy import MinWordsUserTurnStartStrategy
@@ -19,6 +21,7 @@ except ImportError:
 __all__ = [
     "BaseUserTurnStartStrategy",
     "ExternalUserTurnStartStrategy",
+    "InterruptionMode",
     "KrispVivaIPUserTurnStartStrategy",
     "MinWordsUserTurnStartStrategy",
     "TranscriptionUserTurnStartStrategy",

@@ -13,6 +13,7 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     UserStartedSpeakingFrame,
 )
+from pipecat.turns.types import InterruptionMode
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
 
@@ -41,16 +42,28 @@ class ExternalUserTurnStartStrategy(BaseUserTurnStartStrategy):
     instead hands that job back to the pipeline.
     """
 
-    def __init__(self, *, enable_interruptions: bool = True, **kwargs):
+    def __init__(
+        self,
+        *,
+        interruptions: InterruptionMode | None = None,
+        enable_interruptions: bool | None = None,
+        **kwargs,
+    ):
         """Initialize the external user turn start strategy.
 
         Args:
-            enable_interruptions: If True, broadcast an interruption when a
-                proposal opens a turn. Ignored on the adopt path, where the
-                emitter has already broadcast one.
+            interruptions: How starting a user turn handles an in-progress bot
+                response when a proposal opens a turn. Ignored on the adopt
+                path, where the emitter has already broadcast an interruption.
+            enable_interruptions: Backward-compatible alias for
+                ``interruptions``.
             **kwargs: Additional keyword arguments.
         """
-        super().__init__(enable_interruptions=enable_interruptions, **kwargs)
+        super().__init__(
+            interruptions=interruptions,
+            enable_interruptions=enable_interruptions,
+            **kwargs,
+        )
 
     @property
     def resolves_proposed_turn_start_frames(self) -> bool:

@@ -35,6 +35,8 @@ from pipecat.frames.frames import (
     FilterControlFrame,
     Frame,
     InterruptionFrame,
+    InterruptionHoldFrame,
+    InterruptionResumeFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
@@ -383,6 +385,12 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, InterruptionFrame):
             await self.push_frame(frame, direction)
             await self._handle_frame(frame)
+        elif isinstance(frame, InterruptionHoldFrame):
+            await self.push_frame(frame, direction)
+            await self._handle_interruption_hold(frame)
+        elif isinstance(frame, InterruptionResumeFrame):
+            await self.push_frame(frame, direction)
+            await self._handle_interruption_resume(frame)
         elif isinstance(frame, OutputTransportMessageUrgentFrame):
             await self.send_message(frame)
         elif isinstance(frame, OutputDTMFUrgentFrame):
@@ -393,6 +401,22 @@ class BaseOutputTransport(FrameProcessor):
             await self.push_frame(frame, direction)
         else:
             await self._handle_frame(frame)
+
+    async def _handle_interruption_hold(self, frame: InterruptionHoldFrame):
+        """Pause output playback on matching media senders when a hold begins."""
+        if frame.transport_destination is None:
+            for sender in self._media_senders.values():
+                await sender.handle_interruption_hold(frame)
+        elif frame.transport_destination in self._media_senders:
+            await self._media_senders[frame.transport_destination].handle_interruption_hold(frame)
+
+    async def _handle_interruption_resume(self, frame: InterruptionResumeFrame):
+        """Resume output playback on matching media senders when a hold ends."""
+        if frame.transport_destination is None:
+            for sender in self._media_senders.values():
+                await sender.handle_interruption_resume(frame)
+        elif frame.transport_destination in self._media_senders:
+            await self._media_senders[frame.transport_destination].handle_interruption_resume(frame)
 
     async def _handle_frame(self, frame: Frame):
         """Handle frames by routing them to appropriate media senders."""
@@ -515,6 +539,14 @@ class BaseOutputTransport(FrameProcessor):
             # If timestamps are equal, use this count to preserve the insertion order
             self._clock_queue_counter = itertools.count()
 
+            self._held: bool = False
+            self._unheld_event = asyncio.Event()
+            self._unheld_event.set()
+            self._hold_started_event = asyncio.Event()
+            self._hold_started_ns: int = 0
+            self._last_hold_duration_ns: int = 0
+            self._held_audio_frame: Frame | None = None
+
         @property
         def sample_rate(self) -> int:
             """Get the audio sample rate.
@@ -564,6 +596,10 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 frame: The end frame signaling sender shutdown.
             """
+            # End any active hold so audio and clock tasks can drain to EndFrame.
+            self._last_hold_duration_ns = 0
+            self._end_hold()
+
             # Let the sink tasks process the queue until they reach this EndFrame.
             await self._clock_queue.put((float("inf"), next(self._clock_queue_counter), frame))
             await self._audio_queue.put(frame)
@@ -595,6 +631,10 @@ class BaseOutputTransport(FrameProcessor):
         async def cleanup(self):
             """Release media sender resources at teardown."""
             try:
+                self._last_hold_duration_ns = 0
+                self._end_hold()
+                self._held_audio_frame = None
+
                 # Since we are cancelling everything it doesn't matter what task we cancel first.
                 await self._cancel_audio_task()
                 await self._cancel_clock_task()
@@ -606,12 +646,54 @@ class BaseOutputTransport(FrameProcessor):
             finally:
                 self._executor.shutdown(wait=False)
 
+        def _end_hold(self):
+            """Release the hold gate so playback tasks can continue."""
+            self._held = False
+            self._hold_started_event.clear()
+            self._unheld_event.set()
+
+        def _shift_clock_queue(self, offset_ns: int):
+            """Advance presentation timestamps of queued timed frames by ``offset_ns``."""
+            if offset_ns <= 0 or self._clock_queue.empty():
+                return
+            items = []
+            while not self._clock_queue.empty():
+                items.append(self._clock_queue.get_nowait())
+                self._clock_queue.task_done()
+            for timestamp, counter, frame in items:
+                new_timestamp = timestamp if isinstance(frame, EndFrame) else timestamp + offset_ns
+                self._clock_queue.put_nowait((new_timestamp, counter, frame))
+
+        async def handle_interruption_hold(self, _: InterruptionHoldFrame):
+            """Pause output playback while keeping incoming frames buffered."""
+            if self._held:
+                return
+            self._held = True
+            self._hold_started_ns = self._transport.get_clock().get_time()
+            self._last_hold_duration_ns = 0
+            self._unheld_event.clear()
+            self._hold_started_event.set()
+
+        async def handle_interruption_resume(self, _: InterruptionResumeFrame):
+            """Resume output playback paused by :class:`InterruptionHoldFrame`."""
+            if not self._held:
+                return
+            hold_duration_ns = max(
+                0, self._transport.get_clock().get_time() - self._hold_started_ns
+            )
+            self._shift_clock_queue(hold_duration_ns)
+            self._last_hold_duration_ns = hold_duration_ns
+            self._end_hold()
+
         async def handle_interruptions(self, _: InterruptionFrame):
             """Handle interruption events by restarting tasks and clearing buffers.
 
             Args:
                 _: The start interruption frame (unused).
             """
+            if self._held_audio_frame and self._held_audio_frame.interruptible:
+                self._held_audio_frame = None
+
             # Keep the audio task running but drain all interruptible frames, so
             # the frame being written and the pending uninterruptible ones are
             # still delivered. With a mixer, cancelling the task would also stop
@@ -628,6 +710,9 @@ class BaseOutputTransport(FrameProcessor):
             if self._clock_frame and self._clock_frame.interruptible:
                 await self._cancel_clock_task()
 
+            self._last_hold_duration_ns = 0
+            self._end_hold()
+
             await self._cancel_video_task()
 
             # Create tasks.
@@ -637,7 +722,11 @@ class BaseOutputTransport(FrameProcessor):
             # Let's send a bot stopped speaking if we have to. The bot keeps
             # speaking while there's uninterruptible audio still to play (after
             # the reset, everything left in the queue is uninterruptible).
-            if not (self._audio_runs or self._audio_queue.has_frame(OutputAudioRawFrame)):
+            if not (
+                self._audio_runs
+                or self._audio_queue.has_frame(OutputAudioRawFrame)
+                or isinstance(self._held_audio_frame, OutputAudioRawFrame)
+            ):
                 await self._bot_stopped_speaking()
 
         async def handle_audio_frame(self, frame: OutputAudioRawFrame):
@@ -966,17 +1055,32 @@ class BaseOutputTransport(FrameProcessor):
 
             async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
                 while True:
+                    await self._unheld_event.wait()
                     try:
                         frame = await asyncio.wait_for(
                             self._audio_queue.get(), timeout=vad_stop_secs
                         )
-                        await self._filter_audio(frame)
-                        self._apply_volume(frame)
-                        yield frame
-                        self._audio_queue.task_done()
                     except TimeoutError:
                         # Fallback: notify the bot stopped speaking upstream if necessary based on timeout.
-                        await self._bot_stopped_speaking()
+                        if not self._held:
+                            await self._bot_stopped_speaking()
+                        continue
+
+                    if self._held and not isinstance(frame, EndFrame):
+                        self._held_audio_frame = frame
+                        while self._held and self._held_audio_frame is not None:
+                            await self._unheld_event.wait()
+                        held_frame = self._held_audio_frame
+                        self._held_audio_frame = None
+                        if held_frame is None:
+                            self._audio_queue.task_done()
+                            continue
+                        frame = held_frame
+
+                    await self._filter_audio(frame)
+                    self._apply_volume(frame)
+                    yield frame
+                    self._audio_queue.task_done()
 
             async def with_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
                 # Caller below only invokes this when `self._mixer` is set.
@@ -985,6 +1089,16 @@ class BaseOutputTransport(FrameProcessor):
                 last_frame_time = 0
                 silence = b"\x00" * self._audio_chunk_size
                 while True:
+                    if self._held:
+                        last_frame_time = time.time()
+                        frame = OutputAudioRawFrame(
+                            audio=await mixer.mix(silence),
+                            sample_rate=self._sample_rate,
+                            num_channels=self._params.audio_out_channels,
+                        )
+                        yield frame
+                        await asyncio.sleep(0)
+                        continue
                     try:
                         frame = self._audio_queue.get_nowait()
                         await self._filter_audio(frame)
@@ -1219,6 +1333,7 @@ class BaseOutputTransport(FrameProcessor):
             """Main clock/timing task handler for timed frame delivery."""
             running = True
             while running:
+                await self._unheld_event.wait()
                 timestamp, _, frame = await self._clock_queue.get()
 
                 # If we hit an EndFrame, we can finish right away.
@@ -1226,14 +1341,25 @@ class BaseOutputTransport(FrameProcessor):
 
                 # If we have a frame we check it's presentation timestamp. If it
                 # has already passed we process it, otherwise we wait until it's
-                # time to process it.
+                # time to process it (pausing and shifting deadline if held).
                 if running:
                     self._clock_frame = frame
 
-                    current_time = self._transport.get_clock().get_time()
-                    if timestamp > current_time:
+                    while True:
+                        if self._held:
+                            await self._unheld_event.wait()
+                            timestamp += self._last_hold_duration_ns
+                            continue
+                        current_time = self._transport.get_clock().get_time()
+                        if timestamp <= current_time:
+                            break
                         wait_time = nanoseconds_to_seconds(timestamp - current_time)
-                        await asyncio.sleep(wait_time)
+                        try:
+                            await asyncio.wait_for(
+                                self._hold_started_event.wait(), timeout=wait_time
+                            )
+                        except TimeoutError:
+                            break
 
                     # Push frame downstream.
                     await self._transport.push_frame(frame)

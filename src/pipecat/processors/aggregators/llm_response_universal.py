@@ -47,6 +47,8 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
+    InterruptionHoldFrame,
+    InterruptionResumeFrame,
     LLMAssistantPushAggregationFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextAssistantTurnFrame,
@@ -108,7 +110,7 @@ from pipecat.processors.aggregators.llm_context_summarizer import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.turns.empty_user_turn import EmptyUserTurnConfig
-from pipecat.turns.types import UserTurnResumedParams, UserTurnSpeculation
+from pipecat.turns.types import InterruptionMode, UserTurnResumedParams, UserTurnSpeculation
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import (
@@ -834,6 +836,14 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_interrupted_bot = False
         self._consecutive_empty_user_turn_recoveries = 0
 
+        # Whether the current turn's interruption is held pending a transcript
+        # (InterruptionMode.HOLD), and the paired assistant half to flush when
+        # a transcript commits the interruption.
+        self._interruption_held = False
+        self._user_turn_interruption_mode = InterruptionMode.IMMEDIATE
+        self._interruption_commit_pending_flush = False
+        self._paired_assistant_aggregator: LLMAssistantAggregator | None = None
+
         # Whether the user speaking again voided the answer to words already in
         # the context. Without new words, the turn's next inference recovers it
         # like an empty user turn that interrupted the bot.
@@ -1004,6 +1014,10 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, ProposedUserStoppedSpeakingFrame):
             if not self._user_turn_controller.resolves_proposed_turn_stop_frames:
                 await self.push_frame(frame, direction)
+        elif isinstance(frame, InterruptionFrame):
+            if self._interruption_held:
+                self._interruption_held = False
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -1044,6 +1058,13 @@ class LLMUserAggregator(LLMContextAggregator):
                 self._user_turn_answer_voided = False
                 await self._maybe_recover_empty_user_turn(interrupted_bot=True, turn_inference=True)
             return ""
+
+        if self._interruption_held:
+            await self._commit_held_interruption()
+        if self._interruption_commit_pending_flush:
+            self._interruption_commit_pending_flush = False
+            if self._paired_assistant_aggregator is not None:
+                await self._paired_assistant_aggregator._flush_interrupted_turn()
 
         aggregation = self.aggregation_string()
         perception = self._perception
@@ -1469,6 +1490,9 @@ class LLMUserAggregator(LLMContextAggregator):
         if not text.strip():
             return
 
+        if self._interruption_held:
+            await self._commit_held_interruption()
+
         # In realtime mode with a service that doesn't emit user-turn
         # frames (Gemini Live, AWS Nova Sonic, Ultravox),
         # ``_on_user_turn_started`` never fires, so seed
@@ -1549,6 +1573,15 @@ class LLMUserAggregator(LLMContextAggregator):
     async def _on_vad_speech_activity(self, controller):
         await self._queued_broadcast_frame(UserSpeakingFrame)
 
+    async def _commit_held_interruption(self):
+        """Convert a held interruption into a real interruption once speech is recognized."""
+        if not self._interruption_held:
+            return
+        self._interruption_held = False
+        self._user_turn_interrupted_bot = True
+        self._interruption_commit_pending_flush = True
+        await self.broadcast_interruption()
+
     async def _on_user_turn_started(
         self,
         controller: UserTurnController,
@@ -1560,20 +1593,41 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_start_timestamp = time_now_iso8601()
         self._full_user_turn_aggregation = None
         self._user_turn_answer_voided = False
+        self._interruption_commit_pending_flush = False
+
+        mode = (
+            params.interruption_mode
+            if params.interruption_mode is not None
+            else (
+                InterruptionMode.IMMEDIATE if params.enable_interruptions else InterruptionMode.NONE
+            )
+        )
+        self._user_turn_interruption_mode = mode
+
+        was_waiting_for_user = self._user_idle_controller.waiting_for_user
+        has_function_calls = self._user_idle_controller.function_calls_in_progress
+
+        should_hold = (
+            mode == InterruptionMode.HOLD and not has_function_calls and not was_waiting_for_user
+        )
+        should_interrupt_now = mode == InterruptionMode.IMMEDIATE or (
+            mode == InterruptionMode.HOLD and has_function_calls
+        )
+        self._interruption_held = should_hold
 
         # Unless the bot is waiting for the user, it's thinking, speaking or
-        # running a function call, and the interruption below cancels that.
-        self._user_turn_interrupted_bot = (
-            params.enable_interruptions and not self._user_idle_controller.waiting_for_user
-        )
+        # running a function call, and an immediate interruption cancels that.
+        self._user_turn_interrupted_bot = should_interrupt_now and not was_waiting_for_user
 
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
         await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
 
-        if params.enable_interruptions:
+        if should_interrupt_now:
             await self.broadcast_interruption()
+        elif should_hold:
+            await self.broadcast_frame(InterruptionHoldFrame)
 
         await self._call_event_handler("on_user_turn_started", strategy)
 
@@ -1644,6 +1698,13 @@ class LLMUserAggregator(LLMContextAggregator):
             speculation: The speculation to run, from the stop strategy that
                 started it.
         """
+        if self._interruption_held:
+            await self._commit_held_interruption()
+        if self._interruption_commit_pending_flush:
+            self._interruption_commit_pending_flush = False
+            if self._paired_assistant_aggregator is not None:
+                await self._paired_assistant_aggregator._flush_interrupted_turn()
+
         text = concatenate_aggregated_text(
             [
                 *self._aggregation,
@@ -1764,14 +1825,24 @@ class LLMUserAggregator(LLMContextAggregator):
 
         interrupted_bot = self._user_turn_interrupted_bot
         self._user_turn_interrupted_bot = False
+        was_held = self._interruption_held
+        self._interruption_held = False
+        self._interruption_commit_pending_flush = False
+        interruption_mode = self._user_turn_interruption_mode
 
         if content:
             self._consecutive_empty_user_turn_recoveries = 0
         elif not on_session_end:
+            if was_held:
+                logger.debug(f"{self}: Empty user turn while held — resuming buffered response")
+                await self.broadcast_frame(InterruptionResumeFrame)
+            elif interruption_mode == InterruptionMode.HOLD and not interrupted_bot:
+                logger.debug(f"{self}: Empty user turn ignored in hold mode")
+                await self._user_idle_controller.wait_for_user()
             # An empty turn doesn't run the LLM, so the bot stays silent unless
             # a recovery runs it. Without one, restart the idle timer, which
             # this turn's start cancelled.
-            if not await self._maybe_recover_empty_user_turn(interrupted_bot):
+            elif not await self._maybe_recover_empty_user_turn(interrupted_bot):
                 await self._user_idle_controller.wait_for_user()
 
     async def _maybe_recover_empty_user_turn(
@@ -2276,6 +2347,20 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # they are added to this turn before it closes.
         self._assistant_turn_interrupted = True
         await self.queue_frame(_AssistantTurnInterruptedFrame())
+
+    async def _flush_interrupted_turn(self):
+        """Close the interrupted assistant turn ahead of the interrupting user turn.
+
+        Used when a held interruption commits right before the user message is
+        appended to the shared context, ensuring the partial heard assistant
+        message is recorded before the user's message even if
+        ``_AssistantTurnInterruptedFrame`` is still queued.
+        """
+        if not self._assistant_turn_start_timestamp:
+            return
+        self._assistant_turn_interrupted = False
+        await self._trigger_assistant_turn_stopped(interrupted=True)
+        await self.reset()
 
     async def _handle_assistant_turn_interrupted(self, frame: _AssistantTurnInterruptedFrame):
         # The turn's own end frame may have been waiting in the queue too, and
@@ -3000,6 +3085,7 @@ class LLMContextAggregatorPair:
             _realtime_service_mode=realtime_service_mode,
             _paired_user_aggregator=self._user,
         )
+        self._user._paired_assistant_aggregator = self._assistant
 
     def user(self) -> LLMUserAggregator:
         """Get the user context aggregator.
