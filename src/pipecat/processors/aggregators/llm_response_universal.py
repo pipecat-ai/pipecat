@@ -840,6 +840,7 @@ class LLMUserAggregator(LLMContextAggregator):
         # (InterruptionMode.HOLD), and the paired assistant half to flush when
         # a transcript commits the interruption.
         self._interruption_held = False
+        self._bot_stopped_while_held = False
         self._user_turn_interruption_mode = InterruptionMode.IMMEDIATE
         self._interruption_commit_pending_flush = False
         self._paired_assistant_aggregator: LLMAssistantAggregator | None = None
@@ -1017,6 +1018,13 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, InterruptionFrame):
             if self._interruption_held:
                 self._interruption_held = False
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            if self._interruption_held:
+                self._bot_stopped_while_held = True
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_stopped_while_held = False
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
@@ -1594,6 +1602,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._full_user_turn_aggregation = None
         self._user_turn_answer_voided = False
         self._interruption_commit_pending_flush = False
+        self._bot_stopped_while_held = False
 
         mode = (
             params.interruption_mode
@@ -1827,6 +1836,8 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_interrupted_bot = False
         was_held = self._interruption_held
         self._interruption_held = False
+        bot_stopped_while_held = self._bot_stopped_while_held
+        self._bot_stopped_while_held = False
         self._interruption_commit_pending_flush = False
         interruption_mode = self._user_turn_interruption_mode
 
@@ -1836,6 +1847,8 @@ class LLMUserAggregator(LLMContextAggregator):
             if was_held:
                 logger.debug(f"{self}: Empty user turn while held — resuming buffered response")
                 await self.broadcast_frame(InterruptionResumeFrame)
+                if bot_stopped_while_held:
+                    await self._user_idle_controller.wait_for_user()
             elif interruption_mode == InterruptionMode.HOLD and not interrupted_bot:
                 logger.debug(f"{self}: Empty user turn ignored in hold mode")
                 await self._user_idle_controller.wait_for_user()

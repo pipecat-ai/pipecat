@@ -68,22 +68,24 @@ class InterruptionHoldProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, InterruptionResumeFrame):
             was_held = self._held
+            already_flushing = self._flushing
             self._held = False
             logger.debug(f"{self}: resuming downstream frames (was_held={was_held})")
-            if was_held:
+            if was_held and not already_flushing:
                 self._flushing = True
                 await self.push_frame(frame, direction)
                 await self._flush_buffer()
             else:
                 await self.push_frame(frame, direction)
         elif isinstance(frame, InterruptionFrame):
+            already_flushing = self._flushing
             self._held = False
             self._buffer.reset()
             has_uninterruptible = not self._buffer.empty()
-            if has_uninterruptible:
+            if has_uninterruptible and not already_flushing:
                 self._flushing = True
             await self.push_frame(frame, direction)
-            if has_uninterruptible:
+            if has_uninterruptible and not already_flushing:
                 await self._flush_buffer()
         elif isinstance(frame, CancelFrame):
             self._held = False
@@ -96,7 +98,8 @@ class InterruptionHoldProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, EndFrame):
             self._held = False
-            await self._flush_buffer()
+            if not self._flushing:
+                await self._flush_buffer()
             await self.push_frame(frame, direction)
         elif self._held or self._flushing:
             self._buffer.put_nowait(frame)
@@ -114,8 +117,7 @@ class InterruptionHoldProcessor(FrameProcessor):
                 self._buffer.task_done()
                 await self.push_frame(buffered, FrameDirection.DOWNSTREAM)
         finally:
-            if not self._held:
-                self._flushing = False
+            self._flushing = False
 
     def _discard_all(self):
         """Drop every frame currently held in the buffer."""

@@ -395,6 +395,86 @@ class TestInterruptionHoldProcessor(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(processor.is_holding)
 
+    async def test_interruption_or_rehold_mid_flush_does_not_interleave(self):
+        class _MidFlushTriggerProcessor(InterruptionHoldProcessor):
+            def __init__(self, trigger: Frame):
+                super().__init__()
+                self._trigger = trigger
+                self._fired = False
+
+            async def push_frame(
+                self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
+            ):
+                await super().push_frame(frame, direction)
+                if not self._fired and isinstance(frame, TTSTextFrame) and frame.text == "first":
+                    self._fired = True
+                    await self.process_frame(self._trigger, FrameDirection.DOWNSTREAM)
+
+        # Case 1: InterruptionFrame arrives mid-flush while uninterruptible frame remains buffered.
+        fn = FunctionCallInProgressFrame(function_name="lookup", tool_call_id="1", arguments={})
+        p_interrupt = _MidFlushTriggerProcessor(InterruptionFrame())
+        down_int, _ = await run_test(
+            Pipeline([p_interrupt]),
+            frames_to_send=[
+                InterruptionHoldFrame(),
+                TTSTextFrame("first", text_type=TextType.WORD),
+                TTSTextFrame("second", text_type=TextType.WORD),
+                fn,
+                SleepFrame(),
+                InterruptionResumeFrame(),
+            ],
+        )
+        self.assertEqual(
+            [type(f).__name__ for f in down_int],
+            [
+                "InterruptionHoldFrame",
+                "InterruptionResumeFrame",
+                "TTSTextFrame",
+                "InterruptionFrame",
+                "FunctionCallInProgressFrame",
+            ],
+        )
+        self.assertEqual(
+            [f.text for f in down_int if isinstance(f, TTSTextFrame)],
+            ["first"],
+        )
+        self.assertFalse(p_interrupt.is_holding)
+        self.assertFalse(p_interrupt._flushing)
+
+        # Case 2: Re-hold mid-flush stops the flush and a second resume finishes FIFO delivery.
+        p_rehold = _MidFlushTriggerProcessor(InterruptionHoldFrame())
+        down_rehold, _ = await run_test(
+            Pipeline([p_rehold]),
+            frames_to_send=[
+                InterruptionHoldFrame(),
+                TTSTextFrame("first", text_type=TextType.WORD),
+                TTSTextFrame("second", text_type=TextType.WORD),
+                fn,
+                SleepFrame(),
+                InterruptionResumeFrame(),
+                SleepFrame(),
+                InterruptionResumeFrame(),
+            ],
+        )
+        self.assertEqual(
+            [type(f).__name__ for f in down_rehold],
+            [
+                "InterruptionHoldFrame",
+                "InterruptionResumeFrame",
+                "TTSTextFrame",
+                "InterruptionHoldFrame",
+                "InterruptionResumeFrame",
+                "TTSTextFrame",
+                "FunctionCallInProgressFrame",
+            ],
+        )
+        self.assertEqual(
+            [f.text for f in down_rehold if isinstance(f, TTSTextFrame)],
+            ["first", "second"],
+        )
+        self.assertFalse(p_rehold.is_holding)
+        self.assertFalse(p_rehold._flushing)
+
 
 class TestBaseOutputTransportInterruptionHold(unittest.IsolatedAsyncioTestCase):
     async def test_audio_hold_and_resume_plays_buffered_audio_in_order(self):
@@ -899,6 +979,33 @@ class TestInterruptionHoldPipeline(unittest.IsolatedAsyncioTestCase):
             run_test(Pipeline([user, hold_processor, assistant]), frames_to_send=frames),
             timeout=2.0,
         )
+
+    async def test_bot_stopped_while_held_rearms_idle_timer_on_empty_turn(self):
+        context = LLMContext()
+        user, assistant = LLMContextAggregatorPair(
+            context,
+            user_params=_hold_params(user_idle_timeout=0.15),
+        )
+        idle_fired = 0
+
+        @user.event_handler("on_user_turn_idle")
+        async def on_idle(_agg):
+            nonlocal idle_fired
+            idle_fired += 1
+
+        frames = [
+            *_bot_speaking_start(),
+            VADUserStartedSpeakingFrame(),
+            BotStoppedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT + 0.3),
+        ]
+        down, _ = await run_test(Pipeline([user, assistant]), frames_to_send=frames)
+
+        down_types = [type(f) for f in down]
+        self.assertIn(InterruptionResumeFrame, down_types)
+        self.assertNotIn(InterruptionFrame, down_types)
+        self.assertGreaterEqual(idle_fired, 1)
 
 
 if __name__ == "__main__":
