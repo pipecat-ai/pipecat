@@ -498,40 +498,6 @@ async def test_interruption_cancels_the_context(plivo):
 
 
 @pytest.mark.asyncio
-async def test_turn_end_cancels_a_quiet_context(plivo, logged):
-    """Pipecat ends the audio context of a turn that pauses, so the turn's end cancels its context."""
-    service = _make_service(stop_frame_timeout_s=0.5)
-    # Pipecat reports the audio context that ends with no audio.
-    quiet = _WaitFrame(_after(service, ErrorFrame, pushed=True))
-    frames = [*_llm_response("Hello", quiet), *_llm_response("Next.")]
-
-    down, _ = await run_test(Pipeline([_Gate(), service]), frames_to_send=frames)
-
-    hello, cancel, following, _ = plivo.sent
-    assert cancel == {"type": "cancel", "context_id": hello["context_id"]}
-    assert _played_contexts(down) == {following["context_id"]}
-    # Its done logs no warning.
-    assert not any("unable to remove context" in line for line in logged)
-
-
-@pytest.mark.asyncio
-async def test_interruption_cancels_a_quiet_context(plivo):
-    """Pipecat passes no audio context to the interruption hook, so the service sends the cancel."""
-    service = _make_service(stop_frame_timeout_s=0.5)
-    frames = [
-        *_llm_response("Hello", ended=False),
-        *_interruption(service, after=_after(service, ErrorFrame, pushed=True)),
-        *_llm_response("Next."),
-    ]
-
-    down, _ = await run_test(Pipeline([_Gate(), service]), frames_to_send=frames)
-
-    hello, cancel, following, _ = plivo.sent
-    assert cancel == {"type": "cancel", "context_id": hello["context_id"]}
-    assert _played_contexts(down) == {following["context_id"]}
-
-
-@pytest.mark.asyncio
 async def test_interruption_of_two_contexts_drops_late_audio(plivo):
     """While Pipecat cancels two contexts in turn, audio that comes for the first is not played."""
     service = _make_service()
@@ -917,33 +883,6 @@ async def test_turn_continues_on_a_new_connection(plivo, lost, reported):
     assert finished == _finish_message(more)
     assert _played_contexts(down) == {more["context_id"]}
     assert _errors(up, "Plivo") == reported
-
-
-@pytest.mark.asyncio
-async def test_text_during_a_reconnect_waits_for_it(plivo):
-    service = _make_service(stop_frame_timeout_s=0.05)
-
-    async def drop_and_hold_handshake(message: dict):
-        if message.get("text") == "Hello":
-            plivo.connecting.clear()
-            plivo.handshake.clear()
-            plivo.drop()
-            await asyncio.wait_for(plivo.connecting.wait(), 5)
-            # The handshake outlasts the audio context of " there.", which waits for it.
-            asyncio.get_running_loop().call_later(0.2, plivo.handshake.set)
-
-    plivo.after_send = drop_and_hold_handshake
-
-    down, up = await run_test(service, frames_to_send=_llm_response("Hello", " there."))
-
-    hello, there, finished = plivo.sent
-    # The receive loop's reconnect is the only connect after the first.
-    assert len(plivo.connects) == 2
-    assert (there["text"], there["voice_id"]) == (" there.", "test-voice")
-    assert there["context_id"] != hello["context_id"]
-    assert finished == _finish_message(there)
-    assert _audio(down) == AUDIO
-    assert _errors(up, "Plivo") == []
 
 
 @pytest.mark.asyncio

@@ -10,7 +10,6 @@ See https://www.plivo.com/docs/models/text-to-speech/overview for more details o
 Plivo's TTS model.
 """
 
-import asyncio
 import json
 import re
 import time
@@ -26,10 +25,9 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    InterruptionFrame,
     TTSAudioRawFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -226,13 +224,11 @@ class PlivoTTSService(WebsocketTTSService):
         self._url = f"{url}/v1/Account/{auth_id}/TTS/Realtime"
         self._headers = _headers(auth_id, auth_token, client_ref)
 
-        # The contexts opened on this connection, whether or not their text was sent. A context
-        # takes its settings from the text that opens it, so a text for any other ID carries them.
+        # The contexts opened on this connection. A context takes its settings from the text that
+        # opens it, so only that first text carries them.
         self._opened_contexts: set[str] = set()
         # A refused handshake's Retry-After: a text starts no handshake before this monotonic time.
         self._connect_not_before = 0.0
-        # Held while a handshake runs, so that a text can wait for the receive loop's reconnect.
-        self._handshake = asyncio.Lock()
         self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
@@ -278,18 +274,14 @@ class PlivoTTSService(WebsocketTTSService):
         await super().setup(setup)
         await self._connect()
 
-    @property
-    def _receive_loop_running(self) -> bool:
-        """Whether the receive loop is running, and so owns reconnecting."""
-        return self._receive_task is not None and not self._receive_task.done()
-
     async def _connect(self):
         """Connect to the Realtime API and start the receive task."""
         await super()._connect()
 
         await self._connect_websocket()
 
-        if self._websocket and not self._receive_loop_running:
+        # A receive loop that gave up reconnecting has ended: a new connection starts another.
+        if self._websocket and (not self._receive_task or self._receive_task.done()):
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -308,11 +300,10 @@ class PlivoTTSService(WebsocketTTSService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
             logger.debug("Connecting to Plivo TTS")
-            async with self._handshake:
-                self._websocket = await self._websocket_connect(
-                    self._url, additional_headers=self._headers
-                )
-                self._opened_contexts.clear()
+            self._websocket = await self._websocket_connect(
+                self._url, additional_headers=self._headers
+            )
+            self._opened_contexts.clear()
             if response := self._websocket.response:
                 logger.debug(f"{self}: Plivo API ID {response.headers.get('api-id')}")
             await self._call_event_handler("on_connected")
@@ -347,15 +338,17 @@ class PlivoTTSService(WebsocketTTSService):
             return self._websocket
         raise ConnectionError("Plivo is not connected")
 
-    async def _send(self, kind: str, context_id: str, **fields) -> bool:
-        """Send a message for a context, and return whether it was sent."""
+    async def _send(self, kind: str, context_id: str, **fields):
+        """Send a control message for a context.
+
+        A lost connection is not reported: the receive loop reconnects, and the contexts of
+        the old connection end with it.
+        """
         message = {"type": kind, "context_id": context_id, **fields}
         try:
             await self._get_websocket().send(json.dumps(message))
         except (ConnectionError, ConnectionClosed):
-            # A lost or missing connection: the receive loop or the caller handles it.
-            return False
-        return True
+            pass
 
     async def on_audio_context_interrupted(self, context_id: str):
         """Cancel the context when the bot is interrupted, keeping the connection.
@@ -366,29 +359,15 @@ class PlivoTTSService(WebsocketTTSService):
         await self._send("cancel", context_id)
         await super().on_audio_context_interrupted(context_id)
 
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        """Handle an interruption, then cancel the context of a turn that went quiet."""
-        # A turn that pauses for stop_frame_timeout_s loses its audio context, so the parent
-        # has no context to pass to on_audio_context_interrupted. It is cancelled here by its
-        # ID: the API ignores a cancel for a context that has ended.
-        context_id = self._turn_context_id
-        if context_id not in self._opened_contexts or self.audio_context_available(context_id):
-            context_id = None
-        await super()._handle_interruption(frame, direction)
-        if context_id:
-            await self._send("cancel", context_id)
+    async def flush_audio(self, context_id: str | None = None):
+        """Finish the context, so that the TTS model speaks the text it still buffers.
 
-    async def _close_context(self, context_id: str | None):
-        """End the context, if it was opened on this connection.
-
-        The context is finished, so that the TTS model speaks the text it still buffers, or
-        cancelled if its audio context has ended, as its audio would then not be played.
+        Args:
+            context_id: The context to finish. If None, finishes the active context.
         """
-        if context_id in self._opened_contexts:
-            if self.audio_context_available(context_id):
-                await self._send("text", context_id, finish=True)
-            else:
-                await self._send("cancel", context_id)
+        flush_id = context_id or self.get_active_audio_context_id()
+        if flush_id in self._opened_contexts:
+            await self._send("text", flush_id, finish=True)
 
     async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
         """Apply a settings delta. A new model, voice or language gives the turn a new context."""
@@ -399,22 +378,13 @@ class PlivoTTSService(WebsocketTTSService):
             # spoken stay in the transcript.
             sentence = await self._aggregated_frame_sequencer.finalize(context_id)
             await self._push_sequencer_frames(sentence, context_id)
-            await self._close_context(context_id)
+            if self.audio_context_available(context_id):
+                await self.flush_audio(context_id)
             # The rest of the turn opens a new context with the new settings.
             if self._turn_context_id:
                 self._turn_context_id = None
                 self._turn_context_id = self.create_context_id()
         return changed
-
-    async def on_turn_context_completed(self):
-        """Finish the turn's context, so that the TTS model speaks the text it still buffers.
-
-        A turn that paused for ``stop_frame_timeout_s`` has no audio context left, so its
-        context is cancelled instead.
-        """
-        context_id = self._turn_context_id
-        await super().on_turn_context_completed()
-        await self._close_context(context_id)
 
     async def _receive_messages(self):
         """Route each message to its context."""
@@ -471,31 +441,26 @@ class PlivoTTSService(WebsocketTTSService):
         Yields:
             Frame: None once the text is sent; audio arrives on the receive task.
         """
-        if not self._websocket or self._websocket.state is State.CLOSED:
-            if self._receive_loop_running:
-                # The receive loop reconnects by itself: the text waits for its handshake, which
-                # its audio context may not outlast.
-                async with self._handshake:
-                    pass
-                await self._start_audio_context(context_id)
-            elif time.monotonic() >= self._connect_not_before:
-                # A refused handshake's Retry-After asks for no other handshake before its time.
-                await self._connect()
+        # A refused handshake's Retry-After asks for no other handshake before its time.
+        closed = not self._websocket or self._websocket.state is State.CLOSED
+        if closed and time.monotonic() >= self._connect_not_before:
+            await self._connect()
 
         # Text outside a turn is a context of its own, so its message finishes it.
         finish = context_id != self._turn_context_id
-        message = {"text": text, "finish": finish}
+        message = {"type": "text", "context_id": context_id, "text": text, "finish": finish}
         if context_id not in self._opened_contexts:
             message |= _request_fields(self._settings, self.sample_rate, streaming=True)
+
+        try:
+            await self._get_websocket().send(json.dumps(message))
             self._opened_contexts.add(context_id)
-        sent = await self._send("text", context_id, **message)
-
-        # In SENTENCE mode Pipecat has cut the sentence, so a flush has it spoken now.
-        # A finish already does that.
-        if sent and not finish and not self._is_streaming_tokens:
-            sent = await self._send("flush", context_id)
-
-        if not sent:
+            # In SENTENCE mode Pipecat has cut the sentence, so a flush has it spoken now.
+            # A finish already does that.
+            if not finish and not self._is_streaming_tokens:
+                flush = {"type": "flush", "context_id": context_id}
+                await self._get_websocket().send(json.dumps(flush))
+        except (ConnectionError, ConnectionClosed):
             # Pushed rather than yielded: a reconnect during the send ends the text's audio
             # context, which a yielded error goes through.
             await self.push_error(error_msg="Plivo connection unavailable: message not sent")
