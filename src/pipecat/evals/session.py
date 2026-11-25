@@ -105,6 +105,14 @@ class EvalSessionParams(BaseModel):
             .. deprecated:: 1.13.0
                 No replacement. A bot fires ``on_client_disconnected`` whenever
                 the harness disconnects. Will be removed in 2.0.0.
+
+        capture_conversation: Scripted scenarios only: build the run's
+            conversation in the conversation-file format and carry it on
+            :attr:`~pipecat.evals.results.EvalScriptResult.conversation`. Before
+            teardown the run waits for the bot's final reply, up to
+            ``default_timeout_ms``; if it does not arrive, the export is empty.
+            Function calls are captured with their arguments, so the bot is asked
+            for at least arguments-level function-call reports. Off by default.
     """
 
     connect_timeout_s: float = 5.0
@@ -116,6 +124,7 @@ class EvalSessionParams(BaseModel):
     audio_support_check: Literal["off", "when_advertised"] = "off"
     stop_bot: bool = False
     trigger_disconnect: bool = False
+    capture_conversation: bool = False
 
     @model_validator(mode="after")
     def _warn_deprecated_fields(self) -> "EvalSessionParams":

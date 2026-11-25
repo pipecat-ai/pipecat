@@ -391,6 +391,7 @@ def _result_from_dict(data: dict) -> EvalScriptResult:
         debug_log=data.get("debug_log", []),
         skipped=data.get("skipped"),
         bot_metrics=data.get("bot_metrics", []),
+        conversation=data.get("conversation", []),
     )
 
 
@@ -862,7 +863,7 @@ class _RunFiles:
         log: The bot's output.
         harness_log: The harness worker's output, kept only when it crashed.
         trace: The harness's decision trace, ``<prefix>.eval.log``.
-        conversation: A simulation's conversation, ``<prefix>.conversation.json``.
+        conversation: The captured conversation, ``<prefix>.conversation.json``.
         config: The worker's config, the handoff in.
         result: The worker's result, the handoff out.
         body: The bot's runner-args body, written when the manifest gives it inline.
@@ -1249,7 +1250,7 @@ class EvalSuite(BaseObject):
                 handoff.unlink()
         if run.result is not None and run.result.debug_log:
             files.trace.write_text("\n".join(run.result.debug_log) + "\n", encoding="utf-8")
-        if isinstance(run.result, EvalSimulationResult):
+        if run.result is not None and run.result.conversation:
             files.conversation.write_text(
                 json.dumps(run.result.conversation, indent=2) + "\n", encoding="utf-8"
             )

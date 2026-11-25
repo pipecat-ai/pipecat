@@ -93,6 +93,9 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
         self._stream = EvalEventStream(bot_audio=scenario.bot_audio, trace=self._trace)
         # The connection to the bot: the eval pipeline and the user's sends,
         # asking the bot for what the scenario's assertions need.
+        report_level = scenario.required_report_level()
+        if self._params.capture_conversation and report_level != "full":
+            report_level = "arguments"
         self._client = EvalClient(
             bot_url,
             params=EvalClientParams(
@@ -101,7 +104,7 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
                 user_speech=scenario.user_speech,
                 capture_bot_audio=scenario.wants_response(),
                 capture_bot_images=scenario.needs_bot_images(),
-                report_level=scenario.required_report_level(),
+                report_level=report_level,
                 vad_events=scenario.needs_vad_events(),
                 marker_events=scenario.needs_marker_events(),
                 context=list(scenario.context or []),
@@ -123,6 +126,7 @@ class EvalScriptSession(EvalSession[EvalScriptResult]):
             judge=judge,
             trace=self._trace,
             progress=self._progress,
+            capture_conversation=self._params.capture_conversation,
         )
         if on_progress is not None:
             self._add_legacy_progress_callback(on_progress)

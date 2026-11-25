@@ -829,6 +829,17 @@ class TestScenarioRecords(unittest.TestCase):
         rebuilt = _result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
         self.assertEqual(rebuilt, result)
 
+    def test_script_result_conversation_roundtrips_through_the_worker_json(self):
+        result = dataclasses.replace(
+            self._result(),
+            conversation=[
+                {"role": "user", "content": "Book a table."},
+                {"role": "assistant", "content": "It is booked."},
+            ],
+        )
+        rebuilt = _result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
+        self.assertEqual(rebuilt, result)
+
     def test_results_jsonl_record_keeps_what_each_expectation_matched(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

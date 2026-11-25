@@ -330,7 +330,7 @@ async def _execute_scenario(
                 "\n".join(run.result.debug_log) + "\n",
                 encoding="utf-8",
             )
-        if isinstance(run.result, EvalSimulationResult):
+        if run.result.conversation:
             (Path(logs_dir) / f"{run.stem}.conversation.json").write_text(
                 json.dumps(run.result.conversation, indent=2) + "\n",
                 encoding="utf-8",
@@ -447,7 +447,12 @@ def run(
         ".",
         "--logs-dir",
         help="Directory for each scenario's logs: <logs-dir>/<scenario>.eval.log (+ .debug.log, "
-        "and a simulation's .conversation.json).",
+        "and a captured .conversation.json).",
+    ),
+    capture_conversation: bool = typer.Option(
+        False,
+        "--capture-conversation",
+        help="Export each scripted run's conversation as <scenario>.conversation.json.",
     ),
     debug: bool = typer.Option(
         False,
@@ -515,6 +520,7 @@ def run(
         use_cache=not no_cache,
         trigger_disconnect=trigger_disconnect,
         bot_ready_timeout_s=bot_ready_timeout,
+        capture_conversation=capture_conversation,
     )
     started = time.monotonic()
     asyncio.run(
@@ -1413,6 +1419,11 @@ def suite(
     spawn: str = typer.Option(None, "--spawn", help="Override manifest spawn template."),
     python: str = typer.Option(None, "--python", help="Override manifest python interpreter."),
     audio: bool = typer.Option(False, "-a", "--audio", help="Record conversation audio."),
+    capture_conversation: bool = typer.Option(
+        False,
+        "--capture-conversation",
+        help="Export each scripted run's conversation as <run>.conversation.json.",
+    ),
     debug: bool = typer.Option(
         False,
         "-d",
@@ -1467,7 +1478,11 @@ def suite(
             run_dir / "results.jsonl",
             started,
             debug,
-            EvalSessionParams(default_timeout_ms=timeout * 1000, use_cache=not no_cache),
+            EvalSessionParams(
+                default_timeout_ms=timeout * 1000,
+                use_cache=not no_cache,
+                capture_conversation=capture_conversation,
+            ),
         )
     )
     exit_code = _finalize_evals(
