@@ -9,6 +9,7 @@
 import pytest
 
 from pipecat.services.cartesia.tts import CartesiaHttpTTSService, CartesiaTTSService
+from pipecat.services.deepgram.flux.tts import DeepgramFluxHttpTTSService
 from pipecat.services.deepgram.tts import DeepgramHttpTTSService, DeepgramTTSService
 from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService, ElevenLabsTTSService
 from pipecat.services.openai.tts import OpenAITTSService
@@ -17,6 +18,7 @@ from pipecat.services.tts_service import TTSService, WebsocketTTSService
 # Services whose run_tts completes synthesis before returning.
 SYNCHRONOUS = [
     CartesiaHttpTTSService,
+    DeepgramFluxHttpTTSService,
     DeepgramHttpTTSService,
     ElevenLabsHttpTTSService,
     OpenAITTSService,
