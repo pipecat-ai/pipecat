@@ -1045,6 +1045,7 @@ class ServiceRegistry:
             env_prefix="PLIVO",
             include_params=["auth_id", "auth_token"],
             settings_params=["voice"],
+            param_defaults={"voice": "lC7qzMoRE7SSjaNCVeff"},
         ),
         ServiceDefinition(
             value="pockettts_tts",

@@ -47,7 +47,7 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
-    "plivo": lambda: FastAPIWebsocketParams(
+    "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
     ),
@@ -67,7 +67,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         auth_id=os.environ["PLIVO_AUTH_ID"],
         auth_token=os.environ["PLIVO_AUTH_TOKEN"],
         settings=PlivoTTSService.Settings(
-            voice=os.environ["PLIVO_VOICE_ID"],
+            voice="lC7qzMoRE7SSjaNCVeff",
         ),
     )
 

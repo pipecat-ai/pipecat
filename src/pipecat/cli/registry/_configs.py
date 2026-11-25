@@ -587,7 +587,7 @@ SERVICE_CONFIGS = {
         '        auth_id=os.getenv("PLIVO_AUTH_ID"),\n'
         '        auth_token=os.getenv("PLIVO_AUTH_TOKEN"),\n'
         "        settings=PlivoTTSService.Settings(\n"
-        '            voice=os.getenv("PLIVO_VOICE_ID"),\n'
+        '            voice=os.getenv("PLIVO_VOICE_ID", "lC7qzMoRE7SSjaNCVeff"),\n'
         "        ),\n"
         "    )\n"
     ),
