@@ -388,7 +388,7 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_units("40°30′N", "*"), "40°30′N")
 
     async def test_speed_written_with_a_slash(self):
-        # "km/h" used to expand only "km", leaving "100 kilometers/h".
+        # Slash speeds expand as a whole, not just the part before the slash.
         self.assertEqual(
             await expand_units("Limit is 100 km/h", "*"), "Limit is 100 kilometers per hour"
         )

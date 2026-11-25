@@ -30,8 +30,8 @@ _UNIT_MAP: dict[str, tuple[str, str]] = {
     "mph": ("mile per hour", "miles per hour"),
     "kph": ("kilometer per hour", "kilometers per hour"),
     "kmh": ("kilometer per hour", "kilometers per hour"),
-    # Written with a slash, these used to expand only the part before it
-    # ("100 km/h" -> "100 kilometers/h").
+    # Slash forms must be matched whole; otherwise only the part before the
+    # slash would expand ("100 km/h" -> "100 kilometers/h").
     "km/h": ("kilometer per hour", "kilometers per hour"),
     "m/s": ("meter per second", "meters per second"),
     "gb": ("gigabyte", "gigabytes"),
