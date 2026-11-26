@@ -11,6 +11,7 @@ The service is driven without a network: session updates are captured from
 sits between the Voice Agent and the OpenAI Realtime event handling.
 """
 
+import asyncio
 import base64
 import json
 import re
@@ -1059,3 +1060,202 @@ async def test_a_call_with_empty_arguments_still_runs(monkeypatch):
     )
     await service._handle_evt_function_call_arguments_done(evt)
     assert [(c.function_name, c.arguments) for c in ran] == [("get_time", {})]
+
+
+# ---------------------------------------------------------------------------
+# Decisions
+# ---------------------------------------------------------------------------
+
+_DECISIONS = {
+    "delegation": {
+        "name": "assess_return",
+        "description": "Decide what happens with the customer's return.",
+        "questions": [
+            {
+                "type": "choice",
+                "name": "reason",
+                "instructions": "Why does the customer want to return the item?",
+                "choices": [
+                    {"value": "damaged"},
+                    {"value": "changed_mind", "description": "No longer wants it."},
+                ],
+            }
+        ],
+    },
+    "triggers": [
+        {
+            "id": "frustration",
+            "event_type": "conversation.item.input_audio_transcription.completed",
+            "questions": [
+                {
+                    "type": "predicate",
+                    "name": "frustrated",
+                    "instructions": "Is the customer frustrated?",
+                },
+                {
+                    "type": "score",
+                    "name": "urgency",
+                    "instructions": "How urgent is it?",
+                    "levels": [{"label": "Can wait"}, {"label": "Right now"}],
+                },
+            ],
+        }
+    ],
+}
+
+
+@pytest.mark.asyncio
+async def test_decisions_are_sent_in_think():
+    service = _service(decisions=_DECISIONS)
+    (session,) = await _session_updates(service)
+    assert session["think"]["decisions"] == {
+        "delegation": {"type": "decisions", **_DECISIONS["delegation"]},
+        "triggers": [{"type": "decisions", **_DECISIONS["triggers"][0]}],
+    }
+
+
+@pytest.mark.asyncio
+async def test_decisions_are_left_out_unless_set_and_none_removes_them():
+    (session,) = await _session_updates(_service())
+    assert "decisions" not in session["think"]
+    (session,) = await _session_updates(_service(decisions=None))
+    assert session["think"]["decisions"] is None
+    (session,) = await _session_updates(_service(decisions=events.Decisions(delegation=None)))
+    assert session["think"]["decisions"] == {"delegation": None}
+
+
+@pytest.mark.asyncio
+async def test_a_decisions_update_sends_a_session_update():
+    service = _service()
+    service._listen_configured = True
+    sent: list[dict[str, Any]] = []
+
+    async def _ws_send(message):
+        sent.append(message)
+
+    service._ws_send = _ws_send  # type: ignore[method-assign]
+    await service._update_settings(ZoomAIRealtimeLLMService.Settings(decisions=_DECISIONS))
+    assert sent[-1]["session"]["think"]["decisions"]["delegation"]["name"] == "assess_return"
+
+
+@pytest.mark.asyncio
+async def test_decision_events_go_to_on_decision_and_are_not_passed_on():
+    seen: list[str] = []
+
+    async def _on_error(error, event_ids):
+        pass
+
+    async def _on_decision(event):
+        seen.append(event["type"])
+
+    messages = [
+        {"type": "session.delegation.created", "delegation_id": "dlg_1", "response_id": "r1"},
+        {
+            "type": "payload",
+            "payload": {"type": "decision.completed", "delegation_id": "dlg_1", "answers": []},
+        },
+        {"type": "decision.failed", "trigger_id": "t", "error": {"code": "decision_failed"}},
+        {"type": "decision.cancelled", "delegation_id": "dlg_2"},
+        {"type": "session.updated", "session": {}},
+    ]
+    ws = _ZoomAIRealtimeWebSocket(
+        _FakeWebSocket(messages), on_error=_on_error, on_decision=_on_decision
+    )
+    out = [json.loads(m) async for m in ws]
+    assert [e["type"] for e in out] == ["session.updated"]
+    assert seen == [
+        "session.delegation.created",
+        "decision.completed",
+        "decision.failed",
+        "decision.cancelled",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_decision_events_reach_the_event_handlers():
+    service = _service()
+    calls: list[tuple[str, Any]] = []
+    for name in (
+        "on_delegation_created",
+        "on_decision_completed",
+        "on_decision_failed",
+        "on_decision_cancelled",
+    ):
+
+        async def handler(svc, event, name=name):
+            calls.append((name, event))
+
+        service.add_event_handler(name, handler)
+
+    await service._handle_decision(
+        {
+            "type": "session.delegation.created",
+            "event_id": "e0",
+            "delegation_id": "dlg_1",
+            "response_id": "r1",
+        }
+    )
+    await service._handle_decision(
+        {
+            "type": "decision.completed",
+            "delegation_id": "dlg_1",
+            "response_id": "r1",
+            "item_id": "item_1",
+            "answers": [
+                {"type": "choice", "name": "reason", "choice": "damaged", "probability": 0.99},
+                {"type": "refusal", "name": "next_step"},
+            ],
+        }
+    )
+    await service._handle_decision(
+        {
+            "type": "decision.completed",
+            "trigger_id": "frustration",
+            "source_event_type": "conversation.item.input_audio_transcription.completed",
+            "answers": [
+                {"type": "predicate", "name": "frustrated", "probability": 0.97},
+                {
+                    "type": "score",
+                    "name": "urgency",
+                    "score": 1.86,
+                    "probabilities": [{"value": 0, "probability": 0.1}],
+                },
+            ],
+        }
+    )
+    await service._handle_decision(
+        {"type": "decision.failed", "delegation_id": "dlg_2", "error": {"code": "x"}}
+    )
+    await service._handle_decision({"type": "decision.cancelled", "delegation_id": "dlg_3"})
+    await asyncio.sleep(0)  # handlers run as tasks
+    for _ in range(20):
+        if len(calls) == 5:
+            break
+        await asyncio.sleep(0.01)
+
+    names = [n for n, _ in calls]
+    assert sorted(names) == sorted(
+        [
+            "on_delegation_created",
+            "on_decision_completed",
+            "on_decision_completed",
+            "on_decision_failed",
+            "on_decision_cancelled",
+        ]
+    )
+    created = next(e for n, e in calls if n == "on_delegation_created")
+    assert isinstance(created, events.DelegationCreatedEvent) and created.delegation_id == "dlg_1"
+    completed = [e for n, e in calls if n == "on_decision_completed"]
+    delegation = next(e for e in completed if e.delegation_id == "dlg_1")
+    assert delegation.answer("reason").choice == "damaged"
+    assert delegation.answer("next_step").type == "refusal"
+    assert delegation.answer("missing") is None
+    trigger = next(e for e in completed if e.trigger_id == "frustration")
+    assert trigger.answer("frustrated").probability == 0.97
+    assert trigger.answer("urgency").score == 1.86
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_decision_event_is_logged_not_raised():
+    service = _service()
+    await service._handle_decision({"type": "decision.completed", "answers": "not a list"})

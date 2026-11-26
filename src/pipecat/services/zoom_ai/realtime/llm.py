@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.typing import Subprotocol
@@ -37,7 +37,7 @@ from pipecat.services.openai.realtime import events as openai_events
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.services.zoom_ai.utils import new_tracking_id, request_headers
 from pipecat.utils.errors import ErrorCategory
-from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
+from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
 
@@ -63,6 +63,15 @@ _MAX_APPEND_BYTES = 16384
 # Caller audio that arrives before the session is ready (while connecting or
 # reconnecting) is held and sent once it is, up to this much of the latest audio.
 _PENDING_AUDIO_SECS = 3.0
+
+# Zoom's events for Decisions delegations and triggers, which the OpenAI Realtime
+# event models don't cover; they go to the application's event handlers.
+_DECISION_EVENT_TYPES = (
+    "session.delegation.created",
+    "decision.completed",
+    "decision.failed",
+    "decision.cancelled",
+)
 
 # Reconnect attempts, in a row, after a session ends in a way that can be retried
 # (the connection closing, or a session reaching its time limit); the count starts
@@ -91,6 +100,10 @@ class ZoomAIRealtimeLLMSettings(OpenAIRealtimeLLMService.Settings):
             defaults.
         speak: How the agent speaks: its voice. ``None`` takes the server's
             default voice.
+        decisions: Decisions API questions for the session: a delegation the
+            agent may hand off during a turn, transcript triggers, or both
+            (:class:`~pipecat.services.zoom_ai.realtime.events.Decisions`). Can
+            change during the session; ``None`` removes them.
 
     ``extra`` holds Voice Agent session fields this class has no setting for,
     shaped like the ``session`` of ``session.update``. It is merged into each
@@ -100,6 +113,7 @@ class ZoomAIRealtimeLLMSettings(OpenAIRealtimeLLMService.Settings):
     provider: events.Provider | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     listen: events.Listen | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speak: events.Speak | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    decisions: events.Decisions | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     def __post_init__(self):
         # Accept the settings as plain dicts too, e.g. a Voice Agent session's JSON.
@@ -109,6 +123,8 @@ class ZoomAIRealtimeLLMSettings(OpenAIRealtimeLLMService.Settings):
             self.listen = events.Listen.model_validate(self.listen)
         if isinstance(self.speak, Mapping):
             self.speak = events.Speak.model_validate(self.speak)
+        if isinstance(self.decisions, Mapping):
+            self.decisions = events.Decisions.model_validate(self.decisions)
 
 
 def _dump(value: Any) -> Any:
@@ -150,7 +166,9 @@ class _ZoomAIRealtimeWebSocket:
       item) is delivered as ``conversation.item.added``.
     - Fields those models require are filled in when absent (``event_id``,
       ``response.status_details``, the usage details, ``error.type``).
-    - Event types the models don't know are ignored.
+    - Decisions events (``session.delegation.created``, ``decision.*``) go to
+      ``on_decision``.
+    - Other event types the models don't know are ignored.
     - Non-terminal errors go to ``on_error`` instead of ending the session; only
       terminal errors (marked ``fatal``, or a rejected provider key), and failed
       ``conversation.item.retrieve`` requests (which the OpenAI service settles
@@ -163,10 +181,15 @@ class _ZoomAIRealtimeWebSocket:
     """
 
     def __init__(
-        self, websocket, *, on_error: Callable[[dict[str, Any], set[str]], Awaitable[None]]
+        self,
+        websocket,
+        *,
+        on_error: Callable[[dict[str, Any], set[str]], Awaitable[None]],
+        on_decision: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ):
         self._ws = websocket
         self._on_error = on_error
+        self._on_decision = on_decision
         # The terminal error that ended the session, if one did.
         self.terminal_error: dict[str, Any] | None = None
         self._output_rate = _VOICE_AGENT_OUTPUT_RATE
@@ -200,6 +223,10 @@ class _ZoomAIRealtimeWebSocket:
         kind = event.get("type", "")
         if kind == "conversation.item.created":
             kind = event["type"] = "conversation.item.added"
+        if kind in _DECISION_EVENT_TYPES:
+            if self._on_decision:
+                await self._on_decision(event)
+            return []
         if kind not in openai_events._server_event_types:
             logger.trace(f"Zoom Voice Agent: ignoring {kind!r} event")
             return []
@@ -310,6 +337,25 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
     time limit), the service reconnects and restores the conversation; if
     reconnecting fails, it pushes a permanent error.
 
+    **Decisions.** ``Settings.decisions`` gives the session questions for the
+    Decisions API. A *delegation* is a decision the agent may hand off during a
+    turn, the way it calls a tool: the Voice Agent asks the questions about the
+    conversation, and the turn ends with the answers. The agent doesn't continue
+    on its own; your application acts on the answers, then records the outcome
+    and asks for the next reply, for example by queuing
+    ``LLMMessagesAppendFrame([{"role": "developer", "content": "Refund issued."}],
+    run_llm=True)``. *Triggers* ask their questions after each caller transcript
+    or each spoken reply, apart from the conversation. Results arrive as events:
+
+    - ``on_delegation_created(service, event)``: the agent delegated
+      (:class:`~pipecat.services.zoom_ai.realtime.events.DelegationCreatedEvent`).
+    - ``on_decision_completed(service, decision)``: the answers, for a delegation
+      or a trigger
+      (:class:`~pipecat.services.zoom_ai.realtime.events.DecisionEvent`).
+    - ``on_decision_failed(service, decision)``: no decision was made.
+    - ``on_decision_cancelled(service, decision)``: the caller interrupted the
+      turn before its delegation's decision arrived.
+
     Example::
 
         from pipecat.services.zoom_ai.realtime.events import Speak
@@ -387,6 +433,10 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
         # Caller audio, at the session's input rate, waiting for the session to be ready.
         self._pending_audio = bytearray()
         self._tracking_id: str | None = None  # the current session's x-zm-trackingid
+        self._register_event_handler("on_delegation_created")
+        self._register_event_handler("on_decision_completed")
+        self._register_event_handler("on_decision_failed")
+        self._register_event_handler("on_decision_cancelled")
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the service and connect, sending audio at the pipeline's input rate.
@@ -420,7 +470,7 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
             self._terminal_message = None
             self._settings_rejected = False
             self._websocket = _ZoomAIRealtimeWebSocket(
-                websocket, on_error=self._handle_server_error
+                websocket, on_error=self._handle_server_error, on_decision=self._handle_decision
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
@@ -568,6 +618,26 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
             error_msg=f"Zoom Voice Agent error: {message} (tracking_id={self._tracking_id})"
         )
 
+    async def _handle_decision(self, event: dict[str, Any]):
+        """Pass a Decisions event to the application's event handlers."""
+        kind = event.get("type")
+        try:
+            if kind == "session.delegation.created":
+                await self._call_event_handler(
+                    "on_delegation_created", events.DelegationCreatedEvent.model_validate(event)
+                )
+                return
+            decision = events.DecisionEvent.model_validate(event)
+        except ValidationError as e:
+            logger.warning(f"{self}: can't read a {kind} event: {e}")
+            return
+        handler = {
+            "decision.completed": "on_decision_completed",
+            "decision.failed": "on_decision_failed",
+            "decision.cancelled": "on_decision_cancelled",
+        }[decision.type]
+        await self._call_event_handler(handler, decision)
+
     async def _handle_response_create_rejected(self, message: str):
         """The server refused a response.create; no response.done will follow it."""
         self._pending_response_create = None
@@ -631,6 +701,7 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
             "provider",
             "listen",
             "speak",
+            "decisions",
             "extra",
         }
         if self._listen_configured:
@@ -698,6 +769,8 @@ class ZoomAIRealtimeLLMService(OpenAIRealtimeLLMService):
             think["response_token_limit"] = properties.max_output_tokens
         if properties.reasoning is not None:
             think["reasoning"] = _dump(properties.reasoning)
+        if is_given(self._settings.decisions):
+            think["decisions"] = self._settings.decisions
         session: dict[str, Any] = {"think": events.Think(**think)}
 
         if first:
