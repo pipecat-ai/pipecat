@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import LLMContextSummaryRequestFrame
+from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.context.llm_context_summarization import (
@@ -573,6 +574,104 @@ class TestFunctionCallHandling(unittest.TestCase):
         self.assertEqual(len(result.messages), 5)
         self.assertEqual(result.messages[-1]["content"], "What's the date?")
         self.assertEqual(result.last_summarized_index, 5)
+
+    def _start_function_call(self, context: LLMContext, tool_call_id: str, placeholder: dict):
+        """Add a function call and its placeholder result to the context."""
+        context.add_message(
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": tool_call_id,
+                        "type": "function",
+                        "function": {"name": "research", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        context.add_message(placeholder)
+
+    def test_sync_function_call_in_progress_not_summarized(self):
+        """Test that a function call with an IN_PROGRESS result is not summarized."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})
+        context.add_message({"role": "user", "content": "Research the topic"})
+        self._start_function_call(
+            context,
+            "call_123",
+            {"role": "tool", "tool_call_id": "call_123", "content": "IN_PROGRESS"},
+        )
+        context.add_message({"role": "user", "content": "Latest message"})
+
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
+
+        # Should stop before the function call
+        self.assertEqual(len(result.messages), 1)
+        self.assertEqual(result.last_summarized_index, 1)
+
+    def test_async_function_call_in_progress_not_summarized(self):
+        """Test that an async function call that is still running is not summarized."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})
+        context.add_message({"role": "user", "content": "Research the topic"})
+        self._start_function_call(
+            context, "call_123", async_tool_messages.build_started_message("call_123")
+        )
+        context.add_message({"role": "assistant", "content": "I'm looking into it."})
+        context.add_message({"role": "user", "content": "What's the weather?"})
+        context.add_message({"role": "assistant", "content": "It's sunny."})
+        context.add_message({"role": "user", "content": "Latest message"})
+
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
+
+        # Should stop before the async function call
+        self.assertEqual(len(result.messages), 1)
+        self.assertEqual(result.messages[0]["content"], "Research the topic")
+        self.assertEqual(result.last_summarized_index, 1)
+
+    def _add_settled_async_function_call(self, context: LLMContext, final_message: dict):
+        """Add a conversation where an async function call settles after a user turn."""
+        context.add_message({"role": "system", "content": "System prompt"})
+        context.add_message({"role": "user", "content": "Research the topic"})
+        self._start_function_call(
+            context, "call_123", async_tool_messages.build_started_message("call_123")
+        )
+        context.add_message({"role": "user", "content": "What's the weather?"})
+        context.add_message({"role": "assistant", "content": "It's sunny."})
+        context.add_message(final_message)
+        context.add_message({"role": "assistant", "content": "Here's what I found."})
+        context.add_message({"role": "user", "content": "Latest message"})
+
+    def test_settled_async_function_call_can_be_summarized(self):
+        """Test that an async function call settled by its final message can be summarized."""
+        final_messages = {
+            "result": async_tool_messages.build_final_result_message("call_123", '"done"'),
+            "cancelled": async_tool_messages.build_cancelled_message("call_123"),
+        }
+        for kind, final_message in final_messages.items():
+            with self.subTest(kind=kind):
+                context = LLMContext()
+                self._add_settled_async_function_call(context, final_message)
+
+                result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
+
+                # Should get all messages except the last one
+                self.assertEqual(len(result.messages), 7)
+                self.assertEqual(result.last_summarized_index, 7)
+
+    def test_async_function_call_settled_in_kept_range_not_summarized(self):
+        """Test that an async function call whose final message is kept is not summarized."""
+        context = LLMContext()
+        self._add_settled_async_function_call(
+            context, async_tool_messages.build_final_result_message("call_123", '"done"')
+        )
+
+        # Keep the final message, the reply to it, and the latest message
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 3)
+
+        # Should stop before the async function call
+        self.assertEqual(len(result.messages), 1)
+        self.assertEqual(result.last_summarized_index, 1)
 
     def test_function_call_formatting_in_transcript(self):
         """Test that function calls are properly formatted in transcript."""
