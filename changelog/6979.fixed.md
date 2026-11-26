@@ -1,0 +1,1 @@
+- `TogetherSTTService` now resamples input audio to the 16 kHz Together AI's transcription endpoint takes, so pipelines running at another rate transcribe correctly.

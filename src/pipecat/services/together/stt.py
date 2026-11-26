@@ -37,6 +37,10 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
+# The realtime transcription endpoint accepts a single input format,
+# ``pcm_s16le_16000``, so audio is sent at 16 kHz whatever the pipeline runs at.
+TOGETHER_SAMPLE_RATE = 16000
+
 
 @dataclass
 class TogetherSTTSettings(STTSettings):
@@ -49,7 +53,8 @@ class TogetherSTTService(WebsocketSTTService):
     """Together AI speech-to-text service.
 
     Provides real-time speech recognition using Together AI's WebSocket API
-    with OpenAI-compatible speech-to-text endpoints.
+    with OpenAI-compatible speech-to-text endpoints. Audio runs at whatever rate
+    the pipeline does and is sent at the 16 kHz the endpoint takes.
 
     Example::
 
@@ -108,6 +113,15 @@ class TogetherSTTService(WebsocketSTTService):
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
         return True
+
+    @property
+    def send_sample_rate(self) -> int:
+        """Get the rate audio is sent at, the 16 kHz the endpoint takes.
+
+        Returns:
+            The sample rate in Hz.
+        """
+        return TOGETHER_SAMPLE_RATE
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert a Language enum to Together AI language format.
@@ -212,7 +226,7 @@ class TogetherSTTService(WebsocketSTTService):
                 f"{self._base_url}/realtime?intent=transcription"
                 f"&model={self._settings.model}"
                 f"&turn_detection=none"
-                f"&input_audio_format=pcm_s16le_16000"
+                f"&input_audio_format=pcm_s16le_{TOGETHER_SAMPLE_RATE}"
             )
             headers = {
                 "Authorization": f"Bearer {self._api_key}",
