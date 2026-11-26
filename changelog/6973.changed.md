@@ -1,0 +1,1 @@
+- `OpenAIResponsesLLMService` and `OpenAIResponsesHttpLLMService` now send `reasoning.effort="low"`, the lowest effort OpenAI documents, for `gpt-6.2-astra` and `gpt-6.2-sol`.

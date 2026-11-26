@@ -206,6 +206,8 @@ _THINKING_DEFAULTS: dict[str, str] = {
     "gpt-6-sol": "none",
     "gpt-6.1-sol": "low",
     "gpt-6.1-terra": "none",
+    "gpt-6.2-astra": "low",
+    "gpt-6.2-sol": "low",
     "o3": "low",
     "o3-pro": "low",
 }
