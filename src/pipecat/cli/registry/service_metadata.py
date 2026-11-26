@@ -17,6 +17,7 @@ DO NOT edit _configs.py or _imports.py directly - they are auto-generated from t
 This module contains:
   - ServiceDefinition dataclass
   - Service lists (WEBRTC_TRANSPORTS, STT_SERVICES, LLM_SERVICES, etc.)
+  - EXCLUDED_SERVICES: service classes the CLI deliberately doesn't offer
   - FEATURE_DEFINITIONS dict
   - MANUAL_SERVICE_CONFIGS for complex initialization
 
@@ -90,6 +91,31 @@ class ServiceDefinition:
             raise ValueError("Service must have a package")
         if bool(self.client_package) != bool(self.client_package_version):
             raise ValueError("client_package and client_package_version go together")
+
+
+# Service classes the CLI doesn't offer, keyed by class name, with the reason.
+# scripts/cli/check_service_coverage.py fails CI for any concrete service class that
+# is neither offered nor listed here. Base classes, deprecated classes and the HTTP
+# versions of streaming services are skipped by that check and don't belong here.
+EXCLUDED_SERVICES: dict[str, str] = {
+    # Offered in another form
+    "AssemblyAISyncSTTService": "The streaming AssemblyAISTTService is offered.",
+    "DeepgramSegmentedSTTService": "The streaming DeepgramSTTService is offered.",
+    "NvidiaSegmentedSTTService": "The streaming NvidiaSTTService is offered.",
+    "WhisperSTTServiceMLX": "Runs only on Apple Silicon; WhisperSTTService is offered.",
+    # Not yet offered by the CLI
+    "FunASRSTTService": "Not yet offered by the CLI.",
+    "SarvamRealtimeSTTService": "Not yet offered by the CLI.",
+    "TogetherSTTService": "Not yet offered by the CLI.",
+    "NebiusLLMService": "Not yet offered by the CLI.",
+    "RimeV1TTSService": "Not yet offered by the CLI.",
+    "SpeechmaticsTTSService": "Not yet offered by the CLI.",
+    "TogetherTTSService": "Not yet offered by the CLI.",
+    "InworldRealtimeLLMService": "Not yet offered by the CLI.",
+    "NvidiaOmniLLMService": "Not yet offered by the CLI.",
+    "OpenAILiveLLMService": "Not yet offered by the CLI.",
+    "RimeRealtimeLLMService": "Not yet offered by the CLI.",
+}
 
 
 # Feature definitions with metadata for auto-generation
