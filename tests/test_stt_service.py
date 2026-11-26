@@ -14,6 +14,7 @@ import pytest
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
+    EagerTranscriptionFrame,
     ErrorFrame,
     Frame,
     InputAudioRawFrame,
@@ -31,6 +32,7 @@ from pipecat.services.ai_service import AIService
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService, STTService, TranscriptionType
 from pipecat.tests.utils import run_test
+from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
 from pipecat.utils.types import NOT_GIVEN, NotGiven
 
 SAMPLE_RATE = 16000
@@ -465,6 +467,25 @@ async def test_text_transforms_apply_to_their_text_type_in_order(pushed_frames):
     await service.push_frame(_transcription("hi", InterimTranscriptionFrame))
 
     assert [f.text for f in pushed_frames] == ["HI!", "hi!"]
+
+
+@pytest.mark.asyncio
+async def test_an_eager_transcript_is_rewritten_like_a_final_one(pushed_frames):
+    class _EagerSTTService(EagerEndOfTurnSTTServiceMixin, STTService):
+        async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
+            yield None
+
+    service = _EagerSTTService(
+        enable_eager_end_of_turn=True, text_transforms=[(TranscriptionType.FINAL, _mask_card)]
+    )
+
+    await service._push_eager_end_of_turn(
+        "It's 4111 1111 1111 1111", user_id="user", result="as heard"
+    )
+
+    assert [(type(f), f.text, f.result) for f in pushed_frames] == [
+        (EagerTranscriptionFrame, "It's [card number]", None)
+    ]
 
 
 @pytest.mark.asyncio
