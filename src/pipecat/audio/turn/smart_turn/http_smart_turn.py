@@ -108,7 +108,7 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
         """Predict end-of-turn using remote HTTP ML service."""
         try:
             serialized_array = self._serialize_array(audio_array)
-            loop = asyncio.get_running_loop()
+            loop = self._event_loop
             future = asyncio.run_coroutine_threadsafe(
                 self._send_raw_request(serialized_array), loop
             )
