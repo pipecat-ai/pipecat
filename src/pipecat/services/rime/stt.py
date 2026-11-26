@@ -46,6 +46,7 @@ try:
         Rime,
         RimeAudioFormatError,
         RimeAuthenticationError,
+        RimeBillingError,
         RimeCancelledError,
         RimeInputError,
         RimePermissionError,
@@ -115,6 +116,8 @@ def _error_category(error: Exception) -> ErrorCategory:
         return ErrorCategory.AUTHENTICATION
     if isinstance(error, RimePermissionError):
         return ErrorCategory.AUTHORIZATION
+    if isinstance(error, RimeBillingError):
+        return ErrorCategory.QUOTA
     if isinstance(error, (RimeTimeoutError, RimeUnavailableError)):
         return ErrorCategory.CONNECTIVITY
     if isinstance(error, RimeInputError):

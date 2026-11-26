@@ -4,14 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import json
+import time
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from websockets.protocol import State
 
+from pipecat.frames.frames import ErrorFrame, TTSSpeakFrame, TTSStoppedFrame
 from pipecat.services.sarvam.tts import SarvamHttpTTSService, SarvamTTSService
+from pipecat.tests.utils import SleepFrame, run_test
 
 V4_FLASH = "bulbul:v4-flash"
 
@@ -216,6 +220,56 @@ async def test_switching_the_http_service_to_v4_flash_takes_its_capabilities():
     assert "temperature" not in payload
 
 
+class _ErroringWebsocket(_FakeWebsocket):
+    """Answers each text message with a Sarvam error message."""
+
+    def __init__(self):
+        super().__init__()
+        self._replies: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def send(self, message):
+        await super().send(message)
+        if json.loads(message).get("type") == "text":
+            error = {"type": "error", "data": {"message": "Unable to process text"}}
+            self._replies.put_nowait(json.dumps(error))
+
+    async def close(self):
+        await super().close()
+        self._replies.put_nowait(None)
+
+    async def __aiter__(self):
+        while (reply := await self._replies.get()) is not None:
+            yield reply
+
+
+@pytest.mark.asyncio
+async def test_a_server_error_is_reported_once_and_ends_the_turn(monkeypatch):
+    """A Sarvam error is reported once, and the turn it cut short ends right away
+    instead of waiting out stop_frame_timeout_s."""
+    service = _service()
+    monkeypatch.setattr(service, "_websocket_connect", AsyncMock(return_value=_ErroringWebsocket()))
+    stopped_at = None
+    original_push_frame = service.push_frame
+
+    async def push_frame(frame, *args, **kwargs):
+        nonlocal stopped_at
+        if isinstance(frame, TTSStoppedFrame) and stopped_at is None:
+            stopped_at = time.monotonic()
+        await original_push_frame(frame, *args, **kwargs)
+
+    monkeypatch.setattr(service, "push_frame", push_frame)
+
+    started_at = time.monotonic()
+    down, up = await run_test(
+        service, frames_to_send=[TTSSpeakFrame("Hello."), SleepFrame(sleep=0.5)]
+    )
+
+    sarvam_errors = [f for f in up if isinstance(f, ErrorFrame) and "TTS Error" in f.error]
+    assert len(sarvam_errors) == 1
+    assert len([f for f in down if isinstance(f, TTSStoppedFrame)]) == 1
+    assert stopped_at is not None and stopped_at - started_at < 1.0
+
+
 @pytest.mark.parametrize("settings_cls", [SarvamTTSService.Settings, SarvamHttpTTSService.Settings])
 @pytest.mark.parametrize(
     "key, field, value",
@@ -254,3 +308,41 @@ async def test_a_voice_from_a_settings_dict_reaches_the_http_payload(key):
     payload = await _synthesize(service)
 
     assert payload["speaker"] == "priya"
+
+
+def _error_msg(message: str, request_id: str | None) -> str:
+    data = {"message": message}
+    if request_id:
+        data["request_id"] = request_id
+    return json.dumps({"type": "error", "data": data})
+
+
+async def _receive(service: SarvamTTSService, messages: list[str]):
+    """Run `_receive_messages` over one connection carrying `messages`."""
+
+    async def connection():
+        for message in messages:
+            yield message
+
+    service.append_to_audio_context = AsyncMock()
+    service.remove_audio_context = AsyncMock()
+    service.audio_context_available = lambda context_id: True
+    service.push_error = AsyncMock()
+    service.get_active_audio_context_id = lambda: "ctx"
+    service._get_websocket = connection
+
+    await service._receive_messages()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "request_id, expected",
+    [("req-a", "TTS Error: bad text (request ID: req-a)"), (None, "TTS Error: bad text")],
+)
+async def test_an_error_carries_its_request_id(request_id, expected):
+    service = _service()
+
+    await _receive(service, [_error_msg("bad text", request_id)])
+
+    service.push_error.assert_awaited_once_with(error_msg=expected)
+    service.remove_audio_context.assert_awaited_once_with("ctx")

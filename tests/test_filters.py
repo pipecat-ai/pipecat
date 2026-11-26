@@ -95,6 +95,24 @@ class TestFunctionFilter(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
 
+    async def test_filter_is_not_called_for_unfiltered_frames(self):
+        """Frames that pass through unfiltered are never handed to the filter."""
+        seen: list[Frame] = []
+
+        async def hide_comments(frame: Frame):
+            seen.append(frame)
+            return not (isinstance(frame, TextFrame) and frame.text.startswith("#"))
+
+        filter = FunctionFilter(filter=hide_comments, direction=FrameDirection.DOWNSTREAM)
+        frames_to_send = [TextFrame(text="Hello!"), TextFrame(text="# hidden")]
+        expected_down_frames = [TextFrame]
+        await run_test(
+            filter,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        assert [type(f) for f in seen] == [TextFrame, TextFrame]
+
     async def test_no_direction_filters_both_directions(self):
         """When direction is None, frames in both directions are filtered."""
 

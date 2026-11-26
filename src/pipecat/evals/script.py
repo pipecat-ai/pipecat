@@ -32,8 +32,8 @@ Event names are the friendly names the harness maps RTVI server messages onto:
 ``vad_user_stopped_speaking``, ``user_transcription``, ``bot_started_speaking``,
 ``bot_stopped_speaking``, ``llm_started``, ``response``, ``llm_response``,
 ``llm_marker``, ``tts_response``, ``function_call``, ``function_call_stopped``,
-``image``, ``bot_backchannel``, ``user_backchannel``, ``expression``. The ``vad_*``
-events are the raw VAD signal, useful as a timing anchor when a turn-detection strategy
+``image``, ``bot_backchannel``, ``user_backchannel``, ``expression``, ``metrics``,
+``server_message``, ``flow_node``. The ``vad_*`` events are the raw VAD signal, useful as a timing anchor when a turn-detection strategy
 gates or defers the turn-level ``user_stopped_speaking`` (e.g. filtering incomplete
 turns).
 
@@ -45,12 +45,58 @@ images only to a scenario that expects one::
           - event: image
             within_ms: 60000
 
+``metrics`` is a report of what the bot's processors measured, such as a
+service's TTFB, its processing time or its usage. A bot sends them when its
+pipeline has ``enable_metrics`` on, grouped by kind (``ttfb``, ``processing``,
+``tokens``, ...). ``metric:`` names the kind the report must hold and
+``processor:`` text the measuring processor's name must contain; a bare
+``metrics`` takes any report. A report that arrived while an expectation above
+was waiting for its own event is behind this one, so look back for it::
+
+    turns:
+      - user: "What is the capital of Germany?"
+        expect:
+          - event: user_transcription
+          - event: metrics
+            metric: ttfb
+            processor: STT
+            check_from: turn_start
+
+Every report of a run is kept with its result, expected or not, so an
+expectation is only needed to hold a turn open until one arrives.
+
+``server_message`` is a message of the bot's own making: whatever data it
+pushed in an ``RTVIServerMessageFrame``. It is how a bot built for an eval
+reports what only it can know, such as a result it computed or that it has
+finished its work on a turn. The event's text is the data as JSON (or the
+data itself when it is a string), so the content checks read it and a matched
+expectation records it in the run's result::
+
+    turns:
+      - user: "What is the capital of Germany?"
+        expect:
+          - event: server_message
+            text_contains: '"done": true'
+
+``flow_node`` is the bot's conversation flow, built with Pipecat Flows,
+entering a node. The event's text is the node's name, so ``text_matches``
+pins the node a turn leads to; a node of a subflow is named
+``<parent>.<node>``::
+
+    turns:
+      - user: "I'd like to book an appointment."
+        expect:
+          - event: flow_node
+            text_matches: ['^verify_to_book[.]']
+
 ``llm_marker`` is the sideband marker the bot's LLM emitted in a response, such
 as the turn-completion markers of ``filter_incomplete_user_turns``. It arrives
 when the response ends. ``marker:`` says which one: ``complete`` (the turn was
 finished and the bot answers), ``short`` (the user was cut off and the bot
-waits), ``long`` (the user asked for time), or ``incomplete`` (either of the
-last two). A bare ``llm_marker`` asserts only that the bot read a response.
+waits), ``long`` (the user asked for time), ``incomplete`` (either of the
+last two), or ``silent`` (the LLM answered with its silent mark and the bot
+dropped the reply unspoken). A bare ``llm_marker`` asserts only that the bot
+read a response.
 Markers never reach clients by default; a scenario that asserts on one asks the
 bot to report them::
 
@@ -134,6 +180,12 @@ Supported expectation fields (per event):
     marker comes before any text, how many markers the text holds, and whether
     text follows the first marker
 
+``metric: <str>``, ``processor: <str>``
+    for ``metrics`` — the kind of metric the report must hold (``ttfb``,
+    ``processing``, ``tokens``, ...), and text the name of the processor that
+    measured it must contain. The zero a pipeline reports for every processor
+    as it starts is not a measurement and never matches
+
 ``calls:``
     for ``function_call`` — the set of calls the turn should make, matched by
     name in any order; the expectation passes only when all are found::
@@ -168,6 +220,18 @@ Supported expectation fields (per event):
           calls:
             - name: submit_session_suggestion
           eval: "a session about OpenTelemetry tracing, submitted for Jennifer Smith"
+
+``allow_continue: false``
+    with ``eval:`` — judge the reply yes or no, never ``continue``. The judge
+    answers ``continue`` for a reply on the way to its answer, a "let me check"
+    before the result, and the harness then waits for more of the reply.
+    Setting ``allow_continue: false`` forces the judge to consider the reply
+    as final, the thing to be judged, rather than skipping it: a wait
+    reassurance ("still working on it...") is judged that way::
+
+        - event: response
+          eval: "says it is still working on the task, reporting no result"
+          allow_continue: false
 
 ``absent: true``
     invert the expectation: assert that NO event of this type arrives before the
@@ -248,7 +312,8 @@ is sent at its own sample rate, so it need not match the bot's input rate, and
 
 In audio modality a spoken turn may also pause, as a person does mid-thought:
 ``user:`` is then a list of text and ``pause_ms:`` silences, played to the bot
-as one stretch of audio. The judge and ``text_contains`` see the text alone::
+as one stretch of audio. The judge and ``text_contains`` see the text alone.
+A turn's pauses can total at most 60 seconds (``MAX_TURN_PAUSE_MS``)::
 
     turns:
       - user:
@@ -308,7 +373,8 @@ Top-level optional fields:
             # explainer: an LLM block giving the reasons behind the verdicts
             # (see pipecat.evals.judge)
           transcription:           # required when modality is audio
-            service: moonshine     # STT for the bot's audio (or whisper, or a factory)
+            service: moonshine     # STT for the bot's audio (or whisper, or a factory
+                                   # returning a SegmentedSTTService)
             model: small-streaming # optional
             language: en           # optional; the language the bot speaks
             padding_secs: 0        # optional; silence padded around the
@@ -342,6 +408,10 @@ from pipecat.evals.scenario_config import (
 )
 from pipecat.utils.deprecation import deprecated
 
+# The most a turn's pauses can add up to. A caller silent for longer has stopped
+# taking part, and the turn's audio, silence included, is built in memory.
+MAX_TURN_PAUSE_MS = 60_000
+
 # Events whose payloads carry bot-generated text the judge can sensibly
 # evaluate, including the expression the bot's TTS performed. Asserting
 # ``eval:`` on anything else but a function call (user transcripts,
@@ -358,8 +428,9 @@ FUNCTION_CALL_EVENTS = ("function_call", "function_call_stopped")
 
 # What a ``marker:`` may name on an ``llm_marker`` expectation. The first three
 # are the kinds the turn-completion mixin stamps on its markers; ``incomplete``
-# accepts ``short`` or ``long``.
-MARKER_KINDS = ("complete", "short", "long", "incomplete")
+# accepts ``short`` or ``long``; ``silent`` is the LLM service's kind for a
+# reply it dropped as its silent mark.
+MARKER_KINDS = ("complete", "short", "long", "incomplete", "silent")
 
 # Where an expectation checks for its event from: where the expectation above
 # it was met, or the beginning of the turn.
@@ -429,10 +500,19 @@ class EvalExpectation:
             raw text must hold.
         text_after: For an ``llm_marker`` event, whether text must (True) or
             must not (False) follow the first marker in the raw text.
+        metric: For a ``metrics`` event, the kind of metric the report must
+            hold, as the bot names it: ``ttfb``, ``processing``, ``tokens``, ...
+        processor: For a ``metrics`` event, text the name of the processor
+            that measured the metric must contain.
         check_from: Where the expectation checks for its event from:
             ``previous`` (the default), where the expectation above it was
             met; or ``turn_start``, the beginning of the turn, at events the
             expectations above it did not use.
+        allow_continue: With ``eval``, whether the judge may answer
+            ``continue`` and have the harness wait for more of the reply;
+            ``None`` leaves it to the judge's own setting. ``False`` forces
+            the judge to consider the reply as final, the thing to be judged,
+            rather than skipping it.
         absent: When True, the expectation is inverted: it passes only when NO
             event of this type arrives before the ``within_ms`` budget expires,
             and fails as soon as one does. Matches on event type only;
@@ -451,7 +531,10 @@ class EvalExpectation:
     marker_first: bool | None = None
     markers: int | None = None
     text_after: bool | None = None
+    metric: str | None = None
+    processor: str | None = None
     check_from: str = "previous"
+    allow_continue: bool | None = None
     absent: bool = False
 
     @property
@@ -515,7 +598,8 @@ class EvalScriptTurn:
             expected events.
         parts: The turn's text and pauses, in order, when it pauses: text to
             speak, or the milliseconds of silence between texts. ``user`` then
-            holds the text alone. Requires ``user.modality: audio``.
+            holds the text alone. Requires ``user.modality: audio``, and the
+            pauses can total at most :data:`MAX_TURN_PAUSE_MS`.
         audio: Optional path to an audio file (resolved relative to the scenario
             file) played as this turn instead of synthesizing ``user``. Any
             format ``soundfile`` reads works (WAV, MP3, FLAC, OGG, ...);
@@ -907,6 +991,12 @@ def _parse_user(user: Any, path: Path, turn_idx: int) -> tuple[str | None, list[
     texts = [part for part in parts if isinstance(part, str)]
     if not texts:
         raise ValueError(f"{path}: turn #{turn_idx} 'user:' has pauses but no text")
+    pause_ms = sum(part for part in parts if isinstance(part, int))
+    if pause_ms > MAX_TURN_PAUSE_MS:
+        raise ValueError(
+            f"{path}: turn #{turn_idx} pauses for {pause_ms} ms in total; "
+            f"a turn can pause for at most {MAX_TURN_PAUSE_MS} ms"
+        )
     return " ".join(texts), parts
 
 
@@ -997,6 +1087,16 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
             "Will run but is unlikely to be meaningful."
         )
 
+    allow_continue = e.get("allow_continue")
+    if allow_continue is not None and not isinstance(allow_continue, bool):
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'allow_continue:' must be a boolean"
+        )
+    if allow_continue is not None and criterion is None:
+        raise ValueError(
+            f"{path}: turn #{turn_idx} expectation #{exp_idx} 'allow_continue:' "
+            f"only applies with 'eval:'"
+        )
     absent = e.get("absent", False)
     if not isinstance(absent, bool):
         raise ValueError(
@@ -1032,6 +1132,8 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
                 "marker_first",
                 "markers",
                 "text_after",
+                "metric",
+                "processor",
             )
             if key in e
         ]
@@ -1062,6 +1164,15 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         ):
             raise ValueError(f"{where} '{key}:' must be a {kind.__name__}")
 
+    for key in ("metric", "processor"):
+        value = e.get(key)
+        if value is None:
+            continue
+        if event != "metrics":
+            raise ValueError(f"{where} '{key}:' only applies to the 'metrics' event, not {event!r}")
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{where} '{key}:' must be a non-empty string")
+
     text_matches = e.get("text_matches")
     if isinstance(text_matches, str):
         text_matches = [text_matches]
@@ -1086,7 +1197,10 @@ def _parse_expectation(e: Any, path: Path, turn_idx: int, exp_idx: int) -> EvalE
         marker_first=e.get("marker_first"),
         markers=e.get("markers"),
         text_after=e.get("text_after"),
+        metric=e.get("metric"),
+        processor=e.get("processor"),
         check_from=check_from,
+        allow_continue=allow_continue,
         absent=absent,
     )
 

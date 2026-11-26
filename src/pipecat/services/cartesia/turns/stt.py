@@ -34,9 +34,12 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.eager_end_of_turn_mixin import EagerEndOfTurnSTTServiceMixin
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
+
+_MAX_LANGUAGE_HINTS = 6
 
 # Connection-bound turn detection query parameters, named as Cartesia documents
 # them. A change to any of them is applied by reconnecting.
@@ -46,6 +49,18 @@ _TURN_DETECTION_FIELDS = (
     "turn_end_threshold",
     "turn_end_timeout_ms",
 )
+
+
+def _prepare_language_hints(hints: list[Language] | None | NotGiven) -> list[str]:
+    """Normalize language hints to distinct base codes and enforce Cartesia's limit."""
+    if not is_given(hints) or not hints:
+        return []
+    codes = list(dict.fromkeys(Language(hint).value.split("-")[0] for hint in hints))
+    if len(codes) > _MAX_LANGUAGE_HINTS:
+        raise ValueError(
+            f"language_hints accepts at most {_MAX_LANGUAGE_HINTS} distinct base codes"
+        )
+    return codes
 
 
 class CartesiaTurnsRequestError(Exception):
@@ -70,8 +85,7 @@ class CartesiaTurnsRequestError(Exception):
 class CartesiaTurnsSTTSettings(STTSettings):
     """Settings for CartesiaTurnsSTTService.
 
-    The ink-2 model family is English-only and does not support runtime model
-    or language switching.
+    Language hints can be updated at runtime. The model is set at construction.
 
     The four ``turn_*`` fields tune server-side turn detection. Cartesia binds
     them to a connection, so updating any of them at runtime triggers a
@@ -86,6 +100,13 @@ class CartesiaTurnsSTTSettings(STTSettings):
             Cartesia binds keyterms to a connection, so updating this setting
             at runtime triggers a reconnect. See
             https://docs.cartesia.ai/use-the-api/stt/keyterms.
+        language_hints: Languages to steer transcription toward, sent as
+            repeated ``language_hint`` query parameters on the connection URL.
+            Accepts up to six distinct base codes (``pt`` for ``Language.PT_BR``).
+            Hints don't stop the model transcribing other languages. Updating this
+            setting at runtime replaces the hints on the open connection. Not
+            every model accepts hints; see
+            https://docs.cartesia.ai/use-the-api/stt/languages.
         turn_start_threshold: Likelihood above which the server emits
             ``turn.start``. 0.5–0.9; Cartesia defaults to 0.8.
         turn_eager_end_threshold: Likelihood below which the server emits
@@ -97,6 +118,7 @@ class CartesiaTurnsSTTSettings(STTSettings):
     """
 
     keyterm: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_hints: list[Language] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     turn_start_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     turn_eager_end_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     turn_end_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -123,6 +145,9 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
     :class:`UserTurnResponseCancelFrame`, which
     :class:`~pipecat.turns.user_turn_strategies.EagerUserTurnStrategies` uses to
     answer a predicted end of turn ahead of the committed one.
+
+    Final and eager transcription frames carry the strongest language detection
+    from their event, when available. Interim transcriptions leave it unset.
 
     Event handlers available (in addition to the base
     ``on_connected`` / ``on_disconnected`` / ``on_connection_error``):
@@ -184,17 +209,16 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
                 including the ones the server withdraws.
             extra_headers: Optional additional HTTP headers to send with the
                 WebSocket handshake.
-            settings: Runtime-updatable settings. The ink-2 family does not
-                support runtime model or language switching; attempts to update
-                either field will be reported as unhandled.
+            settings: Service settings, including language hints that can be
+                updated at runtime. The model is set at construction.
             **kwargs: Additional arguments passed to the parent
                 :class:`WebsocketSTTService`.
         """
-        # ink-2 is English-only at launch.
         default_settings = self.Settings(
             model="ink-2",
             language=None,
             keyterm=None,
+            language_hints=None,
             # Left unset so the server applies its own turn detection defaults.
             turn_start_threshold=None,
             turn_eager_end_threshold=None,
@@ -203,6 +227,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         )
 
         if settings is not None:
+            _prepare_language_hints(settings.language_hints)
             default_settings.apply_update(settings)
 
         super().__init__(
@@ -217,8 +242,6 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         self._should_interrupt = should_interrupt
         self._watchdog_min_timeout = watchdog_min_timeout
         self._extra_headers = dict(extra_headers) if extra_headers else {}
-        # ink-2 is English-only at launch; language on emitted frames is fixed.
-        self._language = Language.EN
 
         self._request_id: str | None = None
         self._receive_task: asyncio.Task | None = None
@@ -263,9 +286,9 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         ``user_turn_strategies``.
         """
         frame = super().service_metadata_frame()
-        frame.user_turn_strategies = self.recommended_user_turn_strategies(
+        frame.user_turn_strategies = self.eager_user_turn_strategies(
             enable_interruptions=self._should_interrupt,
-        )
+        ) or ExternalUserTurnStrategies(enable_interruptions=self._should_interrupt)
         return frame
 
     # ------------------------------------------------------------------
@@ -303,9 +326,9 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         """Apply a settings delta.
 
         Keyterms and the turn detection thresholds are bound to a connection,
-        so a change to any of them is applied by reconnecting. Ink-2 does not
-        support runtime model or language switching, so those changes are
-        reported as unhandled.
+        so a change to any of them is applied by reconnecting. Language hints
+        are replaced on the open connection. Model updates are reported as
+        unhandled.
 
         Args:
             delta: A :class:`STTSettings` (or
@@ -314,15 +337,36 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         Returns:
             Dict mapping changed field names to their previous values.
         """
+        if isinstance(delta, CartesiaTurnsSTTSettings):
+            _prepare_language_hints(delta.language_hints)
         changed = await super()._update_settings(delta)
 
         connection_bound = {"keyterm", *_TURN_DETECTION_FIELDS}
-        self._warn_unhandled_updated_settings(changed.keys() - connection_bound)
+        self._warn_unhandled_updated_settings(
+            changed.keys() - connection_bound - {"language_hints"}
+        )
 
+        # A new connection takes the current hints from its URL.
         if changed.keys() & connection_bound:
             await self._request_reconnect()
+        elif "language_hints" in changed:
+            await self._send_language_hints()
 
         return changed
+
+    async def _send_language_hints(self):
+        """Replace the open connection's language hints with a ``config`` message.
+
+        The server sends no reply on success, and an ``error`` event for hints
+        it rejects, which leaves the connection open.
+        """
+        if not (self._websocket and self._websocket.state is State.OPEN):
+            return
+        hints = _prepare_language_hints(self._settings.language_hints)
+        try:
+            await self._websocket.send(json.dumps({"type": "config", "language_hints": hints}))
+        except Exception as e:
+            await self.push_error(error_msg=f"Failed to send language hints: {e}", exception=e)
 
     # ------------------------------------------------------------------
     # Connection management
@@ -394,6 +438,10 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
             if is_given(value := getattr(self._settings, name)) and value is not None
         )
         params.extend(("keyterm", term) for term in _prepare_keyterms(self._settings.keyterm))
+        params.extend(
+            ("language_hint", code)
+            for code in _prepare_language_hints(self._settings.language_hints)
+        )
         # Cartesia expects spaces inside a keyterm as %20, which urlencode only
         # emits with quote_via=quote.
         return f"{self._url}?{urllib.parse.urlencode(params, quote_via=urllib.parse.quote)}"
@@ -592,9 +640,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         transcript, self._turn_transcript = self._turn_transcript, ""
         if transcript:
             await self.emit_stt_usage_metrics()
-            await self.push_frame(
-                TranscriptionFrame(transcript, self._user_id, time_now_iso8601(), self._language)
-            )
+            await self.push_frame(TranscriptionFrame(transcript, self._user_id, time_now_iso8601()))
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
 
     @traced_stt
@@ -658,7 +704,6 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
                     transcript,
                     self._user_id,
                     time_now_iso8601(),
-                    self._language,
                     result=data,
                 )
             )
@@ -674,7 +719,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         """
         transcript = data.get("transcript", "")
         await self._push_eager_end_of_turn(
-            transcript, user_id=self._user_id, language=self._language, result=data
+            transcript, user_id=self._user_id, language=self._detected_language(data), result=data
         )
         await self._call_event_handler("on_turn_eager_end", transcript)
 
@@ -697,6 +742,7 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
         # avoid an empty user message downstream; the lifecycle frames below
         # still fire so the turn closes cleanly.
         if transcript:
+            language = self._detected_language(data)
             # Report usage before the transcription frame so tracing can
             # attach it to the STT span the frame closes.
             await self.emit_stt_usage_metrics()
@@ -705,14 +751,26 @@ class CartesiaTurnsSTTService(EagerEndOfTurnSTTServiceMixin, WebsocketSTTService
                     transcript,
                     self._user_id,
                     time_now_iso8601(),
-                    self._language,
+                    language=language,
                     result=data,
                     finalized=True,
                 )
             )
-            await self._handle_transcription(transcript, True, self._language)
+            await self._handle_transcription(transcript, True, language)
         await self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
         await self._call_event_handler("on_turn_end", transcript)
+
+    def _detected_language(self, data: dict) -> Language | None:
+        """Read the first language in the event's strongest-first detection list."""
+        languages = data.get("languages")
+        if not languages:
+            return None
+        code = languages[0].get("language")
+        try:
+            return Language(code)
+        except ValueError:
+            logger.debug(f"{self}: no Language for detected language {code!r}")
+            return None
 
     async def _handle_server_error(self, data: dict):
         message = data.get("message", "Unknown error")

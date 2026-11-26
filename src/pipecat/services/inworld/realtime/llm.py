@@ -39,7 +39,6 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
@@ -62,6 +61,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, LLMWit
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
@@ -186,6 +186,7 @@ _NON_FATAL_ERROR_CODES = {
 }
 
 
+@traced_realtime_llm
 class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
     """Inworld Realtime LLM service for real-time audio and text communication.
 
@@ -613,8 +614,6 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
             await self._handle_user_stopped_speaking(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._handle_bot_stopped_speaking()
-        elif isinstance(frame, LLMMessagesAppendFrame):
-            await self._handle_messages_append(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             # Continuous session: no fresh context frame per turn, so sync the
             # registered tool handlers to the new tool set here (the base service
@@ -756,10 +755,6 @@ class InworldRealtimeLLMService(LLMService[InworldRealtimeLLMAdapter]):
                     await self.start_processing_metrics()
                     await self.start_ttfb_metrics()
                     await self.send_client_event(events.ResponseCreateEvent())
-
-    async def _handle_messages_append(self, frame):
-        """Handle appending messages to the context (not yet supported)."""
-        logger.warning(f"{self}: LLMMessagesAppendFrame is not yet supported by Inworld Realtime")
 
     #
     # WebSocket communication

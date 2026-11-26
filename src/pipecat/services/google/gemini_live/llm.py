@@ -80,7 +80,7 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.deprecation import deprecated
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
+from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from .file_api import GeminiFileAPI
@@ -421,6 +421,7 @@ class GeminiLiveLLMSettings(LLMSettings):
     proactivity: ProactivityConfig | dict | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+@traced_realtime_llm
 class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     """Provides access to Google's Gemini Live API.
 
@@ -810,7 +811,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         self._last_transcription_sent = ""
         self._bot_audio_buffer = bytearray()
         self._bot_text_buffer = ""
-        self._llm_output_buffer = ""
         self._transcription_timeout_task = None
 
         self._sample_rate = 24000
@@ -1150,14 +1150,16 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         model reads them without answering. Whether it answers is the
         aggregator's call: an append that asks to run comes back to this
         service as the context frame the assistant aggregator pushes upstream,
-        which completes the turn (see :meth:`_handle_context`). Without a
-        context aggregator, the append starts a conversation on its own, which
-        is how a pipeline with no aggregators kicks one off.
+        which completes the turn (see :meth:`_handle_context`).
+
+        If the session hasn't received its first context yet, the messages
+        aren't sent. The assistant aggregator adds them to the context, and the
+        session starts from that context, so the model gets them then.
+
+        The messages are taken from this frame, not read from the context.
+        ``LLMUserAggregator._realtime_handle_messages_append`` explains why.
         """
-        if self._context is None:
-            await self._create_single_response(frame.messages)
-            return
-        if self._disconnecting or not self._session:
+        if self._context is None or self._disconnecting or not self._session:
             return
         turns = cast(
             "list[Content | ContentDict]",
@@ -1685,6 +1687,10 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         if sc and sc.turn_complete:
             if not message.usage_metadata:
                 logger.warning("Received turn_complete without usage_metadata")
+            # Usage goes first, so the reply it belongs to is still open when
+            # it is reported.
+            if message.usage_metadata:
+                await self._handle_msg_usage_metadata(message)
             if interaction_idle is False:
                 # The server is still reasoning in the background, so this
                 # turn_complete only closes an output chunk. Hold the turn
@@ -1695,8 +1701,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 # earlier one still being held.
                 self._discard_deferred_turn()
                 await self._handle_msg_turn_complete(message)
-            if message.usage_metadata:
-                await self._handle_msg_usage_metadata(message)
         if message.tool_call:
             await self._handle_msg_tool_call(message)
         if message.session_resumption_update:
@@ -2105,41 +2109,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
         self._ready_for_realtime_input = True
 
-    async def _create_single_response(self, messages_list):
-        """Create a single response from a list of messages.
-
-        This is only here to support the very specific 'legacy' scenario of
-        kicking off a conversation using LLMMessagesAppendFrame when there's no
-        context aggregators in the pipeline (see process_frame for more details).
-        """
-        if self._disconnecting or not self._session:
-            return
-
-        # Create a throwaway context just for the purpose of getting messages
-        # in the right format
-        context = LLMContext(messages=messages_list)
-        adapter = self.get_llm_adapter()
-        messages = cast(
-            "list[Content | ContentDict]",
-            (await adapter.get_llm_invocation_params(context)).get("messages", []),
-        )
-
-        if not messages:
-            return
-
-        logger.debug(f"Creating response: {messages}")
-
-        await self.start_ttfb_metrics()
-
-        try:
-            await self._session.send_client_content(turns=messages, turn_complete=True)
-            # Gemini 3.x wants turn_complete=True, but also won't run inference without a realtime input
-            if self._is_gemini_3:
-                await self._session.send_realtime_input(text=" ")
-        except Exception as e:
-            await self._handle_send_error(e)
-
-    @traced_gemini_live(operation="llm_tool_result")
     async def _tool_result(
         self,
         tool_call_id: str,
@@ -2306,7 +2275,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         )
         await self.push_frame(frame)
 
-    @traced_gemini_live(operation="llm_tool_call")
     async def _handle_msg_tool_call(self, message: LiveServerMessage):
         """Handle tool call messages."""
         assert message.tool_call is not None
@@ -2336,16 +2304,11 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
 
         await self.run_function_calls(function_calls_llm)
 
-    @traced_gemini_live(operation="llm_response")
     async def _handle_msg_turn_complete(self, message: LiveServerMessage):
         """Handle the turn complete message."""
         text = self._bot_text_buffer
 
-        # Trace the complete LLM response (this will be handled by the decorator)
-        # The decorator will extract the output text and usage metadata from the message
-
         self._bot_text_buffer = ""
-        self._llm_output_buffer = ""
 
         # Process grounding metadata if we have accumulated any
         if self._accumulated_grounding_metadata:
@@ -2367,13 +2330,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 # TEXT modality case
                 await self.push_frame(LLMFullResponseEndFrame())
 
-    @traced_stt
-    async def _handle_user_transcription(
-        self, transcript: str, is_final: bool, language: Language | None = None
-    ):
-        """Handle a transcription result with tracing."""
-        pass
-
     async def _push_user_transcription(self, text: str, result: LiveServerMessage | None = None):
         """Push a user transcription frame upstream.
 
@@ -2384,7 +2340,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
             text: The transcription text to push
             result: Optional LiveServerMessage that triggered this transcription
         """
-        await self._handle_user_transcription(text, True, self._settings.language)
         await self.push_frame(
             TranscriptionFrame(
                 text=text,
@@ -2493,8 +2448,6 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
         # Check for grounding metadata in server content
         if message.server_content and message.server_content.grounding_metadata:
             self._accumulated_grounding_metadata = message.server_content.grounding_metadata
-        # Collect text for tracing
-        self._llm_output_buffer += text
 
         # NOTE: Shoot. When using Vertex AI, output transcription messages
         # arrive *before* the model_turn messages with audio, so we need to

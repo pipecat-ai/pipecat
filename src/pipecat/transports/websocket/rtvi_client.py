@@ -8,8 +8,9 @@
 
 `RTVIClientTransport` connects to a bot that runs an RTVI *server* transport
 (e.g. the eval transport) and exchanges frames with it: the bot's RTVI server
-messages arrive as pipeline frames, and outgoing frames (audio, pre-built RTVI
-client messages) are sent to the bot. It is the client-side counterpart to a bot
+messages reach the pipeline as raw messages, ``InputTransportMessageFrame``s
+pushed downstream, and outgoing frames (audio, pre-built RTVI client messages)
+are sent to the bot. It is the client-side counterpart to a bot
 running an RTVI server transport, and the foundation for the eval harness and
 eval simulations (see ``docs/design/eval-simulations.md``).
 
@@ -21,12 +22,35 @@ defaulting its serializer to
 
 import json
 
+from pydantic import ValidationError
+
 import pipecat.processors.frameworks.rtvi.models as RTVI
+from pipecat.frames.frames import InputTransportMessageFrame
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.serializers.rtvi_client import RTVIClientSerializer
 from pipecat.transports.websocket.client import (
+    WebsocketClientInputTransport,
     WebsocketClientParams,
     WebsocketClientTransport,
 )
+
+
+class RTVIClientInputTransport(WebsocketClientInputTransport):
+    """Input transport that hands the bot's RTVI messages to the pipeline downstream only.
+
+    A ``PipelineWorker`` puts its own ``RTVIProcessor`` ahead of the pipeline,
+    and it takes any ``InputTransportMessageFrame`` reaching it for a client's
+    message to it. The bot's messages must not reach it: it would answer them
+    with errors sent back to the bot.
+    """
+
+    async def _push_transport_message(self, frame: InputTransportMessageFrame):
+        """Push the bot's message downstream, past nothing upstream of the input.
+
+        Args:
+            frame: The bot's message, as the serializer deserialized it.
+        """
+        await self.push_frame(frame)
 
 
 class RTVIClientTransport(WebsocketClientTransport):
@@ -36,7 +60,11 @@ class RTVIClientTransport(WebsocketClientTransport):
 
     - on_connected: the WebSocket connection was established
     - on_disconnected: the WebSocket connection was closed
-    - on_bot_ready: the bot answered the ``client-ready`` handshake with ``bot-ready``
+    - on_bot_ready: the bot answered the ``client-ready`` handshake with ``bot-ready``.
+      The handler runs before any later message from the bot is dispatched, so
+      it acts on what the bot reported before it hears anything else from it.
+      It runs in the loop that reads from the bot, so it must return quickly
+      and must not wait for anything the bot sends next.
 
     Example::
 
@@ -63,12 +91,34 @@ class RTVIClientTransport(WebsocketClientTransport):
         super().__init__(uri, params)
 
         self._bot_ready = False
-        self._register_event_handler("on_bot_ready")
+        self._bot_capabilities: BotCapabilities | None = None
+        # Run inline: the bot can send its first reports right after bot-ready,
+        # and they must not reach the pipeline before the handler has run.
+        self._register_event_handler("on_bot_ready", sync=True)
+
+    def input(self) -> WebsocketClientInputTransport:
+        """Get the input transport, which hands the bot's messages downstream only.
+
+        Returns:
+            The RTVI client input transport instance.
+        """
+        if not self._input:
+            self._input = RTVIClientInputTransport(self, self._session, self._params)
+        return self._input
 
     @property
     def bot_ready(self) -> bool:
         """Whether the bot has answered the handshake with ``bot-ready``."""
         return self._bot_ready
+
+    @property
+    def bot_capabilities(self) -> BotCapabilities | None:
+        """What the bot reported it does in ``bot-ready``.
+
+        ``None`` before ``bot-ready``, and when the bot reported nothing
+        readable, as bots on Pipecat before 1.13 do.
+        """
+        return self._bot_capabilities
 
     async def _on_connected(self, websocket):
         """On connect, fire the user's handler and start the RTVI handshake."""
@@ -79,6 +129,7 @@ class RTVIClientTransport(WebsocketClientTransport):
         """Watch for ``bot-ready`` to complete the handshake, then dispatch normally."""
         if not self._bot_ready and self._is_bot_ready(message):
             self._bot_ready = True
+            self._bot_capabilities = self._capabilities(message)
             await self._call_event_handler("on_bot_ready")
         await super()._on_message(websocket, message)
 
@@ -106,3 +157,15 @@ class RTVIClientTransport(WebsocketClientTransport):
             and data.get("label") == RTVI.MESSAGE_LABEL
             and data.get("type") == "bot-ready"
         )
+
+    @staticmethod
+    def _capabilities(bot_ready) -> BotCapabilities | None:
+        """Return the capabilities a ``bot-ready`` message reports, or ``None`` if none."""
+        data = json.loads(bot_ready).get("data")
+        capabilities = data.get("capabilities") if isinstance(data, dict) else None
+        if capabilities is None:
+            return None
+        try:
+            return BotCapabilities.model_validate(capabilities)
+        except ValidationError:
+            return None

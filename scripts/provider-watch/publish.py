@@ -27,7 +27,8 @@ A sweep over the open provider-watch PRs then renames every ``+slug``
 changelog fragment to its PR's number — the PRs this pass opened, plus any
 left misnamed from a previous killed run.
 
-Then commit and push ``_reports``. With ``--finalize`` it also publishes the
+Then commit and push ``_reports``, pulling and retrying when another research
+group's push lands first. With ``--finalize`` it also publishes the
 digest — the ``digests/<date>.md`` that ``/provider-research-digest`` rendered,
 or a highlights-less render made here when none exists — and opens (or
 updates) the digest issue on the reports repo when there is anything to show.
@@ -60,6 +61,11 @@ import digest  # noqa: E402
 REPO_ROOT = HERE.parents[1]
 DEFAULT_REPORTS = REPO_ROOT / "_reports"
 PR_LABEL = "provider-watch"
+
+# Research groups push their reports to the same branch, so a push can lose to
+# another group's. Each lost attempt means another group's push landed, so a
+# few attempts are plenty.
+PUSH_ATTEMPTS = 5
 
 # The line a researcher writes under "## PRs" for a local branch; rewritten to
 # the PR URL once the PR exists.
@@ -355,11 +361,13 @@ def push_reports(sh: Shell, reports_dir: Path, date: str) -> bool:
     if sh.ok("git", "diff", "--cached", "--quiet", cwd=reports_dir):
         return False
     sh.run("git", "commit", "-q", "-m", f"provider-watch: {date}", cwd=reports_dir)
-    try:
-        sh.run("git", "push", cwd=reports_dir)
-    except RuntimeError:
-        sh.run("git", "pull", "--rebase", "--quiet", cwd=reports_dir)
-        sh.run("git", "push", cwd=reports_dir)
+    for _ in range(PUSH_ATTEMPTS - 1):
+        try:
+            sh.run("git", "push", cwd=reports_dir)
+            return True
+        except RuntimeError:
+            sh.run("git", "pull", "--rebase", "--quiet", cwd=reports_dir)
+    sh.run("git", "push", cwd=reports_dir)
     return True
 
 

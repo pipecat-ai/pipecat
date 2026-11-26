@@ -351,12 +351,26 @@ class TestEvalsScenarioParser(unittest.TestCase):
         self.assertEqual(turn.user, "So last week I went to Spain.")
         self.assertEqual(turn.parts, ["So last week I went to", 2000, "Spain."])
 
+    def test_a_turn_can_pause_up_to_the_limit(self):
+        s = _script(
+            _write(
+                "name: a\n"
+                "user: {modality: audio, speech: {service: kokoro, voice: v1}}\n"
+                "turns: [{user: ['Hi', {pause_ms: 30000}, 'so', {pause_ms: 30000}]}]\n"
+            )
+        )
+        self.assertEqual(s.turns[0].parts, ["Hi", 30000, "so", 30000])
+
     def test_user_turn_pauses_are_validated(self):
         audio = "user: {modality: audio, speech: {service: kokoro, voice: v1}}\n"
         cases = {
             "pauses but no text": audio + "turns: [{user: [{pause_ms: 500}]}]\n",
             "items must be text": audio + "turns: [{user: ['Hi', {pause_ms: 0}]}]\n",
             "text modality": "turns: [{user: ['Hi', {pause_ms: 500}, 'there']}]\n",
+            "60001 ms in total": audio + "turns: [{user: ['Hi', {pause_ms: 60001}]}]\n",
+            "60500 ms in total": (
+                audio + "turns: [{user: ['Hi', {pause_ms: 30000}, 'so', {pause_ms: 30500}]}]\n"
+            ),
         }
         for message, body in cases.items():
             with self.subTest(message=message):
@@ -451,6 +465,44 @@ class TestEvalsScenarioParser(unittest.TestCase):
                             expect:
                               - event: llm_response
                                 text_matches: {value}
+                        """
+                    )
+                )
+
+    def test_allow_continue_false_parsed(self):
+        s = _script(
+            _write(
+                """
+                name: final
+                turns:
+                  - user: "x"
+                    expect:
+                      - event: llm_response
+                        eval: "says it is still working"
+                        allow_continue: false
+                      - event: llm_response
+                        eval: "gives the result"
+                """
+            )
+        )
+        self.assertIs(s.turns[0].expect[0].allow_continue, False)
+        self.assertIsNone(s.turns[0].expect[1].allow_continue)
+
+    def test_allow_continue_needs_eval_and_a_boolean(self):
+        for extra in (
+            "allow_continue: false",
+            'eval: "x"\n                                allow_continue: no way',
+        ):
+            with self.assertRaises(ValueError):
+                _script(
+                    _write(
+                        f"""
+                        name: bad_allow_continue
+                        turns:
+                          - user: "x"
+                            expect:
+                              - event: llm_response
+                                {extra}
                         """
                     )
                 )
@@ -613,6 +665,48 @@ class TestEvalsScenarioParser(unittest.TestCase):
             with self.assertRaises(ValueError, msg=bad) as ctx:
                 EvalScriptScenario.load(_write(f'name: bad\nturns:\n  - user: "x"\n    {bad}\n'))
             self.assertIn(message, str(ctx.exception))
+
+    def test_metrics_expectation(self):
+        s = EvalScriptScenario.load(
+            _write(
+                """
+                name: metrics
+                turns:
+                  - user: "hello"
+                    expect:
+                      - event: metrics
+                      - event: metrics
+                        metric: ttfb
+                        processor: STT
+                        check_from: turn_start
+                """
+            )
+        )
+        bare, filtered = s.turns[0].expect
+        self.assertEqual((bare.metric, bare.processor), (None, None))
+        self.assertEqual((filtered.metric, filtered.processor), ("ttfb", "STT"))
+        for bad, message in (
+            ("expect: [{event: response, metric: ttfb}]", "only applies to the 'metrics' event"),
+            ("expect: [{event: response, processor: STT}]", "only applies to the 'metrics' event"),
+            ("expect: [{event: metrics, metric: 1}]", "'metric:' must be a non-empty string"),
+            ("expect: [{event: metrics, absent: true, metric: ttfb}]", "cannot be combined"),
+        ):
+            with self.assertRaises(ValueError, msg=bad) as ctx:
+                EvalScriptScenario.load(_write(f'name: bad\nturns:\n  - user: "x"\n    {bad}\n'))
+            self.assertIn(message, str(ctx.exception))
+
+    def test_llm_marker_silent_kind_parsed(self):
+        s = _script(
+            _write(
+                """
+                name: silent_marker
+                turns:
+                  - user: "x"
+                    expect: [{event: llm_marker, marker: silent}]
+                """
+            )
+        )
+        self.assertEqual(s.turns[0].expect[0].marker, "silent")
 
     def test_llm_marker_unknown_kind_rejected(self):
         with self.assertRaises(ValueError) as ctx:

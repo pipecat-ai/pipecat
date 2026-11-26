@@ -21,14 +21,14 @@ import mimetypes
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from loguru import logger
 from pydantic import BaseModel, Field
 from websockets.asyncio.client import ClientConnection
-from websockets.exceptions import InvalidHandshake
+from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -46,25 +46,19 @@ from pipecat.evals.serializer import (
     EVAL_STT_SAMPLE_RATE,
     EvalClientSerializer,
     EvalConnectionFlags,
-    EvalFunctionCallCancelFrame,
 )
 from pipecat.evals.session import DEFAULT_BOT_READY_TIMEOUT_S, EvalSessionParams
 from pipecat.evals.tts import CachingTTSService, tts_sample_rate
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     DataFrame,
     EndFrame,
     Frame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
     InputTransportMessageFrame,
     InterruptionFrame,
     LLMConfigureOutputFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMarkerResponseFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     OutputTransportMessageUrgentFrame,
@@ -74,9 +68,11 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserTurnCompletionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.pipeline.capabilities import BotCapabilities
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -89,29 +85,11 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transports.websocket.client import WebsocketClientParams
+from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 # The default, at the name the deprecated ``pipecat.evals.harness`` re-exports.
 BOT_READY_TIMEOUT_S = DEFAULT_BOT_READY_TIMEOUT_S
-
-
-# Frames the bot produced: the sink turns them into events and stops them here.
-# Everything downstream of the sink speaks for the user (a persona LLM, the user
-# TTS, the output) and must never see the bot's text or reports as its own
-# input. The aggregator's context frame and lifecycle frames pass.
-_BOT_FRAMES = (
-    LLMFullResponseStartFrame,
-    LLMTextFrame,
-    LLMMarkerResponseFrame,
-    LLMFullResponseEndFrame,
-    TTSTextFrame,
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
-    EvalFunctionCallCancelFrame,
-    InputTransportMessageFrame,
-)
 
 
 def _close_description(websocket: ClientConnection) -> str:
@@ -172,13 +150,13 @@ def _tag_bot_segments(stt: SegmentedSTTService, starts: "deque[float]") -> None:
         try:
             async for frame in run_stt(audio):
                 if isinstance(frame, TranscriptionFrame):
+                    # Every field the frame was built with, so none is dropped.
                     frame = _BotSegmentTranscriptionFrame(
-                        text=frame.text,
-                        user_id=frame.user_id,
-                        timestamp=frame.timestamp,
-                        language=frame.language,
-                        result=frame.result,
-                        finalized=frame.finalized,
+                        **{
+                            f.name: getattr(frame, f.name)
+                            for f in fields(TranscriptionFrame)
+                            if f.init
+                        },
                         segment_started_at=started_at,
                     )
                 yield frame
@@ -203,19 +181,18 @@ class _BotSpeechGate(FrameProcessor):
     folded into it. A turn that sends nothing drops the same way what the bot
     says before it starts speaking again.
 
-    Both need a segmented STT, which transcribes one segment at a time. With
-    any other STT the gate keeps no account of segments and drops nothing, and
-    a send waits only for the bot to stop speaking and its open turn to close.
+    Both need a segmented STT, which transcribes one segment at a time, so the
+    client accepts no other.
     """
 
-    def __init__(self, stream: EvalEventStream, trace: EvalTrace, starts: "deque[float] | None"):
+    def __init__(self, stream: EvalEventStream, trace: EvalTrace, starts: "deque[float]"):
         """Initialize the gate.
 
         Args:
             stream: The event stream, for when the user's input was sent.
             trace: The run's trace, for what the gate drops.
             starts: Where the start of each ended segment goes, for the STT's
-                tagging; ``None`` with an STT that is not segmented.
+                tagging.
         """
         super().__init__()
         self._stream = stream
@@ -225,9 +202,7 @@ class _BotSpeechGate(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if self._starts is None:
-            pass
-        elif isinstance(frame, VADUserStartedSpeakingFrame):
+        if isinstance(frame, VADUserStartedSpeakingFrame):
             logger.debug(f"bot speech: segment began ({direction.name})")
             self._segment_started_at = time.monotonic()
             self._stream.bot_segment_started()
@@ -247,7 +222,7 @@ class _BotSpeechGate(FrameProcessor):
 class _BotFrameSink(FrameProcessor):
     """Where the bot's output stops and the user's turns start.
 
-    The bot's frames become events on the stream and go no further. The
+    The bot's RTVI messages become events on the stream and go no further. The
     user's turns are injected here, past the bot's side of the pipeline, so
     an interruption there cannot drop them.
 
@@ -257,6 +232,11 @@ class _BotFrameSink(FrameProcessor):
     talking stops). And the persona answers from here: in text mode it hears
     each finished bot response through the sink, in audio mode the aggregator
     hands it the bot's turn; either way nothing reaches it once it hung up.
+
+    Once the persona has hung up, its LLM no longer marks the bot's turns
+    complete. The sink marks the closing turn complete in its place once the
+    bot reports it stopped speaking, so a pause between two of the bot's
+    sentences doesn't end it.
     """
 
     def __init__(
@@ -269,7 +249,7 @@ class _BotFrameSink(FrameProcessor):
         """Initialize the sink.
 
         Args:
-            stream: Where the bot's frames go as events.
+            stream: Where the bot's RTVI messages go as events.
             persona: The simulated caller, else ``None``.
             persona_hears: Whether the persona hears the bot's responses through
                 the sink (text mode, with no aggregator to hand it the turn).
@@ -278,6 +258,9 @@ class _BotFrameSink(FrameProcessor):
         self._stream = stream
         self._persona = persona
         self._persona_hears = persona_hears and persona is not None
+        # The closing turn's latest inference, marked complete once the bot
+        # stopped speaking.
+        self._closing_inference: LLMContextFrame | None = None
 
     async def inject(self, frame: Frame) -> None:
         """Push a user turn into the pipeline, past the bot's side.
@@ -290,26 +273,36 @@ class _BotFrameSink(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        # The bot's frames arrive downstream, from the input transport. What
+        # The bot's side arrives downstream, from the input transport. What
         # travels upstream is the user side's own (a persona's function call, a
         # TTS's lifecycle), not bot output, and passes through as is.
         if direction != FrameDirection.DOWNSTREAM:
             await self.push_frame(frame, direction)
             return
-        event = self._stream.frame_to_event(frame)
-        if event is not None:
-            await self._stream.append(event)
-            if self._persona_hears and self._persona is not None:
-                await self._answer(self._persona.hear(event))
+        if isinstance(frame, InputTransportMessageFrame):
+            # The bot's RTVI messages become events and stop here. Everything
+            # downstream of the sink speaks for the user (a persona LLM, the
+            # user TTS, the output) and must never take them as its own input.
+            event = self._stream.rtvi_message_to_event(frame.message)
+            if event is not None:
+                await self._stream.append(event)
+                if self._persona_hears and self._persona is not None:
+                    await self._answer(self._persona.hear(event))
+                await self._maybe_complete_closing_turn()
+            return
+        # Not one of the bot's RTVI messages, but activity on its side all the same.
+        self._stream.touch()
         if isinstance(frame, _BotSegmentTranscribedFrame):
             self._stream.bot_segment_transcribed()
             return
-        if isinstance(frame, _BOT_FRAMES):
-            return
-        elif isinstance(frame, InterruptionFrame) and self._persona is None:
+        if isinstance(frame, InterruptionFrame) and self._persona is None:
             return
         elif isinstance(frame, LLMContextFrame):
             # The aggregator handing the persona the bot's turn (audio mode).
+            if self._persona is not None and self._persona.hung_up:
+                self._closing_inference = frame
+                await self._maybe_complete_closing_turn()
+                return
             await self._answer(frame)
             return
         await self.push_frame(frame, direction)
@@ -319,6 +312,16 @@ class _BotFrameSink(FrameProcessor):
         if frame is None or self._persona is None or self._persona.hung_up:
             return
         await self.push_frame(frame)
+
+    async def _maybe_complete_closing_turn(self) -> None:
+        """Mark the closing turn complete for the persona once the bot stopped speaking."""
+        if self._closing_inference is None or self._stream.bot_speaking:
+            return
+        frame, self._closing_inference = self._closing_inference, None
+        await self.push_frame(
+            UserTurnCompletionFrame(kind="complete", context_frame_id=frame.id),
+            FrameDirection.UPSTREAM,
+        )
 
 
 # The event the relay appends for each response the persona completes, and the
@@ -456,7 +459,7 @@ class EvalClientParams(BaseModel):
 
 
 class EvalBotUnavailableError(Exception):
-    """The bot refused the connection, or closed it, before sending ``bot-ready``."""
+    """The bot refused the connection, closed it before ``bot-ready``, or can't carry the run's audio."""
 
     def __init__(self, kind: str, reason: str):
         """Initialize the error.
@@ -464,7 +467,9 @@ class EvalBotUnavailableError(Exception):
         Args:
             kind: The failure kind the run records: ``connect_failed`` when the
                 bot refused the connection, ``closed_before_ready`` when it
-                closed the connection before ``bot-ready``.
+                closed the connection before ``bot-ready``,
+                ``audio_unsupported`` when its ``bot-ready`` reported that its
+                transport is off for audio the run uses.
             reason: What happened, with the close code and reason when there
                 was one.
         """
@@ -518,13 +523,26 @@ class EvalClient:
             trace: The run's trace.
             user_tts: The :class:`~pipecat.evals.tts.CachingTTSService` that
                 synthesizes spoken user turns, or ``None`` for text mode.
-            bot_stt: The ``STTService`` that transcribes the bot's audio into
-                the ``response`` event, or ``None`` when unused.
+            bot_stt: The :class:`SegmentedSTTService` that transcribes the bot's
+                audio into the ``response`` event, or ``None`` when unused.
             persona: A simulation's :class:`~pipecat.evals.persona.EvalPersona`,
                 whose LLM rides in the pipeline and whose context the
                 aggregators keep up to date with both sides of the conversation;
                 ``None`` for a scripted scenario.
+
+        Raises:
+            ValueError: If ``bot_stt`` is not a :class:`SegmentedSTTService`.
         """
+        # Only a segmented STT's transcripts can be traced to when their audio
+        # began, which is how _BotSpeechGate tells the speech the user talked
+        # over from the bot's reply.
+        if bot_stt is not None and not isinstance(bot_stt, SegmentedSTTService):
+            raise ValueError(
+                f"The bot's speech must be transcribed by a SegmentedSTTService, and "
+                f"{type(bot_stt).__name__} is not one. Use the built-in moonshine or whisper, "
+                "or have judge.transcription's factory return a SegmentedSTTService, such as "
+                "DeepgramSegmentedSTTService, or pass one as bot_stt."
+            )
         self._bot_url = bot_url
         self._stream = stream
         self._trace = trace
@@ -609,12 +627,21 @@ class EvalClient:
             cancel_on_idle_timeout=False,
         )
 
+        bot_connection = (transport.input(), transport.output())
+
         @self._worker.event_handler("on_pipeline_error")
         async def _on_pipeline_error(_worker, frame):
-            # The transport connects as it starts, so a refused connection (an
-            # HTTP 403 for a spent token, nothing listening) surfaces here.
-            if isinstance(frame.exception, (InvalidHandshake, OSError)):
+            # An error before bot-ready ends the handshake. The transport connects
+            # to the bot as it starts, so a refused connection (an HTTP 403 for a
+            # spent token, nothing listening) surfaces here. Any other error is the
+            # harness's: a service failing, such as the caller's voice refused by
+            # its provider, or a bug in the harness's own transport code.
+            if frame.processor in bot_connection and isinstance(
+                frame.exception, (InvalidHandshake, OSError, ConnectionClosed)
+            ):
                 self._refuse("connect_failed", str(frame.exception))
+            else:
+                self._refuse("error", str(frame.error))
             self._stream.harness_failed(str(frame.error))
             await self._stream.append({"type": HARNESS_ERROR_EVENT, "text": str(frame.error)})
 
@@ -634,8 +661,9 @@ class EvalClient:
         instead of sending turns to a half-started bot.
 
         Raises:
-            EvalBotUnavailableError: If the bot refuses the connection or closes
-                it before sending ``bot-ready``.
+            EvalBotUnavailableError: If the bot refuses the connection, closes
+                it before sending ``bot-ready``, or reports that its transport
+                is off for audio the run uses.
             TimeoutError: If the bot never sends ``bot-ready``.
         """
         # The transport sends client-ready on connect and fires on_bot_ready when
@@ -835,10 +863,32 @@ class EvalClient:
         )
         await self._sink.inject(LLMConfigureOutputFrame(skip_tts=not self._params.user_audio))
 
+    def _check_audio_support(self, capabilities: BotCapabilities | None) -> None:
+        """Refuse the run if the bot reports its transport is off for audio the run uses.
+
+        A transport that drops the caller's audio, or never sends the bot's,
+        would otherwise pass for a bot ignoring the caller and use up the run's
+        turn budget. A bot that reports nothing (``None``) runs unchecked.
+        """
+        if self._session_params.audio_support_check == "off" or capabilities is None:
+            return
+        off = []
+        if self.sends_user_audio and capabilities.audio_in is False:
+            off.append("receive the caller's audio (audio_in_enabled)")
+        if self._params.bot_audio and capabilities.audio_out is False:
+            off.append("send its audio (audio_out_enabled)")
+        if off:
+            self._refuse(
+                "audio_unsupported", f"The bot's eval transport is set not to {' or '.join(off)}"
+            )
+
     def _refuse(self, kind: str, reason: str) -> None:
         """End the handshake with a refusal, unless it is already over."""
         if not self._handshake_over.is_set():
             self._refusal = EvalBotUnavailableError(kind, reason)
+            # A bot can greet as the run is torn down; the persona mustn't answer it.
+            if self._persona is not None:
+                self._persona.hang_up()
             self._handshake_over.set()
 
     def _connection_flags(self) -> EvalConnectionFlags:
@@ -906,6 +956,7 @@ class EvalClient:
 
         @transport.event_handler("on_bot_ready")
         async def _on_bot_ready(_transport):
+            self._check_audio_support(_transport.bot_capabilities)
             self._handshake_over.set()
 
         @transport.event_handler("on_disconnected")
@@ -918,6 +969,10 @@ class EvalClient:
             # bot-starter turning away a session over the agent's limit.
             self._refuse("closed_before_ready", _close_description(websocket))
             self._stream.bot_ended()
+            # The persona has nobody left to answer, so the sink marks the bot's
+            # last turn complete in its place.
+            if self._persona is not None:
+                self._persona.hang_up()
             await self._stream.append({"type": BOT_ENDED_EVENT})
 
         return transport
@@ -938,11 +993,9 @@ class EvalClient:
 
         inbound: list = [transport.input()]
         if bot_stt is not None:
-            starts: deque[float] | None = None
-            if isinstance(bot_stt, SegmentedSTTService):
-                starts = deque()
-                _tag_bot_segments(bot_stt, starts)
-            self._bot_turns = self._bot_turn_aggregator(context)
+            starts: deque[float] = deque()
+            _tag_bot_segments(bot_stt, starts)
+            self._bot_turns = self._bot_turn_aggregator(context, persona=persona is not None)
             inbound += [bot_stt, _BotSpeechGate(self._stream, self._trace, starts), self._bot_turns]
 
         speech = [user_tts] if user_tts is not None else []
@@ -959,16 +1012,28 @@ class EvalClient:
             ]
         return inbound + [self._sink] + outbound
 
-    def _bot_turn_aggregator(self, context: LLMContext) -> LLMUserAggregator:
+    def _bot_turn_aggregator(self, context: LLMContext, *, persona: bool) -> LLMUserAggregator:
         """The aggregator that cuts the bot's transcribed speech into turns (audio mode).
 
         Its turn hooks give the stream the timing of the bot's replies, and its
         finished turn is the persona's next user message.
+
+        Args:
+            context: The context the aggregator writes the bot's turns to.
+            persona: Whether a persona answers the bot's turns (a simulation).
+                Its LLM then also judges whether the bot finished what it was
+                saying: smart turn hears a finished turn at the end of every
+                sentence the bot's TTS speaks, and the persona waits for the
+                rest of a reply that reads unfinished. Once it hangs up, the
+                bot's report that it stopped speaking decides instead (see
+                ``_BotFrameSink``).
         """
+        strategies = FilterIncompleteUserTurnStrategies() if persona else None
         aggregator = LLMUserAggregator(
             context,
             params=LLMUserAggregatorParams(
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.4))
+                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.4)),
+                user_turn_strategies=strategies,
             ),
         )
 

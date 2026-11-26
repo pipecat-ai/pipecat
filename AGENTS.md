@@ -27,6 +27,9 @@ uv run pytest tests/test_name.py::test_function_name
 # Preview changelog
 uv run towncrier build --draft --version Unreleased
 
+# Check changelog fragment names (CI runs this on every PR)
+uv run python scripts/check-changelog-fragments.py
+
 # Run a behavioral eval scenario against a running bot (started with `python bot.py`)
 pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860/ws
 
@@ -79,7 +82,7 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 
 - **Serializers** (`src/pipecat/serializers/`): Convert frames to/from wire formats for WebSocket transports. `FrameSerializer` base class defines `serialize()` and `deserialize()`. Telephony serializers (Twilio, Plivo, Vonage, Telnyx, Exotel, Genesys) handle provider-specific protocols and audio encoding (e.g., μ-law).
 
-- **RTVI** (`src/pipecat/processors/frameworks/rtvi/`): Real-Time Voice Interface protocol bridging clients and the pipeline. `RTVIProcessor` handles incoming client messages (text input, audio, DTMF keypresses, function call results). `RTVIObserver` converts pipeline frames to outgoing messages: user/bot speaking events, transcriptions, LLM/TTS lifecycle, function calls, metrics, and audio levels.
+- **RTVI** (`src/pipecat/processors/frameworks/rtvi/`): Real-Time Voice Interface protocol bridging clients and the pipeline. `RTVIProcessor` handles incoming client messages (text input, audio, DTMF keypresses, function call results). `RTVIObserver` converts pipeline frames to outgoing messages: user/bot speaking events, transcriptions, LLM/TTS lifecycle, function calls, metrics, and audio levels. The protocol's specification lives in `rtvi/spec/`: a change to what the server sends or accepts goes in `MESSAGES` there too, and a released version's wire format never changes — see `rtvi/spec/README.md`.
 
 - **Observers** (`src/pipecat/observers/`): Monitor frame flow without modifying the pipeline. Passed to `PipelineWorker` via the `observers` parameter. Implement `on_process_frame()` and `on_push_frame()` callbacks.
 

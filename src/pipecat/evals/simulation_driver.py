@@ -6,6 +6,7 @@
 
 """The simulation driver: lets the persona hold the conversation, then judges the whole of it."""
 
+import math
 import time
 from collections.abc import Awaitable, Callable
 
@@ -40,9 +41,16 @@ from pipecat.utils.text.word_count import count_spoken_words
 # call has gone out to the bot.
 END_CALL_EVENT = "end_call"
 # How long the run waits, after the persona hangs up on its own last line, for
-# the bot's reply to it. A flow makes its final tool calls in that turn, and a
-# caller who hangs up mid-sentence is not what the simulation tests.
+# the bot's reply to it. The wait runs only while neither side is speaking, by
+# the bot's reports, and starts over when one stops: the persona's last line
+# plays out after the call is made, and the bot's reply can be long. A flow
+# makes its final tool calls in that turn, and a caller who hangs up
+# mid-sentence is not what the simulation tests.
 CLOSING_REPLY_WAIT_S = 15.0
+# How long the run waits, after the bot hangs up, for what it said last to close
+# into a turn. The harness hears the bot stop only in the silence that follows,
+# and smart turn may wait out its 3 s silence fallback.
+BOT_ENDED_WAIT_S = 5.0
 
 
 def _call_matches(spec: EvalFunctionCall, call: EvalFunctionCall) -> bool:
@@ -97,6 +105,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         self._persona = persona
         self._turns = 0
         self._ended_by: str | None = None
+        # When the run ended, on the stream's clock, for a reply still owed then.
+        self._ended_at: float | None = None
         self._duration_s = 0.0
         self._end_call: dict | None = None
         self._succeeded = False
@@ -130,6 +140,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
         # Set when the persona hangs up on its own last line: the run then
         # waits for the bot's reply to it, or this long, before ending.
         closing_ends: float | None = None
+        # Whether the bot hears the persona speaking, by its own reports.
+        bot_hears_persona = False
         while self._ended_by is None:
             lull_ends = self._stream.last_activity + simulation.max_silence_s
             waits = [deadline, lull_ends] + ([closing_ends] if closing_ends is not None else [])
@@ -157,7 +169,14 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                     self._ended_by = "end_call"
                 else:
                     self._trace.log("persona: hung up; waiting for the bot's closing turn")
-                    closing_ends = time.monotonic() + CLOSING_REPLY_WAIT_S
+                    closing_ends = self._closing_reply_deadline(bot_hears_persona)
+            elif event["type"] in ("user_started_speaking", "user_stopped_speaking"):
+                bot_hears_persona = event["type"] == "user_started_speaking"
+                if closing_ends is not None:
+                    closing_ends = self._closing_reply_deadline(bot_hears_persona)
+            elif event["type"] in ("bot_started_speaking", "bot_stopped_speaking"):
+                if closing_ends is not None:
+                    closing_ends = self._closing_reply_deadline(bot_hears_persona)
             elif event["type"] == BOT_ENDED_EVENT:
                 self._ended_by = "bot"
             elif event["type"] == HARNESS_ERROR_EVENT:
@@ -174,11 +193,14 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 await self._report("bot", event["text"])
                 if closing_ends is not None:
                     self._ended_by = "end_call"
+        self._ended_at = self._stream.elapsed()
         # The persona has said its last word either way: nothing the bot says
         # from here on gets an answer.
         await self._client.hang_up()
         self._duration_s = round(time.monotonic() - started, 3)
         self._trace.log(f"persona: ended by {self._ended_by} after {self._turns} turn(s)")
+        if self._ended_by == "bot":
+            await self._report_last_words()
         # Whatever the bot said last closes the conversation.
         self._observe_new_events()
         self._conversation.end_bot_turn()
@@ -215,6 +237,8 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
             events_seen=events_seen,
             debug_log=debug_log,
             success=self._simulation.success,
+            failure_kind=failures[0].kind if failures else None,
+            bot_metrics=self.bot_metrics(),
         )
 
     def timeline(self) -> list[dict]:
@@ -276,9 +300,22 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 lines.extend(EvalSimulationJudge.call_lines(message))
         return lines
 
+    def _closing_reply_deadline(self, bot_hears_persona: bool) -> float:
+        """When the closing reply wait runs out: never while either side is speaking."""
+        if bot_hears_persona or self._stream.bot_speaking:
+            return math.inf
+        return time.monotonic() + CLOSING_REPLY_WAIT_S
+
     async def _report(self, status: str, text: str) -> None:
         """Emit one line of the conversation, or its end, as progress."""
         await self._progress(EvalSimulationProgress(status=status, text=text, turn=self._turns))
+
+    async def _report_last_words(self) -> None:
+        """Wait for what the bot said before hanging up to close into a turn, and report it."""
+        await self._stream.wait_bot_transcribed(BOT_ENDED_WAIT_S)
+        for event in self._stream.events_seen[self._observed :]:
+            if event["type"] == self._bot_said and event.get("text"):
+                await self._report("bot", event["text"])
 
     def _harness_failure(self, text: str) -> EvalAssertionFailure:
         """The failure a harness pipeline error becomes: the run's error, scored against the current turn."""
@@ -423,38 +460,69 @@ class EvalSimulationDriver(BaseEvalDriver[EvalSimulationResult]):
                 return None, "no reply to measure"
             return float(longest), f"longest reply {longest} words"
         if measure == "latency":
-            slowest = max(self._reply_latencies(), default=None)
+            latencies, unanswered = self._reply_latencies()
+            slowest = max(
+                latencies + ([unanswered] if unanswered is not None else []), default=None
+            )
             if slowest is None:
                 return None, "no reply to time"
-            timed = (
-                "from the persona stopping to the first spoken sentence"
-                if self._simulation.bot_audio
-                else "to the first token"
-            )
-            return slowest, f"slowest reply {slowest:.2f} s {timed}"
+            start = "the persona stopping" if self._simulation.user_audio else "the persona's send"
+            end = "the bot starting to speak" if self._simulation.bot_audio else "the first token"
+            reason = f"slowest reply {slowest:.2f} s from {start} to {end}"
+            if unanswered is not None and slowest == unanswered:
+                reason += f", the last turn unanswered when the run ended by {self._ended_by}"
+            return slowest, reason
         raise ValueError(f"unknown measure {measure!r}")
 
-    def _reply_latencies(self) -> list[float]:
-        """Seconds from each persona turn to the bot's first word of the reply.
+    def _reply_latencies(self) -> tuple[list[float], float | None]:
+        """Seconds from each persona turn to the start of the bot's reply, and the wait of one never answered.
 
-        In text mode, from the send to the first LLM token; in audio mode, from
-        the bot noticing the persona stop to its first spoken sentence.
+        Each end follows its own side's modality. The start is the persona's
+        send for text input, and the bot noticing the persona stop for spoken
+        input, which the bot reports only for audio and only once its turn
+        strategy has decided the persona is done, so the bot's end-of-turn
+        wait is left out. The end is the first LLM
+        token of a reply that has text, for a text judge, and the bot starting
+        to speak, for an audio judge. An LLM response that only calls a
+        function has no text, so it is not the reply. The bot's report of its
+        first spoken word isn't used as the end: it lags the audio by about
+        0.1 s with a TTS that reports word timestamps, and by the whole first
+        sentence with an HTTP TTS that doesn't, which sends a sentence's text
+        after its audio.
+
+        A turn still unanswered when the run ends by silence or its time limit
+        was owed a reply, so the wait up to the end is returned as a lower
+        bound on its latency. Under the time limit that bound can be short.
+        After an ``end_call``, the turn limit, or the bot leaving, no reply
+        was owed, and nothing is returned for it.
         """
+        sent = "user_stopped_speaking" if self._simulation.user_audio else PERSONA_TURN_EVENT
         if self._simulation.bot_audio:
-            sent, replied = "user_stopped_speaking", "tts_response"
+            replied, needs_text = "bot_started_speaking", False
         else:
-            sent, replied = PERSONA_TURN_EVENT, "llm_response"
+            replied, needs_text = "llm_response", True
         latencies: list[float] = []
         sent_at: float | None = None
         for event in self._stream.events_seen:
             if event["type"] == sent:
                 sent_at = event.get("at")
-            elif event["type"] == replied and sent_at is not None:
+            elif (
+                event["type"] == replied
+                and sent_at is not None
+                and (event.get("text") or not needs_text)
+            ):
                 first_word = event.get("started_at", event.get("at"))
                 if first_word is not None:
                     latencies.append(round(max(0.0, first_word - sent_at), 3))
                 sent_at = None
-        return latencies
+        unanswered = None
+        if (
+            sent_at is not None
+            and self._ended_at is not None
+            and self._ended_by in ("silence", "max_duration")
+        ):
+            unanswered = round(max(0.0, self._ended_at - sent_at), 3)
+        return latencies, unanswered
 
     def _calls_outcome(self, metric: EvalSimulationMetric) -> tuple[float, bool, str]:
         """The ``function_calls`` measure: the count, whether the set matches, and a reason naming the calls made against the list."""

@@ -221,6 +221,19 @@ class TestExpandPhoneNumbers(unittest.IsolatedAsyncioTestCase):
         result = await expand_phone_numbers(text, "*")
         self.assertEqual(result, text)
 
+    async def test_no_match_in_decimal_fraction(self):
+        # The digits after a decimal point are not a phone number.
+        for text in ("Pi is approximately 3.1415926535.", "Latitude 40.7127753000"):
+            self.assertEqual(await expand_phone_numbers(text, "*"), text, text)
+
+    async def test_no_match_in_currency_amount(self):
+        for text in ("The budget is $2500000000.", "It cost ₹2500000000 to build"):
+            self.assertEqual(await expand_phone_numbers(text, "*"), text, text)
+
+    async def test_dotted_number_with_country_code(self):
+        result = await expand_phone_numbers("Call 1.800.555.1234 or 800.555.1234", "*")
+        self.assertEqual(result, "Call 1 8 0 0 5 5 5 1 2 3 4 or 8 0 0 5 5 5 1 2 3 4")
+
 
 class TestNormalizeAcronyms(unittest.IsolatedAsyncioTestCase):
     async def test_nasa(self):
@@ -370,6 +383,43 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
 
 
 class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
+    async def test_degrees(self):
+        # The degree sign was left for the TTS engine, which may skip it.
+        self.assertEqual(
+            await expand_units("It is 25°C today", "*"), "It is 25 degrees Celsius today"
+        )
+        self.assertEqual(await expand_units("at 98.6°F", "*"), "at 98.6 degrees Fahrenheit")
+        self.assertEqual(await expand_units("72 °F", "*"), "72 degrees Fahrenheit")
+        self.assertEqual(await expand_units("1°C warmer", "*"), "1 degree Celsius warmer")
+        self.assertEqual(await expand_units("a 90° turn", "*"), "a 90 degrees turn")
+        self.assertEqual(await expand_units("1.0°C", "*"), "1.0 degrees Celsius")
+        self.assertEqual(await expand_units("-1°C", "*"), "-1 degree Celsius")
+        self.assertEqual(await expand_units("-5°C", "*"), "-5 degrees Celsius")
+        self.assertEqual(await expand_units("72 ° F", "*"), "72 degrees Fahrenheit")
+        # A degree sign directly followed by another word is left alone.
+        self.assertEqual(await expand_units("40°N", "*"), "40°N")
+        # Degrees-minutes coordinates are left alone.
+        self.assertEqual(await expand_units("40°30′N", "*"), "40°30′N")
+
+    async def test_rate_written_with_a_slash(self):
+        # A unit over time expands as a whole, not just the part before the slash.
+        self.assertEqual(
+            await expand_units("Limit is 100 km/h", "*"), "Limit is 100 kilometers per hour"
+        )
+        self.assertEqual(await expand_units("at 50km/h", "*"), "at 50 kilometers per hour")
+        self.assertEqual(await expand_units("1 km/h", "*"), "1 kilometer per hour")
+        self.assertEqual(
+            await expand_units("wind at 9.8 m/s", "*"), "wind at 9.8 meters per second"
+        )
+        self.assertEqual(await expand_units("5m/s", "*"), "5 meters per second")
+        self.assertEqual(await expand_units("100 KM/H", "*"), "100 kilometers per hour")
+        self.assertEqual(await expand_units("80 km/hr", "*"), "80 kilometers per hour")
+        self.assertEqual(await expand_units("80 km/hour", "*"), "80 kilometers per hour")
+        self.assertEqual(await expand_units("30 ft/s", "*"), "30 feet per second")
+        self.assertEqual(await expand_units("5m/sec", "*"), "5 meters per second")
+        self.assertEqual(await expand_units("2 L/min", "*"), "2 liters per minute")
+        self.assertEqual(await expand_units("100 MB/s", "*"), "100 megabytes per second")
+
     async def test_km(self):
         result = await expand_units("5km away", "*")
         self.assertIn("kilometers", result)
@@ -655,6 +705,13 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             await VoiceFormatter()("raised $5m last year", "*"),
             "raised five million dollars last year",
+        )
+
+    async def test_ten_digit_amount_is_not_read_as_a_phone_number(self):
+        # The phone transform runs before the currency one, so it must leave the amount whole.
+        self.assertEqual(
+            await VoiceFormatter()("The budget is $2500000000.", "*"),
+            "The budget is two billion, five hundred million dollars.",
         )
 
     async def test_amount_followed_by_other_letters_is_left_alone(self):

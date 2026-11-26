@@ -17,16 +17,19 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     OutputAudioRawFrame,
     STTMetadataFrame,
     STTMuteFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     TranscriptionSpeaker,
 )
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import STTSettings
-from pipecat.services.stt_service import SegmentedSTTService, STTService
+from pipecat.services.stt_service import SegmentedSTTService, STTService, TranscriptionType
 from pipecat.tests.utils import run_test
 from pipecat.utils.types import NOT_GIVEN, NotGiven
 
@@ -290,6 +293,60 @@ async def test_push_transcription_runs_finalizes_only_the_last_run(pushed_frames
     assert all(f.user_id == "session-user" for f in pushed_frames)
 
 
+@pytest.mark.asyncio
+async def test_a_confirmation_without_text_is_pushed_as_a_frame_of_its_own(pushed_frames):
+    """The transcript arrived before the service confirmed it was the last."""
+    service = _make_capturing_service()
+    service._user_id = "session-user"
+    stopped: list[bool] = []
+
+    async def stop_ttfb_metrics(**kwargs):
+        stopped.append(True)
+
+    service.stop_ttfb_metrics = stop_ttfb_metrics
+
+    await service._push_transcription_runs([(None, "Hi.")])
+    service.request_finalize()
+    service.confirm_finalize()
+    await service._push_transcription_finalized()
+
+    transcript, confirmation = pushed_frames
+    assert (transcript.text, transcript.finalized) == ("Hi.", False)
+    assert isinstance(confirmation, TranscriptionFinalizedFrame)
+    assert confirmation.user_id == "session-user"
+    # The wait for the final transcript ends at the confirmation.
+    assert stopped == [True]
+
+    # One confirmation finalizes once.
+    await service._push_transcription_finalized()
+    assert len(pushed_frames) == 2
+
+
+@pytest.mark.asyncio
+async def test_no_finalized_frame_without_a_confirmed_finalization(pushed_frames):
+    """Nothing is finalized unless the service asked and the server confirmed."""
+    service = _make_capturing_service()
+
+    await service._push_transcription_finalized()
+    service.request_finalize()
+    await service._push_transcription_finalized()
+
+    assert pushed_frames == []
+
+
+@pytest.mark.asyncio
+async def test_a_confirmation_with_text_finalizes_its_transcript_only(pushed_frames):
+    """An utterance is finalized by its transcript or by the frame, never both."""
+    service = _make_capturing_service()
+
+    service.request_finalize()
+    service.confirm_finalize()
+    await service._push_transcription_runs([(None, "Hi.")])
+    await service._push_transcription_finalized()
+
+    assert [(type(f), f.finalized) for f in pushed_frames] == [(TranscriptionFrame, True)]
+
+
 def _make_segmented_service(frames: list[Frame]) -> SegmentedSTTService:
     class _SegmentedSTTService(SegmentedSTTService):
         async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
@@ -346,3 +403,119 @@ async def test_segment_pushes_unlabelled_transcript_without_waiting(pushed_frame
 
     assert pushed_before_resume == [[transcript]]
     assert transcript.finalized
+
+
+async def _mask_card(text: str, text_type: str) -> str:
+    return text.replace("4111 1111 1111 1111", "[card number]")
+
+
+def _transcription(text: str, frame_class: type = TranscriptionFrame) -> Frame:
+    return frame_class(text, "user", "now", result={"transcript": text})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("frame_class", "text_type"),
+    [
+        (TranscriptionFrame, TranscriptionType.FINAL),
+        (InterimTranscriptionFrame, TranscriptionType.INTERIM),
+    ],
+)
+async def test_text_transforms_rewrite_a_transcript_before_it_is_pushed(
+    pushed_frames, frame_class, text_type
+):
+    types: list[str] = []
+
+    async def transform(text: str, text_type: str) -> str:
+        types.append(text_type)
+        return await _mask_card(text, text_type)
+
+    service = _make_capturing_service(text_transforms=[("*", transform)])
+
+    await service.push_frame(_transcription("It's 4111 1111 1111 1111", frame_class))
+
+    assert [f.text for f in pushed_frames] == ["It's [card number]"]
+    assert types == [text_type]
+    # The provider's result has the transcript as heard, so it goes.
+    assert pushed_frames[0].result is None
+
+
+@pytest.mark.asyncio
+async def test_a_transcript_a_transform_leaves_alone_keeps_its_result(pushed_frames):
+    service = _make_capturing_service(text_transforms=[("*", _mask_card)])
+
+    await service.push_frame(_transcription("Hello"))
+
+    assert [(f.text, f.result) for f in pushed_frames] == [("Hello", {"transcript": "Hello"})]
+
+
+@pytest.mark.asyncio
+async def test_text_transforms_apply_to_their_text_type_in_order(pushed_frames):
+    async def upper(text: str, text_type: str) -> str:
+        return text.upper()
+
+    async def exclaim(text: str, text_type: str) -> str:
+        return f"{text}!"
+
+    service = _make_capturing_service(
+        text_transforms=[(TranscriptionType.FINAL, upper), ("*", exclaim)]
+    )
+
+    await service.push_frame(_transcription("hi"))
+    await service.push_frame(_transcription("hi", InterimTranscriptionFrame))
+
+    assert [f.text for f in pushed_frames] == ["HI!", "hi!"]
+
+
+@pytest.mark.asyncio
+async def test_text_transformers_can_be_added_and_removed(pushed_frames):
+    service = _make_capturing_service()
+
+    service.add_text_transformer(_mask_card)
+    await service.push_frame(_transcription("4111 1111 1111 1111"))
+    service.remove_text_transformer(_mask_card)
+    await service.push_frame(_transcription("4111 1111 1111 1111"))
+
+    assert [f.text for f in pushed_frames] == ["[card number]", "4111 1111 1111 1111"]
+
+
+@pytest.mark.asyncio
+async def test_a_transcription_going_upstream_isnt_transformed(pushed_frames):
+    service = _make_capturing_service(text_transforms=[("*", _mask_card)])
+
+    await service.push_frame(_transcription("4111 1111 1111 1111"), FrameDirection.UPSTREAM)
+
+    assert [f.text for f in pushed_frames] == ["4111 1111 1111 1111"]
+
+
+@pytest.mark.asyncio
+async def test_observers_see_only_the_transformed_transcript():
+    """An observer, such as the RTVI client's transcript, sees a frame as it's pushed."""
+
+    class TranscriptObserver(BaseObserver):
+        def __init__(self):
+            super().__init__()
+            self.texts: list[str] = []
+
+        async def on_push_frame(self, data: FramePushed):
+            if isinstance(data.frame, TranscriptionFrame):
+                self.texts.append(data.frame.text)
+
+    class _TranscribingSTTService(STTService):
+        async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+            yield _transcription("It's 4111 1111 1111 1111")
+
+    observer = TranscriptObserver()
+    service = _TranscribingSTTService(
+        settings=STTSettings(model=None, language=None),
+        text_transforms=[("*", _mask_card)],
+    )
+
+    await run_test(
+        service,
+        frames_to_send=[_input_audio()],
+        expected_down_frames=[STTMetadataFrame, TranscriptionFrame, InputAudioRawFrame],
+        observers=[observer],
+    )
+
+    assert observer.texts and set(observer.texts) == {"It's [card number]"}

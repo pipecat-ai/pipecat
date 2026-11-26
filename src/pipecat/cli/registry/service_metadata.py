@@ -1038,6 +1038,16 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="plivo_tts",
+            label="Plivo",
+            package="pipecat-ai[plivo]",
+            class_name=["PlivoTTSService"],
+            env_prefix="PLIVO",
+            include_params=["auth_id", "auth_token"],
+            settings_params=["voice"],
+            param_defaults={"voice": "lC7qzMoRE7SSjaNCVeff"},
+        ),
+        ServiceDefinition(
             value="pockettts_tts",
             label="Pocket TTS",
             package="pipecat-ai[pocket-tts]",
@@ -1116,6 +1126,15 @@ class ServiceRegistry:
             class_name=["XTTSService"],
             env_prefix="XTTS",
             include_params=["base_url"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
+            value="zoom_ai_tts",
+            label="Zoom AI",
+            package="pipecat-ai[zoom-ai]",
+            class_name=["ZoomAIHttpTTSService"],
+            env_prefix="ZOOM_AI",
+            include_params=["api_key"],
             settings_params=["voice"],
         ),
     ]

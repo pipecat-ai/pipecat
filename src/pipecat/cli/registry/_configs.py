@@ -582,6 +582,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "plivo_tts": (
+        "PlivoTTSService(\n"
+        '        auth_id=os.getenv("PLIVO_AUTH_ID"),\n'
+        '        auth_token=os.getenv("PLIVO_AUTH_TOKEN"),\n'
+        "        settings=PlivoTTSService.Settings(\n"
+        '            voice=os.getenv("PLIVO_VOICE_ID", "lC7qzMoRE7SSjaNCVeff"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "pockettts_tts": (
         "PocketTTSService(\n"
         "        settings=PocketTTSService.Settings(\n"
@@ -652,6 +661,15 @@ SERVICE_CONFIGS = {
         "        aiohttp_session=session,\n"
         "        settings=XTTSService.Settings(\n"
         '            voice=os.getenv("XTTS_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "zoom_ai_tts": (
+        "ZoomAIHttpTTSService(\n"
+        '        api_key=os.getenv("ZOOM_AI_API_KEY"),\n'
+        "        aiohttp_session=session,\n"
+        "        settings=ZoomAIHttpTTSService.Settings(\n"
+        '            voice=os.getenv("ZOOM_AI_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"
     ),

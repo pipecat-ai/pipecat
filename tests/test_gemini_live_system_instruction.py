@@ -6,10 +6,8 @@
 
 """Tests for the system instruction GeminiLiveLLMService configures sessions with.
 
-The service connects in ``setup()``, before ``LLMService.start()`` composes the
-system instruction, so the first context reconnects when the composed
-instruction differs from the one the session was configured with. These tests
-fake the Live API connection and record the config of every connect.
+These tests fake the Live API connection and record the system instruction
+of every connect.
 """
 
 import asyncio
@@ -106,19 +104,34 @@ async def _running(service: GeminiLiveLLMService, recorder: _ConnectRecorder):
 
 
 @pytest.mark.asyncio
-async def test_first_context_reconnects_with_composed_instruction():
-    """Async-tool guidance composed at start reaches the model on the first context."""
+async def test_first_connect_sends_composed_instruction():
+    """Async-tool guidance composed at setup reaches the model on the first connect."""
     service = _service("base prompt")
     service.register_function("check_order", AsyncMock(), cancel_on_interruption=False)
     recorder = _ConnectRecorder()
     async with _running(service, recorder):
+        await service._handle_context(_context())
+        await asyncio.sleep(0.05)
+
+    (first,) = recorder.system_instructions
+    assert first.startswith("base prompt")
+    assert ASYNC_TOOL_INSTRUCTIONS in first
+
+
+@pytest.mark.asyncio
+async def test_first_context_reconnects_with_instruction_composed_after_setup():
+    """An instruction appended after setup reaches the model on the first context."""
+    service = _service("base prompt")
+    recorder = _ConnectRecorder()
+    async with _running(service, recorder):
+        service.append_system_instruction("more guidance")
         await service._handle_context(_context())
         await recorder.wait_for(2)
 
     first, reconnect = recorder.system_instructions
     assert first == "base prompt"
     assert reconnect.startswith("base prompt")
-    assert ASYNC_TOOL_INSTRUCTIONS in reconnect
+    assert "more guidance" in reconnect
 
 
 @pytest.mark.asyncio

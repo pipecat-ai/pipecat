@@ -21,6 +21,8 @@ import pytest
 
 from pipecat.classifiers.base_classifier import BaseClassifier, ClassifierError, YesNoResult
 from pipecat.frames.frames import (
+    BackgroundWorkFinishedFrame,
+    BackgroundWorkStartedFrame,
     ExternalFunctionCallInProgressFrame,
     ExternalFunctionCallResultFrame,
     ExternalFunctionCallsStartedFrame,
@@ -28,6 +30,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
+    FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -59,6 +62,7 @@ from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.turns.user_stop.llm_turn_completion.llm_extension import LLMTurnCompletionLLMExtension
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker, BackendOutput
 from pipecat.workers.llm.backend_llm_worker import BackendError, BackendIdle, BackendToolCall
@@ -135,7 +139,7 @@ def _params(context: LLMContext | None = None, arguments: dict | None = None) ->
         function_name="delegate",
         tool_call_id="call_1",
         arguments=arguments or {},
-        llm=SimpleNamespace(push_frame=AsyncMock()),  # type: ignore[arg-type]
+        llm=SimpleNamespace(push_frame=AsyncMock(), broadcast_frame=AsyncMock()),  # type: ignore[arg-type]
         pipeline_worker=None,  # type: ignore[arg-type]
         context=context or LLMContext(),
         result_callback=AsyncMock(),
@@ -386,6 +390,116 @@ async def test_delegate_fails_when_the_backend_never_attaches():
 
 
 # ---------------------------------------------------------------------------
+# The backend's work, as the pipeline hears of it
+# ---------------------------------------------------------------------------
+
+
+def _work_frames(frontend) -> list[tuple[type, str]]:
+    return [(c.args[0], c.kwargs["work_id"]) for c in frontend.broadcast_frame.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_a_delegation_starts_the_backends_work_once_per_lull():
+    connector = _bound(session=_FakeSession())
+    frontend = SimpleNamespace(
+        queue_frame=AsyncMock(), push_frame=AsyncMock(), broadcast_frame=AsyncMock()
+    )
+    params = FunctionCallParams(
+        function_name="delegate",
+        tool_call_id="call_1",
+        arguments={},
+        llm=frontend,  # type: ignore[arg-type]
+        pipeline_worker=None,  # type: ignore[arg-type]
+        context=LLMContext([{"role": "user", "content": "do it"}]),
+        result_callback=AsyncMock(),
+    )
+
+    await connector.delegate(params)
+    params.context.add_message({"role": "user", "content": "and this"})
+    await connector.delegate(params)
+    assert _work_frames(frontend) == [(BackgroundWorkStartedFrame, "backend")]
+
+    await connector.deliver(frontend, BackendIdle())  # type: ignore[arg-type]
+    await connector.deliver(frontend, BackendIdle())  # type: ignore[arg-type]
+    assert _work_frames(frontend) == [
+        (BackgroundWorkStartedFrame, "backend"),
+        (BackgroundWorkFinishedFrame, "backend"),
+    ]
+
+    params.context.add_message({"role": "user", "content": "once more"})
+    await connector.delegate(params)
+    assert _work_frames(frontend)[-1] == (BackgroundWorkStartedFrame, "backend")
+
+
+@pytest.mark.asyncio
+async def test_a_backend_error_finishes_its_work():
+    connector = _bound(session=_FakeSession())
+    frontend = SimpleNamespace(
+        queue_frame=AsyncMock(), push_frame=AsyncMock(), broadcast_frame=AsyncMock()
+    )
+    params = _params(LLMContext([{"role": "user", "content": "do it"}]))
+    params.llm = frontend  # type: ignore[assignment]
+
+    await connector.delegate(params)
+    await connector.deliver(frontend, BackendError(error="provider down"))  # type: ignore[arg-type]
+
+    assert _work_frames(frontend) == [
+        (BackgroundWorkStartedFrame, "backend"),
+        (BackgroundWorkFinishedFrame, "backend"),
+    ]
+
+
+class _EndingSession:
+    """A session that sends nothing and ends when told to."""
+
+    detached = True
+
+    def __init__(self, *args, **kwargs):
+        self.ended = asyncio.Event()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        await self.ended.wait()
+        raise StopAsyncIteration
+
+    async def send(self, request: str) -> str:
+        return "working"
+
+
+@pytest.mark.asyncio
+async def test_a_session_ending_mid_work_finishes_it():
+    connector = _bound()
+    frontend = SimpleNamespace(
+        queue_frame=AsyncMock(), push_frame=AsyncMock(), broadcast_frame=AsyncMock()
+    )
+    params = _params(LLMContext([{"role": "user", "content": "do it"}]))
+    params.llm = frontend  # type: ignore[assignment]
+
+    with patch("pipecat.pipeline.llm_with_backend.connector._BackendSession", _EndingSession):
+        running = asyncio.create_task(connector.run_session(None, frontend))  # type: ignore[arg-type]
+        await connector._session_open.wait()
+        session = connector.session
+        await connector.delegate(params)
+        assert _work_frames(frontend) == [(BackgroundWorkStartedFrame, "backend")]
+
+        session.ended.set()  # type: ignore[attr-defined]
+        await running
+
+    assert _work_frames(frontend) == [
+        (BackgroundWorkStartedFrame, "backend"),
+        (BackgroundWorkFinishedFrame, "backend"),
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Delivery
 # ---------------------------------------------------------------------------
 
@@ -564,6 +678,35 @@ async def test_client_tracing_sends_each_exchange_as_a_server_message():
     ]
     assert traced[0]["backend"] == "idle" and "weather in seattle?" in traced[0]["text"]
     assert traced[-2]["text"] == "It's 62 and raining." and traced[-2]["spoken"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_delegate_call_is_announced_when_it_starts():
+    """As a call of the application's own tools is, to the app and to the pipeline."""
+    frontend = _DelegatingFrontend()
+    service = LLMWithBackend(
+        frontend=frontend,
+        backend=BackendLLMWorker(
+            name="backend", llm=_ScriptedLLM([[("text", ">> Done.")]]), context=LLMContext()
+        ),
+    )
+    announced = []
+
+    @frontend.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        announced.extend(call.function_name for call in function_calls)
+
+    down, _ = await run_test(
+        service,
+        frames_to_send=[
+            LLMContextFrame(LLMContext([{"role": "user", "content": "weather in seattle?"}])),
+            SleepFrame(sleep=1.0),
+        ],
+    )
+
+    (started,) = [f for f in down if isinstance(f, FunctionCallsStartedFrame)]
+    assert [call.function_name for call in started.function_calls] == ["delegate"]
+    assert announced == ["delegate"]
 
 
 @pytest.mark.asyncio
@@ -911,7 +1054,7 @@ async def test_no_turn_is_raced_while_the_frontend_filters_incomplete_turns():
     await run_test(
         service,
         frames_to_send=[
-            LLMUpdateSettingsFrame(delta=LLMSettings(filter_incomplete_user_turns=True)),
+            LLMUpdateSettingsFrame(delta=LLMSettings(extensions=[LLMTurnCompletionLLMExtension])),
             SleepFrame(0.1),
             _user_turn(),
             SleepFrame(0.1),

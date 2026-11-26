@@ -58,7 +58,7 @@ from pipecat.services.websocket_service import ReportErrorCallback
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.deprecation import deprecated, warn_deprecated
-from pipecat.utils.errors import ErrorCategory
+from pipecat.utils.errors import ErrorCategory, classify_http_status_code
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
@@ -896,13 +896,14 @@ class SarvamSTTService(STTService):
         await self._socket_client.transcribe(**method_kwargs)
 
 
-_REALTIME_MODEL = "saaras:v3-realtime"
+_REALTIME_MODEL = "saaras:v4"
 
 # Sarvam's realtime endpoint serves both generations over the same connection
 # parameters and event protocol, so only the model string differs. The default
-# follows Sarvam's own, which is still v3. The second generation is named
+# follows Sarvam's current default, `saaras:v4`. The newer generation is named
 # `saaras:v4` here, without the `-realtime` suffix its predecessor carries: that
 # is the name the endpoint accepts, and it rejects `saaras:v4-realtime`.
+# `saaras:v3-realtime` is beta-gated and still selectable through settings.
 _SUPPORTED_REALTIME_MODELS = frozenset({"saaras:v3-realtime", "saaras:v4"})
 
 SUPPORTED_LANGUAGES = {
@@ -943,6 +944,18 @@ _CLIENT_CHUNK_MS = 50
 # Sarvam closes a connection with this code when it rejects a connection
 # parameter (model, language, VAD tuning) or the account isn't enabled for it.
 _REJECTED_SETTINGS_CLOSE_CODE = 4000
+
+# Categories for the `code` of an `error` event that carries no `status_code`.
+# Sarvam closes a rejected key, rate limit and exhausted quota alike with 1003,
+# so the event, not the close code, says whether retrying can help.
+_ERROR_CODE_CATEGORIES = {
+    "invalid_subscription_key": ErrorCategory.AUTHENTICATION,
+    "beta_access_required": ErrorCategory.AUTHORIZATION,
+    "invalid_model": ErrorCategory.INVALID_REQUEST,
+    "invalid_request": ErrorCategory.INVALID_REQUEST,
+    "rate_limit_exceeded": ErrorCategory.RATE_LIMIT,
+    "quota_exceeded": ErrorCategory.QUOTA,
+}
 
 # Accepted in a `config.update` message. `Settings.language` reaches Sarvam as
 # `language_code`; the rest share their `Settings` names. Of these,
@@ -1061,6 +1074,29 @@ class SarvamRealtimeSTTSettings(STTSettings):
     min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+def _error_event_category(message: dict[str, Any]) -> ErrorCategory | None:
+    """Categorize a Sarvam realtime `error` event.
+
+    Only a fatal event (``is_fatal: true``), which Sarvam sends before closing
+    the connection, is categorized: a non-fatal one, such as an
+    ``invalid_config`` reply to a rejected ``config.update``, leaves the session
+    running and must not cost the service its usability. For a fatal event the
+    HTTP-style ``status_code`` decides when present (401 for a bad key, 403 for
+    a model the account can't use, 400 for a rejected setting, 429, 402);
+    otherwise its ``code`` does. Anything else is left for ``push_error`` to
+    classify.
+    """
+    if message.get("is_fatal") is not True:
+        return None
+    status_code = message.get("status_code")
+    if isinstance(status_code, int) and not isinstance(status_code, bool):
+        category = classify_http_status_code(status_code)
+        if category is not ErrorCategory.UNKNOWN:
+            return category
+    code = message.get("code")
+    return _ERROR_CODE_CATEGORIES.get(code) if isinstance(code, str) else None
+
+
 class SarvamRealtimeSTTService(WebsocketSTTService):
     """Sarvam realtime Speech-to-Text service.
 
@@ -1069,7 +1105,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
 
     Serves ``saaras:v3-realtime`` and ``saaras:v4``, selected with
     ``settings=SarvamRealtimeSTTService.Settings(model=...)`` and defaulting to
-    ``saaras:v3-realtime``, Sarvam's own default.
+    ``saaras:v4``, Sarvam's current default.
 
     With the default ``endpointing="vad"`` the server drives turn boundaries. With
     ``endpointing="manual"`` the pipeline drives them instead, so the pipeline
@@ -1424,7 +1460,11 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             async for message in messages:
                 await self._process_message(message)
         except ConnectionClosedError as e:
-            if e.rcvd is not None and e.rcvd.code == _REJECTED_SETTINGS_CLOSE_CODE:
+            if (
+                e.rcvd is not None
+                and e.rcvd.code == _REJECTED_SETTINGS_CLOSE_CODE
+                and self._is_service_usable
+            ):
                 await self.push_error(
                     error_msg=f"Sarvam realtime STT rejected the connection: {e.rcvd.reason}",
                     exception=e,
@@ -1625,6 +1665,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
     async def _handle_error(self, message: dict[str, Any]):
         await self.push_error(
             error_msg=f"Sarvam realtime STT error: {json.dumps(message, ensure_ascii=False)}",
+            category=_error_event_category(message),
         )
 
     async def _send_audio_chunk(self, chunk: bytes):

@@ -8,7 +8,8 @@
 
 By default the questions go to Jev; with ``--clef`` they go to Cloudflare's
 Clef, with ``--openai`` to OpenAI's Decisions API, with ``--google`` to
-Google's Decisions API, and with ``--llm`` to an OpenAI vision model through
+Google's Decisions API, with ``--zoom`` to Zoom's Decisions API, and with
+``--llm`` to an OpenAI vision model through
 ``LLMClassifier``.
 
 Usage::
@@ -17,6 +18,7 @@ Usage::
     CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_KEY=... python features-classifiers-images.py --clef
     OPENAI_API_KEY=... python features-classifiers-images.py --openai
     GOOGLE_API_KEY=... python features-classifiers-images.py --google
+    ZOOM_AI_API_KEY=... python features-classifiers-images.py --zoom
     OPENAI_API_KEY=... python features-classifiers-images.py --llm gpt-4.1-mini
 """
 
@@ -40,6 +42,7 @@ from pipecat.classifiers.google.decisions.classifier import GoogleDecisionsClass
 from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.classifiers.openai.decisions.classifier import OpenAIDecisionsClassifier
 from pipecat.classifiers.typesafe.jev.classifier import JevClassifier
+from pipecat.classifiers.zoom.decisions.classifier import ZoomDecisionsClassifier
 from pipecat.frames.frames import ImageRawFrame
 from pipecat.services.openai.llm import OpenAILLMService
 
@@ -120,6 +123,13 @@ if __name__ == "__main__":
         const="gemini-decision-1",
         help="use Google's Decisions API instead of Jev",
     )
+    parser.add_argument(
+        "--zoom",
+        metavar="MODEL",
+        nargs="?",
+        const="zoom-decisions",
+        help="use Zoom's Decisions API (zoom-decisions or zoom-decisions-pro) instead of Jev",
+    )
     parser.add_argument("--llm", metavar="MODEL", help="use an OpenAI vision model instead of Jev")
     args = parser.parse_args()
 
@@ -139,6 +149,9 @@ if __name__ == "__main__":
         classifier = GoogleDecisionsClassifier(
             api_key=os.environ["GOOGLE_API_KEY"], model=args.google
         )
+        asyncio.run(main(classifier))
+    elif args.zoom:
+        classifier = ZoomDecisionsClassifier(api_key=os.environ["ZOOM_AI_API_KEY"], model=args.zoom)
         asyncio.run(main(classifier))
     elif args.llm:
         llm = OpenAILLMService(

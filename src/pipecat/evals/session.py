@@ -26,7 +26,7 @@ import time
 import traceback
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Generic, Literal, TypeVar, overload
 
 from loguru import logger
 from pydantic import BaseModel, model_validator
@@ -84,6 +84,13 @@ class EvalSessionParams(BaseModel):
             the default (``<user-cache-dir>/pipecat/evals/tts``).
         use_cache: When False, ignore cached user audio and force fresh
             synthesis, with no cache reads or writes.
+        audio_support_check: Whether an audio run checks that the bot's
+            transport carries the audio it uses, as the bot reports in
+            ``bot-ready``. With ``when_advertised``, a bot that reports a
+            direction the run uses as off is refused before the conversation
+            (failure kind ``audio_unsupported``); a bot that reports nothing,
+            such as one on Pipecat before 1.13, runs unchecked. Defaults to
+            ``off``.
         stop_bot: No effect: the harness ends the bot's session when a run
             finishes.
 
@@ -106,6 +113,7 @@ class EvalSessionParams(BaseModel):
     record_path: str | None = None
     cache_dir: str | None = None
     use_cache: bool = True
+    audio_support_check: Literal["off", "when_advertised"] = "off"
     stop_bot: bool = False
     trigger_disconnect: bool = False
 
@@ -356,7 +364,9 @@ class EvalSession(BaseObject, Generic[R]):
         Raises:
             ValueError: If ``persona_llm`` is given for a scripted scenario,
                 which has no persona, or ``on_progress`` for a simulation,
-                which reports its progress through the event handler alone.
+                which reports its progress through the event handler alone,
+                or if the bot's STT, ``bot_stt`` or the one built from
+                ``judge.transcription``, is not a ``SegmentedSTTService``.
             TypeError: If ``scenario`` is neither kind.
         """
         # Imported here rather than at module level: both subclasses import this module.
@@ -446,7 +456,7 @@ class EvalSession(BaseObject, Generic[R]):
         """
         await self._client.start()
         try:
-            return await self._converse()
+            failures = await self._converse()
         except Exception as e:
             return [self._error_failure(e)]
         finally:
@@ -454,6 +464,16 @@ class EvalSession(BaseObject, Generic[R]):
             # Progress handlers run as tasks; wait them out so every record is
             # delivered before the caller has the result in hand.
             await self.cleanup()
+        # A harness service can fail once nothing is waiting on it, such as the
+        # caller's voice on a last turn that expects nothing. Stopping the client
+        # lets the failure surface; a run that otherwise passed is then no evidence.
+        error = self._stream.harness_error
+        if error is not None and not failures:
+            self._trace.log(f"FAIL: harness: {error}")
+            failure = self._failure("<harness>", error, "error")
+            self._driver.record_failure(failure)
+            failures = [failure]
+        return failures
 
     async def _converse(self) -> list[EvalAssertionFailure]:
         """Run the handshake, then the driver; a bot that never says ready is a failure."""
@@ -465,7 +485,7 @@ class EvalSession(BaseObject, Generic[R]):
             await self._client.handshake()
         except EvalBotUnavailableError as e:
             self._trace.log(f"handshake: failed ({e})")
-            where = "<connect>" if e.kind == "connect_failed" else "<bot-ready>"
+            where = {"connect_failed": "<connect>", "error": "<harness>"}.get(e.kind, "<bot-ready>")
             return [self._failure(where, str(e), e.kind)]
         except TimeoutError as e:
             self._trace.log("handshake: failed (bot-ready not received)")

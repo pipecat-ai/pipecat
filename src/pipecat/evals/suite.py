@@ -213,7 +213,8 @@ def _append_result(
     """Append one JSON line describing a finished run, flushed at once.
 
     The record carries enough to compute pass rates and group failures by
-    kind, plus paths to the artifacts. ``events_seen`` is included only for
+    kind, plus paths to the artifacts, and ``bot_metrics``, what the bot's
+    processors measured during the run. ``events_seen`` is included only for
     runs that did not pass, since that is what a failure is diagnosed from.
     """
     artifacts = {"log": str(logs_dir / f"{stem}.log")}
@@ -277,6 +278,7 @@ def _scenario_record(run: "EvalRun", artifacts: dict) -> dict:
             }
             for t in (result.turns if result else [])
         ],
+        "bot_metrics": result.bot_metrics if result else [],
         "artifacts": artifacts,
     }
     if result is not None and not record["passed"]:
@@ -297,6 +299,7 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "passed": bool(result and result.passed),
         "succeeded": bool(result and result.succeeded),
         "error": run.error or (result.error if result else None),
+        "failure_kind": result.failure_kind if result else None,
         "confidence": result.confidence if result else None,
         "probabilities": result.probabilities if result else {},
         "ended_by": result.ended_by if result else "error",
@@ -329,6 +332,7 @@ def _simulation_record(run: "EvalRun", artifacts: dict) -> dict:
         "end_call": result.end_call if result else None,
         "duration_ms": run.duration_ms,
         "messages": result.messages if result else [],
+        "bot_metrics": result.bot_metrics if result else [],
         "artifacts": artifacts,
     }
     if result is not None and not record["passed"]:
@@ -345,6 +349,7 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         confidence=data.get("confidence"),
         probabilities=data.get("probabilities", {}),
         error=data.get("error"),
+        failure_kind=data.get("failure_kind"),
         metrics=[
             EvalSimulationMetricScore(
                 **{k: v for k, v in m.items() if k != "verdicts"},
@@ -361,6 +366,7 @@ def _simulation_result_from_dict(data: dict) -> EvalSimulationResult:
         events_seen=data.get("events_seen", []),
         debug_log=data.get("debug_log", []),
         success=data.get("success", ""),
+        bot_metrics=data.get("bot_metrics", []),
     )
 
 
@@ -384,6 +390,7 @@ def _result_from_dict(data: dict) -> EvalScriptResult:
         events_seen=data.get("events_seen", []),
         debug_log=data.get("debug_log", []),
         skipped=data.get("skipped"),
+        bot_metrics=data.get("bot_metrics", []),
     )
 
 

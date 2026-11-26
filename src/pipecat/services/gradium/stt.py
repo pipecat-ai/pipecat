@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.services.gradium.utils import GradiumLogLevel, log_server_message
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
@@ -278,6 +279,7 @@ class GradiumSTTService(WebsocketSTTService):
         params: InputParams | None = None,
         json_config: str | None = None,
         enable_turn_detection: bool = False,
+        log_level: GradiumLogLevel | None = None,
         settings: Settings | None = None,
         ttfs_p99_latency: float | None = GRADIUM_TTFS_P99,
         **kwargs,
@@ -309,6 +311,10 @@ class GradiumSTTService(WebsocketSTTService):
             enable_turn_detection: Whether the server's end-pointing signal
                 decides when user turns start and end, instead of the
                 pipeline's VAD. Off by default.
+            log_level: Opt in to the server's log messages, such as a warning
+                about an unknown or deprecated setting: the lowest level to
+                receive ("debug", "info", "warning" or "error"). They are
+                logged at their own level. Off by default.
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
@@ -362,6 +368,7 @@ class GradiumSTTService(WebsocketSTTService):
         self._enable_turn_detection = enable_turn_detection
         self._websocket = None
         self._json_config = json_config
+        self._log_level = log_level
 
         self._receive_task = None
 
@@ -494,7 +501,9 @@ class GradiumSTTService(WebsocketSTTService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, VADUserStoppedSpeakingFrame) and not self._enable_turn_detection:
-            await self._send_flush()
+            # The "flushed" acknowledgment confirms the transcript is complete.
+            if await self._send_flush():
+                self.request_finalize()
 
     async def _send_flush(self):
         """Send a flush request to process any buffered audio immediately.
@@ -598,9 +607,14 @@ class GradiumSTTService(WebsocketSTTService):
                 json_config["delay_in_frames"] = self._settings.delay_in_frames
             if json_config:
                 setup_msg["json_config"] = json_config
+            if self._log_level is not None:
+                setup_msg["log_level"] = self._log_level
             await websocket.send(json.dumps(setup_msg))
-            ready_msg = await websocket.recv()
-            ready_msg = json.loads(ready_msg)
+            ready_msg = json.loads(await websocket.recv())
+            # A server log can come before ``ready``.
+            while ready_msg["type"] == "log":
+                log_server_message(ready_msg)
+                ready_msg = json.loads(await websocket.recv())
             if ready_msg["type"] == "error":
                 raise Exception(f"received error {ready_msg['message']}")
             if ready_msg["type"] != "ready":
@@ -693,10 +707,15 @@ class GradiumSTTService(WebsocketSTTService):
                     self._flush_cooldown = (
                         assert_given(self._settings.post_flush_cooldown_frames) or 0
                     )
+                # An acknowledgment of an earlier flush says nothing about the
+                # audio sent since. The server returns the id as a number.
+                if str(msg.get("flush_id")) == str(self._flush_counter):
                     self.confirm_finalize()
                 await self._handle_flushed()
             elif type_ == "end_of_stream":
                 logger.debug("Received end_of_stream message from server")
+            elif type_ == "log":
+                log_server_message(msg)
             elif type_ == "error":
                 await self.push_error(error_msg=f"Error: {msg}")
 
