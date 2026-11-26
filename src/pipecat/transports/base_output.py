@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     MixerControlFrame,
+    OutputAudioDrainFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
@@ -418,6 +419,8 @@ class BaseOutputTransport(FrameProcessor):
             await sender.handle_mixer_control_frame(frame)
         elif isinstance(frame, TTSStoppedFrame):
             await sender.handle_tts_stopped(frame)
+        elif isinstance(frame, OutputAudioDrainFrame):
+            await sender._enqueue_audio_boundary(frame)
         elif frame.pts:
             await sender.handle_timed_frame(frame)
         else:
@@ -713,6 +716,10 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 frame: The TTS stopped frame to queue.
             """
+            await self._enqueue_audio_boundary(frame)
+
+        async def _enqueue_audio_boundary(self, frame: OutputAudioDrainFrame | TTSStoppedFrame):
+            """Queue a boundary behind all remaining buffered audio."""
             await self._enqueue_flushed_audio_buffer()
             await self._audio_queue.put(frame)
 
@@ -939,7 +946,7 @@ class BaseOutputTransport(FrameProcessor):
                 self._volume = frame.volume
             elif isinstance(frame, VolumeGainFrame):
                 self._volume_gain = frame.gain
-            else:
+            elif not isinstance(frame, OutputAudioDrainFrame):
                 await self._transport.write_transport_frame(frame)
 
         async def _filter_audio(self, frame: Frame):

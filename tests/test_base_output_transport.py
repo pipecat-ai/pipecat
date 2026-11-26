@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     InterruptionFrame,
     MixerControlFrame,
+    OutputAudioDrainFrame,
     OutputAudioRawFrame,
     StartFrame,
     TTSAudioRawFrame,
@@ -103,6 +104,7 @@ async def _make_transport(
     audio_out_sample_rate: int | None = None,
     audio_filter: BaseAudioFilter | None = None,
     audio_out_volume: float = 1.0,
+    audio_out_destinations: list[str] | None = None,
 ) -> BaseOutputTransport:
     params = TransportParams(
         audio_out_enabled=True,
@@ -110,6 +112,7 @@ async def _make_transport(
         audio_out_filter=audio_filter,
         audio_out_sample_rate=audio_out_sample_rate,
         audio_out_volume=audio_out_volume,
+        audio_out_destinations=audio_out_destinations or [],
     )
     transport = BaseOutputTransport(params)
     transport.push_frame = AsyncMock()
@@ -381,6 +384,84 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
     padded with silence to a full chunk and queued for playback (see
     ``handle_tts_stopped``), instead of being silently discarded.
     """
+
+    async def test_audio_drain_flushes_only_its_destination_before_forwarding(self):
+        transport = await _make_transport(audio_out_destinations=["secondary"])
+        transport.write_transport_frame = AsyncMock()
+        chunk_size = transport.audio_chunk_size
+        primary_audio = b"\x01\x02" * (chunk_size // 4)
+        secondary_audio = b"\x03\x04" * (chunk_size // 4)
+
+        async def queue_audio(audio: bytes, destination: str | None):
+            frame = OutputAudioRawFrame(audio, transport.sample_rate, 1)
+            frame.transport_destination = destination
+            await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        async def drain(destination: str | None):
+            marker = OutputAudioDrainFrame()
+            marker.transport_destination = destination
+            marker.pts = transport.get_clock().get_time() + 60_000_000_000
+            forwarded = asyncio.Event()
+
+            async def push(frame, direction=FrameDirection.DOWNSTREAM):
+                if frame is marker:
+                    forwarded.set()
+
+            transport.push_frame.side_effect = push
+            await transport.process_frame(marker, FrameDirection.DOWNSTREAM)
+            await asyncio.wait_for(forwarded.wait(), timeout=1)
+
+        def writes():
+            return [
+                (call.args[0].transport_destination, call.args[0].audio)
+                for call in transport.write_audio_frame.call_args_list
+            ]
+
+        try:
+            await queue_audio(primary_audio, None)
+            await queue_audio(secondary_audio, "secondary")
+            await drain("secondary")
+            padding = bytes(chunk_size // 2)
+            self.assertEqual(writes(), [("secondary", secondary_audio + padding)])
+            await drain(None)
+            await drain(None)
+            self.assertEqual(
+                writes(),
+                [("secondary", secondary_audio + padding), (None, primary_audio + padding)],
+            )
+            transport.write_transport_frame.assert_not_awaited()
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_audio_drain_waits_for_write_attempt_even_when_it_fails(self):
+        transport = await _make_transport()
+        writing = asyncio.Event()
+        release_write = asyncio.Event()
+        forwarded = asyncio.Event()
+        marker = OutputAudioDrainFrame()
+
+        async def write(frame):
+            writing.set()
+            await release_write.wait()
+            return False
+
+        async def push(frame, direction=FrameDirection.DOWNSTREAM):
+            if frame is marker:
+                forwarded.set()
+
+        transport.write_audio_frame.side_effect = write
+        transport.push_frame.side_effect = push
+        try:
+            audio = OutputAudioRawFrame(b"\x01\x02", transport.sample_rate, 1)
+            await transport.process_frame(audio, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(marker, FrameDirection.DOWNSTREAM)
+            await asyncio.wait_for(writing.wait(), timeout=1)
+            self.assertFalse(forwarded.is_set())
+            release_write.set()
+            await asyncio.wait_for(forwarded.wait(), timeout=1)
+        finally:
+            release_write.set()
+            await transport.cancel(CancelFrame())
 
     async def test_tts_stopped_frame_flushes_partial_chunk_padded_with_silence(self):
         transport = await _make_transport(mixer=None)
