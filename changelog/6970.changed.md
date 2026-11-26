@@ -1,0 +1,1 @@
+- `InworldRealtimeLLMService` session properties now carry Inworld's generation controls: `max_output_tokens`, `tool_choice`, `truncation` and `text_generation_config` (reasoning effort, top-p, penalties and token ceilings).
