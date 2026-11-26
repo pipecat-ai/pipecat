@@ -178,6 +178,21 @@ class TestSimpleTextAggregator(unittest.IsolatedAsyncioTestCase):
         result = await aggregator.flush()
         assert result.text == "下一句话。"
 
+    async def test_thai_streaming_tokens(self):
+        """Test Thai, which ends a sentence with a space instead of punctuation."""
+        tokens = ["สวัสดี", "ค่ะ", " ยินดี", "ต้อนรับ", "สู่ร้าน", "ค่ะ", " วันนี้", "มีโต๊ะ", "ว่าง", "ค่ะ"]
+        all_results = []
+        for token in tokens:
+            results = [agg async for agg in self.aggregator.aggregate(token)]
+            all_results.extend(results)
+
+        # "สวัสดีค่ะ" is too short on its own, so it goes out with the next
+        # sentence, which is confirmed when วันนี้ starts
+        assert [r.text for r in all_results] == ["สวัสดีค่ะ ยินดีต้อนรับสู่ร้านค่ะ"]
+
+        result = await self.aggregator.flush()
+        assert result.text == "วันนี้มีโต๊ะว่างค่ะ"
+
     async def test_japanese_single_sentence_flush(self):
         """Test that a single Japanese sentence with no lookahead flushes correctly."""
         text = "こんにちは。"
