@@ -59,8 +59,11 @@ def test_sarvam_llm_constructor_rejects_unsupported_model():
     "model",
     [
         "deepseekv4.1-flash",
+        "deepseekv4.1-flash-1017",
+        "deepseekv4.1-flash-1017-interactive",
         "gemma4",
         "glm5.3",
+        "glm5.3-flash",
         "sarvam-105b",
         "sarvam-105b-conversations",
     ],
@@ -85,8 +88,11 @@ def test_sarvam_llm_default_model_is_sarvam_105b():
     [
         ("sarvam-105b", "https://api.sarvam.ai/v2"),
         ("deepseekv4.1-flash", "https://api.sarvam.ai/v2"),
+        ("deepseekv4.1-flash-1017", "https://api.sarvam.ai/v2"),
+        ("deepseekv4.1-flash-1017-interactive", "https://api.sarvam.ai/v2"),
         ("gemma4", "https://api.sarvam.ai/v2"),
         ("glm5.3", "https://api.sarvam.ai/v2"),
+        ("glm5.3-flash", "https://api.sarvam.ai/v2"),
         ("sarvam-105b-conversations", "https://api.sarvam.ai/v1"),
     ],
 )

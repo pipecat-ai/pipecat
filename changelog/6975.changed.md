@@ -1,0 +1,1 @@
+- `SarvamLLMService` now accepts `deepseekv4.1-flash-1017`, `deepseekv4.1-flash-1017-interactive` and `glm5.3-flash`, the models Sarvam serves on its chat completions API.
