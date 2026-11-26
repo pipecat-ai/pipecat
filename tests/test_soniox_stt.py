@@ -39,6 +39,7 @@ from pipecat.services.soniox.stt import (
     FINALIZED_TOKEN,
     SonioxSTTService,
     _language_from_tokens,
+    _split_agent_text,
     language_to_soniox_language,
 )
 from pipecat.transcriptions.language import Language
@@ -984,6 +985,40 @@ async def test_assistant_turn_is_sent_as_agent_text_when_the_turn_ends():
     assert [json.loads(p) for p in _sent_payloads(websocket)] == [
         {"type": "agent_text", "text": "Lekadol is in stock.", "end_of_segment": True}
     ]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        # 2,500 bytes of ASCII.
+        " ".join(["Lekadol"] * 312) + " is in stock.",
+        # 2,374 bytes of Devanagari, 3 bytes a letter: over the limit at 900 characters.
+        ("नमस्ते आपका ऑर्डर कल पहुंच जाएगा " * 28)[:900],
+    ],
+)
+@pytest.mark.asyncio
+async def test_long_assistant_turn_goes_out_as_messages_within_the_limit(reply):
+    service, websocket = _connected_service()
+
+    await service._process_assistant_turn(reply)
+
+    # Soniox ends the stream on a message over 1000 bytes of UTF-8.
+    sent = [json.loads(p) for p in _sent_payloads(websocket)]
+    assert len(sent) > 1
+    assert all(len(m["text"].encode("utf-8")) <= 1000 for m in sent)
+    # One segment: the whole reply, in order, ended by the last message only.
+    assert "".join(m["text"] for m in sent) == reply
+    assert [m["end_of_segment"] for m in sent] == [False] * (len(sent) - 1) + [True]
+    # Each message but the last ends between words.
+    assert all(m["text"].endswith(" ") for m in sent[:-1])
+
+
+def test_split_agent_text_keeps_short_text_and_cuts_a_long_word_between_characters():
+    assert _split_agent_text("Lekadol is in stock.") == ["Lekadol is in stock."]
+    assert _split_agent_text("") == [""]
+    assert _split_agent_text("a" * 2500) == ["a" * 1000, "a" * 1000, "a" * 500]
+    # A cut never splits a character: 334 three-byte letters are 1,002 bytes.
+    assert _split_agent_text("न" * 334) == ["न" * 333, "न"]
 
 
 @pytest.mark.parametrize(
