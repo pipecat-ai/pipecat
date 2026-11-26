@@ -54,6 +54,7 @@ SERVICE_CONFIGS = {
         "        aiohttp_session=session\n"
         "    )\n"
     ),
+    "funasr_stt": "FunASRSTTService()",
     "gemini_stt": 'GeminiSTTService(api_key=os.getenv("GOOGLE_API_KEY"))',
     "gladia_stt": (
         "GladiaSTTService(\n"
@@ -77,9 +78,11 @@ SERVICE_CONFIGS = {
     "openai_realtime_stt": 'OpenAIRealtimeSTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "rime_stt": 'RimeSTTService(api_key=os.getenv("RIME_API_KEY"))',
     "sarvam_stt": 'SarvamSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
+    "sarvam_realtime_stt": 'SarvamRealtimeSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
     "smallest_stt": 'SmallestSTTService(api_key=os.getenv("SMALLEST_API_KEY"))',
     "soniox_stt": 'SonioxSTTService(api_key=os.getenv("SONIOX_API_KEY"))',
     "speechmatics_stt": 'SpeechmaticsSTTService(api_key=os.getenv("SPEECHMATICS_API_KEY"))',
+    "together_stt": 'TogetherSTTService(api_key=os.getenv("TOGETHER_API_KEY"))',
     "moonshine_stt": (
         "MoonshineSTTService(\n"
         "        settings=MoonshineSTTService.Settings(\n"
@@ -228,20 +231,20 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
-    "inception_llm": (
-        "InceptionLLMService(\n"
-        '        api_key=os.getenv("INCEPTION_API_KEY"),\n'
-        "        settings=InceptionLLMService.Settings(\n"
-        '            model=os.getenv("INCEPTION_MODEL"),\n'
-        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
-        "        ),\n"
-        "    )\n"
-    ),
     "mistral_llm": (
         "MistralLLMService(\n"
         '        api_key=os.getenv("MISTRAL_API_KEY"),\n'
         "        settings=MistralLLMService.Settings(\n"
         '            model=os.getenv("MISTRAL_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "nebius_llm": (
+        "NebiusLLMService(\n"
+        '        api_key=os.getenv("NEBIUS_API_KEY"),\n'
+        "        settings=NebiusLLMService.Settings(\n"
+        '            model=os.getenv("NEBIUS_MODEL"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "        ),\n"
         "    )\n"
@@ -614,6 +617,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "rime_v1_tts": (
+        "RimeV1TTSService(\n"
+        '        api_key=os.getenv("RIME_API_KEY"),\n'
+        "        settings=RimeV1TTSService.Settings(\n"
+        '            model=os.getenv("RIME_MODEL", "coda"),\n'
+        '            voice=os.getenv("RIME_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "sarvam_tts": (
         "SarvamTTSService(\n"
         '        api_key=os.getenv("SARVAM_API_KEY"),\n'
@@ -638,6 +650,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "speechmatics_tts": (
+        "SpeechmaticsTTSService(\n"
+        '        api_key=os.getenv("SPEECHMATICS_API_KEY"),\n'
+        "        aiohttp_session=session,\n"
+        "        settings=SpeechmaticsTTSService.Settings(\n"
+        '            voice=os.getenv("SPEECHMATICS_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "speechify_tts": (
         "SpeechifyHttpTTSService(\n"
         '        api_key=os.getenv("SPEECHIFY_API_KEY"),\n'
@@ -647,20 +668,19 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "together_tts": (
+        "TogetherTTSService(\n"
+        '        api_key=os.getenv("TOGETHER_API_KEY"),\n'
+        "        settings=TogetherTTSService.Settings(\n"
+        '            voice=os.getenv("TOGETHER_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "xai_tts": (
         "XAITTSService(\n"
         '        api_key=os.getenv("XAI_API_KEY"),\n'
         "        settings=XAITTSService.Settings(\n"
         '            voice=os.getenv("XAI_VOICE_ID"),\n'
-        "        ),\n"
-        "    )\n"
-    ),
-    "xtts_tts": (
-        "XTTSService(\n"
-        '        base_url=os.getenv("XTTS_BASE_URL"),\n'
-        "        aiohttp_session=session,\n"
-        "        settings=XTTSService.Settings(\n"
-        '            voice=os.getenv("XTTS_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"
     ),
@@ -738,6 +758,16 @@ SERVICE_CONFIGS = {
         "    ),\n"
         ")\n"
     ),
+    "inworld_realtime": (
+        "llm = InworldRealtimeLLMService(\n"
+        '    api_key=os.getenv("INWORLD_API_KEY"),\n'
+        '    llm_model=os.getenv("INWORLD_MODEL"),\n'
+        '    voice=os.getenv("INWORLD_VOICE_ID"),\n'
+        "    settings=InworldRealtimeLLMService.Settings(\n"
+        '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "    ),\n"
+        ")\n"
+    ),
     "xai_realtime": (
         "session_properties = SessionProperties(\n"
         '    voice=os.getenv("XAI_VOICE_ID"),\n'
@@ -768,6 +798,22 @@ SERVICE_CONFIGS = {
         "    ),\n"
         ")\n"
     ),
+    "openai_live_realtime": (
+        "llm = OpenAILiveLLMService(\n"
+        '    api_key=os.getenv("OPENAI_API_KEY"),\n'
+        "    settings=OpenAILiveLLMService.Settings(\n"
+        '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "    ),\n"
+        ")\n"
+    ),
+    "rime_realtime": (
+        "# The Rime SDK reads RIME_API_KEY from the environment.\n"
+        "llm = RimeRealtimeLLMService(\n"
+        "    settings=RimeRealtimeLLMService.Settings(\n"
+        '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "    ),\n"
+        ")\n"
+    ),
     "zoom_ai_realtime": (
         "llm = ZoomAIRealtimeLLMService(\n"
         '    api_key=os.getenv("ZOOM_AI_API_KEY"),\n'
@@ -793,7 +839,7 @@ SERVICE_CONFIGS = {
         "    service_type=ServiceType.LIVE_AVATAR,\n"
         "    session=session,\n"
         "    session_request=LiveAvatarNewSessionRequest(\n"
-        '        avatar_id="HEYGEN_AVATAR_ID",\n'
+        '        avatar_id=os.getenv("HEYGEN_AVATAR_ID"),\n'
         "    ),\n"
         ")\n"
     ),

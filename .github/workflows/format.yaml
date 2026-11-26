@@ -65,5 +65,11 @@ jobs:
           uv run scripts/cli/update_registry.py
           git diff --exit-code src/pipecat/cli/registry/_imports.py src/pipecat/cli/registry/_configs.py
 
+      - name: CLI service coverage check
+        id: service-coverage
+        # Fail if a service class is neither offered by the CLI nor in EXCLUDED_SERVICES.
+        # Runs here because it imports every service module, which needs --all-extras.
+        run: uv run scripts/cli/check_service_coverage.py
+
       - name: Changelog fragment names
         run: uv run python scripts/check-changelog-fragments.py
