@@ -347,6 +347,15 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(await expand_percentages("5%-10%", "*"), "five percent to ten percent")
 
+    async def test_range_lookalikes_unchanged(self):
+        # A dash that is not a range between two standalone numbers is left alone.
+        self.assertEqual(await expand_percentages("Q3-5%", "*"), "Q3-five percent")
+        self.assertEqual(await expand_percentages("+/-5%", "*"), "+/-five percent")
+        self.assertEqual(await expand_percentages("1-2-3%", "*"), "1-2-three percent")
+        self.assertEqual(await expand_percentages("2025-2026", "*"), "2025-2026")
+        self.assertEqual(await expand_percentages("5-10 km", "*"), "5-10 km")
+        self.assertEqual(await expand_percentages("5% -2%", "*"), "five percent minus two percent")
+
     async def test_negative(self):
         # A leading minus sign is spoken, not dropped in front of the words.
         self.assertEqual(

@@ -14,10 +14,11 @@ from pipecat.frames.frames import TextType
 
 _PERCENT_RE = re.compile(r"(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\s*%")
 
-# A range such as "5-10%" or "5%–10%": the dash becomes "to". The first number must not
-# be glued to a word ("Q3-5%"), so only standalone numbers start a range.
+# A range such as "5-10%" or "5 – 10%": the dash becomes "to". The first number must not be
+# glued to a word or another dash ("Q3-5%", "1-2-3%"), and the dash is spaced on both sides or
+# neither, so "5% -2%" keeps its minus sign.
 _PERCENT_RANGE_RE = re.compile(
-    r"(?<![\w.,])(\d[\d,]*(?:\.\d+)?\s*%?)\s*[-–]\s*(?=\d[\d,]*(?:\.\d+)?\s*%)"
+    r"(?<![\w.,\-–])(\d[\d,]*(?:\.\d+)?\s*%?)(?:[-–]|\s[-–]\s)(?=\d[\d,]*(?:\.\d+)?\s*%)"
 )
 
 # A minus sign in front of a percentage, not a hyphen joined to a preceding word or number.
