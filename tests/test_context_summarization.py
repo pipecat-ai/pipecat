@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import LLMContextSummaryRequestFrame
+from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.context.llm_context_summarization import (
@@ -394,6 +395,34 @@ class TestFunctionCallHandling(unittest.TestCase):
         # Should only get the first user message, stopping before the function call
         self.assertEqual(len(result.messages), 1)
         self.assertEqual(result.messages[0]["content"], "What time is it?")
+        self.assertEqual(result.last_summarized_index, 1)
+
+    def test_async_function_call_running_not_summarized(self):
+        """Test that a running async function call is not summarized."""
+        context = LLMContext()
+
+        context.add_message({"role": "system", "content": "System prompt"})
+        context.add_message({"role": "user", "content": "Research the topic"})
+        context.add_message(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {"name": "research", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        context.add_message(async_tool_messages.build_started_message("call_123"))
+        context.add_message({"role": "assistant", "content": "I'm looking into it."})
+        context.add_message({"role": "user", "content": "Latest message"})
+
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
+
+        self.assertEqual(len(result.messages), 1)
         self.assertEqual(result.last_summarized_index, 1)
 
     def test_completed_function_call_can_be_summarized(self):
