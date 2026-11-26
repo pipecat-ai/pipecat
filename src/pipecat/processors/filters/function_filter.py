@@ -79,7 +79,6 @@ class FunctionFilter(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        passthrough = self._should_passthrough_frame(frame, direction)
-        allowed = await self._filter(frame)
-        if passthrough or allowed:
+        # Frames that pass through unfiltered never reach the filter function.
+        if self._should_passthrough_frame(frame, direction) or await self._filter(frame):
             await self.push_frame(frame, direction)
