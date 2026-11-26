@@ -54,6 +54,7 @@ SERVICE_CONFIGS = {
         "        aiohttp_session=session\n"
         "    )\n"
     ),
+    "funasr_stt": "FunASRSTTService()",
     "gemini_stt": 'GeminiSTTService(api_key=os.getenv("GOOGLE_API_KEY"))',
     "gladia_stt": (
         "GladiaSTTService(\n"
@@ -77,9 +78,11 @@ SERVICE_CONFIGS = {
     "openai_realtime_stt": 'OpenAIRealtimeSTTService(api_key=os.getenv("OPENAI_API_KEY"))',
     "rime_stt": 'RimeSTTService(api_key=os.getenv("RIME_API_KEY"))',
     "sarvam_stt": 'SarvamSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
+    "sarvam_realtime_stt": 'SarvamRealtimeSTTService(api_key=os.getenv("SARVAM_API_KEY"))',
     "smallest_stt": 'SmallestSTTService(api_key=os.getenv("SMALLEST_API_KEY"))',
     "soniox_stt": 'SonioxSTTService(api_key=os.getenv("SONIOX_API_KEY"))',
     "speechmatics_stt": 'SpeechmaticsSTTService(api_key=os.getenv("SPEECHMATICS_API_KEY"))',
+    "together_stt": 'TogetherSTTService(api_key=os.getenv("TOGETHER_API_KEY"))',
     "moonshine_stt": (
         "MoonshineSTTService(\n"
         "        settings=MoonshineSTTService.Settings(\n"
@@ -233,6 +236,15 @@ SERVICE_CONFIGS = {
         '        api_key=os.getenv("MISTRAL_API_KEY"),\n'
         "        settings=MistralLLMService.Settings(\n"
         '            model=os.getenv("MISTRAL_MODEL"),\n'
+        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "nebius_llm": (
+        "NebiusLLMService(\n"
+        '        api_key=os.getenv("NEBIUS_API_KEY"),\n'
+        "        settings=NebiusLLMService.Settings(\n"
+        '            model=os.getenv("NEBIUS_MODEL"),\n'
         '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "        ),\n"
         "    )\n"
@@ -605,6 +617,15 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "rime_v1_tts": (
+        "RimeV1TTSService(\n"
+        '        api_key=os.getenv("RIME_API_KEY"),\n'
+        "        settings=RimeV1TTSService.Settings(\n"
+        '            model=os.getenv("RIME_MODEL", "coda"),\n'
+        '            voice=os.getenv("RIME_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "sarvam_tts": (
         "SarvamTTSService(\n"
         '        api_key=os.getenv("SARVAM_API_KEY"),\n'
@@ -629,12 +650,29 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
+    "speechmatics_tts": (
+        "SpeechmaticsTTSService(\n"
+        '        api_key=os.getenv("SPEECHMATICS_API_KEY"),\n'
+        "        aiohttp_session=session,\n"
+        "        settings=SpeechmaticsTTSService.Settings(\n"
+        '            voice=os.getenv("SPEECHMATICS_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
     "speechify_tts": (
         "SpeechifyHttpTTSService(\n"
         '        api_key=os.getenv("SPEECHIFY_API_KEY"),\n'
         "        aiohttp_session=session,\n"
         "        settings=SpeechifyHttpTTSService.Settings(\n"
         '            voice=os.getenv("SPEECHIFY_VOICE_ID"),\n'
+        "        ),\n"
+        "    )\n"
+    ),
+    "together_tts": (
+        "TogetherTTSService(\n"
+        '        api_key=os.getenv("TOGETHER_API_KEY"),\n'
+        "        settings=TogetherTTSService.Settings(\n"
+        '            voice=os.getenv("TOGETHER_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"
     ),
