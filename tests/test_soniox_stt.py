@@ -33,7 +33,7 @@ from pipecat.observers.bot_speech_observer import BotSpeechObserver
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
-from pipecat.services.soniox.stream_reconnect import SonioxReconnectTracker
+from pipecat.services.soniox.stream_reconnect import SonioxWebSocket
 from pipecat.services.soniox.stt import (
     DEFAULT_AGENT_TEXT_LEAD_MS,
     END_TOKEN,
@@ -53,12 +53,11 @@ from tests.frame_processor_helpers import frame_processor_setup
 
 
 class _FakeWebsocket:
-    def __init__(self, messages, *, state=State.OPEN, send_side_effect=None, replies=()):
+    def __init__(self, messages, *, state=State.OPEN, send_side_effect=None):
         self._messages = messages
         self.state = state
         self.closed = False
         self.send = AsyncMock(side_effect=send_side_effect)
-        self.recv = AsyncMock(side_effect=[json.dumps(reply) for reply in replies])
         self.transport = MagicMock()
 
     async def close(self):
@@ -1353,258 +1352,78 @@ async def test_setup_does_not_observe_the_pipeline_for_a_model_without_agent_tex
     assert not worker.add_observer.called
 
 
-_RECONNECT_OFFER = {
-    "type": "reconnect",
-    "reconnect_url": "wss://soniox/reconnect",
-    "reconnect_token": "t1",
-}
+async def _connect_with_reconnect(monkeypatch, enabled):
+    """Connect a service to a fake socket, with reconnect on or off."""
+    websocket = _FakeWebsocket([], state=State.OPEN)
 
-
-def _service_with_reconnect_offer(**kwargs):
-    """A connected service that Soniox has offered a reconnect."""
-    service, websocket = _connected_service(
-        settings=SonioxSTTService.Settings(enable_reconnect=True), **kwargs
-    )
-    service._reconnect_tracker = SonioxReconnectTracker()
-    service._reconnect_tracker.handle_server_message(_RECONNECT_OFFER)
-    return service, websocket
-
-
-def _fake_connections(monkeypatch, *websockets):
-    """Hand out the given sockets, one per connect, recording each URL."""
-    urls = []
-    remaining = list(websockets)
-
-    async def fake_websocket_connect(url, **kwargs):
-        urls.append(url)
-        return remaining.pop(0)
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
 
     monkeypatch.setattr(
         "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
     )
-    return urls
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(enable_reconnect=enabled)
+    )
+    await service._connect_websocket()
+    return service, websocket
 
 
 @pytest.mark.parametrize("enabled", [False, True])
 @pytest.mark.asyncio
-async def test_connect_config_requests_reconnect_only_when_enabled(monkeypatch, enabled):
-    settings = SonioxSTTService.Settings(enable_reconnect=enabled)
+async def test_connect_requests_reconnect_only_when_enabled(monkeypatch, enabled):
+    _, websocket = await _connect_with_reconnect(monkeypatch, enabled)
 
-    config = await _connect_config(monkeypatch, settings=settings)
-
+    config = json.loads(_sent_payloads(websocket)[0])
     assert config.get("enable_reconnect") is (True if enabled else None)
 
 
+@pytest.mark.parametrize("enabled", [False, True])
 @pytest.mark.asyncio
-async def test_messages_sent_while_disconnected_are_tracked_for_resend():
-    service, _ = _service_with_reconnect_offer()
-    service._websocket = None
+async def test_connect_wraps_the_connection_only_when_reconnect_is_enabled(monkeypatch, enabled):
+    service, websocket = await _connect_with_reconnect(monkeypatch, enabled)
 
-    await service._send(b"audio")
-    await service._send_stop_recording()
-
-    assert service._reconnect_tracker.unacknowledged_after(0) == [(1, b"audio"), (2, "")]
+    assert isinstance(service._websocket, SonioxWebSocket) is enabled
+    assert service._websocket.state is State.OPEN
 
 
 @pytest.mark.asyncio
-async def test_a_lost_connection_is_aborted_without_ending_the_stream():
-    service, websocket = _service_with_reconnect_offer()
-
-    await service._disconnect_websocket()
-
-    # A close, with status 1000, would end the stream.
-    assert not websocket.closed
-    assert service._websocket is None
-    assert service._reconnect_tracker.can_reconnect
-
-
-@pytest.mark.asyncio
-async def test_disconnecting_ends_the_stream():
-    service, websocket = _service_with_reconnect_offer()
-
-    await service._disconnect()
-
-    assert websocket.closed
-    assert service._reconnect_tracker is None
-
-
-@pytest.mark.asyncio
-async def test_connect_reconnects_and_resends_the_missing_messages(monkeypatch):
-    service, _ = _service_with_reconnect_offer()
-    for message in (b"a", b"b", b"c"):
-        await service._send(message)
-    service._websocket = None
-    reconnected = {"type": "reconnected", "reconnect_token": "t2", "last_request": 1}
-    websocket = _FakeWebsocket([], replies=[reconnected])
-    urls = _fake_connections(monkeypatch, websocket)
-
-    await service._connect_websocket()
-
-    assert urls == ["wss://soniox/reconnect"]
-    request, *resent = _sent_payloads(websocket)
-    assert json.loads(request) == {"type": "reconnect", "reconnect_token": "t1", "last_seq": 0}
-    assert resent == [b"b", b"c"]
-    assert service._websocket is websocket
-
-
-@pytest.mark.asyncio
-async def test_a_refused_reconnect_starts_a_new_stream(monkeypatch):
-    service, _ = _service_with_reconnect_offer()
-    service._websocket = None
-    refused = {"tokens": [], "error_code": 400, "error_type": "reconnect_failed"}
-    refusing, fresh = _FakeWebsocket([], replies=[refused]), _FakeWebsocket([])
-    urls = _fake_connections(monkeypatch, refusing, fresh)
-
-    await service._connect_websocket()
-
-    assert urls == ["wss://soniox/reconnect", service._url]
-    refusing.transport.abort.assert_called_once()
-    assert json.loads(_sent_payloads(fresh)[0])["enable_reconnect"] is True
-    assert service._websocket is fresh
-    assert not service._reconnect_tracker.can_reconnect
-
-
-@pytest.mark.asyncio
-async def test_reconnect_keeps_final_tokens_from_before_the_drop(monkeypatch):
-    service, _ = _service_with_reconnect_offer()
-    service._final_transcription_buffer = [{"text": "Hello", "is_final": True}]
-    end = {"text": END_TOKEN, "is_final": True}
-    service._websocket = _FakeWebsocket(
-        [
-            json.dumps({"type": "pong", "id": 1}),
-            json.dumps({"tokens": [{"text": " there", "is_final": True}, end], "seq": 4}),
-        ]
-    )
-
-    transcripts = []
-
-    async def fake_push_frame(frame, direction=None):
-        if isinstance(frame, TranscriptionFrame):
-            transcripts.append(frame.text)
-
-    monkeypatch.setattr(service, "push_frame", fake_push_frame)
-    monkeypatch.setattr(service, "_handle_transcription", AsyncMock())
-    monkeypatch.setattr(service, "emit_stt_usage_metrics", AsyncMock())
-
-    await service._receive_messages()
-
-    assert transcripts == ["Hello there"]
-    assert json.loads(service._reconnect_tracker.create_reconnect_request())["last_seq"] == 4
-
-
-@pytest.mark.asyncio
-async def test_a_finished_stream_cannot_be_reconnected(monkeypatch):
-    service, _ = _service_with_reconnect_offer()
-    service._websocket = _FakeWebsocket([json.dumps({"tokens": [], "finished": True, "seq": 1})])
-
-    await service._receive_messages()
-
-    assert service._reconnect_tracker is None
-
-
-@pytest.mark.asyncio
-async def test_audio_and_keepalives_are_tracked_for_resend():
-    service, websocket = _service_with_reconnect_offer()
+async def test_audio_after_the_config_is_sent_through_the_reconnecting_connection(monkeypatch):
+    service, websocket = await _connect_with_reconnect(monkeypatch, True)
 
     async for _ in service.run_stt(b"audio"):
         pass
-    await service._send_keepalive(b"")
 
-    assert _sent_payloads(websocket) == [b"audio", '{"type": "keepalive"}']
-    assert service._reconnect_tracker.unacknowledged_after(0) == [
-        (1, b"audio"),
-        (2, '{"type": "keepalive"}'),
-    ]
-
-
-@pytest.mark.parametrize("enabled", [False, True])
-@pytest.mark.asyncio
-async def test_connect_runs_the_ping_task_only_when_reconnect_is_enabled(monkeypatch, enabled):
-    service, _ = _connected_service(settings=SonioxSTTService.Settings(enable_reconnect=enabled))
-    service._task_manager = service._setup.task_manager
-    monkeypatch.setattr(service, "_connect_websocket", AsyncMock())
-    monkeypatch.setattr(service, "_receive_task_handler", AsyncMock())
-
-    await service._connect()
-    assert (service._ping_task is not None) is enabled
-
-    await service._disconnect()
-    assert service._ping_task is None
-
-
-async def _run_ping_task(service, monkeypatch):
-    """Run a few rounds of the ping task with no wait between them."""
-    monkeypatch.setattr("pipecat.services.soniox.stt.PING_INTERVAL_S", 0)
-    task = asyncio.create_task(service._ping_task_handler())
-    for _ in range(3):
-        await asyncio.sleep(0)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-
-class _Clock:
-    def __init__(self):
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
+    assert _sent_payloads(websocket)[1:] == [b"audio"]
 
 
 @pytest.mark.asyncio
-async def test_ping_task_pings_an_open_connection(monkeypatch):
-    service, websocket = _service_with_reconnect_offer()
+async def test_disconnecting_closes_the_reconnecting_connection(monkeypatch):
+    service, websocket = await _connect_with_reconnect(monkeypatch, True)
 
-    await _run_ping_task(service, monkeypatch)
+    await service._disconnect_websocket()
 
-    pings = [json.loads(payload) for payload in _sent_payloads(websocket)]
-    assert pings and all(ping["type"] == "ping" for ping in pings)
-    websocket.transport.abort.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_ping_task_aborts_the_connection_when_a_pong_is_overdue(monkeypatch):
-    service, websocket = _service_with_reconnect_offer()
-    clock = _Clock()
-    service._reconnect_tracker = SonioxReconnectTracker(clock=clock)
-    service._reconnect_tracker.handle_server_message(_RECONNECT_OFFER)
-    service._reconnect_tracker.create_ping()
-    clock.now = 10
-
-    await _run_ping_task(service, monkeypatch)
-
-    websocket.transport.abort.assert_called()
-    assert _sent_payloads(websocket) == []
+    # A close, with status 1000, ends the Soniox stream.
+    assert websocket.closed
+    assert service._websocket is None
 
 
 @pytest.mark.asyncio
-async def test_ping_task_waits_while_disconnected(monkeypatch):
-    service, websocket = _service_with_reconnect_offer()
-    service._websocket = None
+async def test_a_failed_config_send_aborts_the_connection(monkeypatch):
+    websocket = _FakeWebsocket([], send_side_effect=ConnectionResetError("send failed"))
 
-    await _run_ping_task(service, monkeypatch)
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
 
-    assert _sent_payloads(websocket) == []
-
-
-@pytest.mark.asyncio
-async def test_ping_task_keeps_running_when_a_ping_send_fails(monkeypatch):
-    service, websocket = _service_with_reconnect_offer()
-    websocket.send = AsyncMock(side_effect=ConnectionResetError("send failed"))
-
-    await _run_ping_task(service, monkeypatch)
-
-    assert websocket.send.await_count > 1
-
-
-@pytest.mark.asyncio
-async def test_a_replaced_connection_is_ignored_without_ending_the_stream(monkeypatch):
-    service, _ = _service_with_reconnect_offer()
-    replaced = {"tokens": [], "error_code": 400, "error_type": "connection_replaced"}
-    service._websocket = _FakeWebsocket([json.dumps(replaced)])
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(enable_reconnect=True)
+    )
     monkeypatch.setattr(service, "push_error", AsyncMock())
 
-    await service._receive_messages()
+    await service._connect_websocket()
 
-    service.push_error.assert_not_awaited()
-    assert service._reconnect_tracker.can_reconnect
+    assert service._websocket is None
+    websocket.transport.abort.assert_called()
