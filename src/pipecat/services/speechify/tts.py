@@ -271,8 +271,11 @@ class SpeechifyTTSSettings(TTSSettings):
                  {"text": "TTS", "alias": "text to speech"}]
 
             Speechify applies these on ``simba-3.5`` in every language it lists under
-            ``pronunciation_languages`` in ``GET /v1/audio/models``, which excludes
-            English; any other model or language returns ``pronunciations_unsupported``.
+            ``pronunciation_languages`` in ``GET /v1/audio/models``, which is every
+            language the model speaks, English included; any other model or language
+            returns ``pronunciations_unsupported``. English ``ipa`` entries draw on a
+            phone set of their own, separate from the one the other languages share,
+            and a phone outside the request language's set is rejected.
 
             Another way to guide pronunciation is to pass
             :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
