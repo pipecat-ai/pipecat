@@ -16,6 +16,7 @@ from pipecat.bus import (
     BusJobCancelMessage,
     BusSubscriber,
 )
+from pipecat.bus.queue import BusMessageQueue
 from pipecat.utils.asyncio.task_manager import TaskManager
 
 
@@ -267,6 +268,20 @@ class TestBusMessagePriority(unittest.IsolatedAsyncioTestCase):
         await bus.stop()
 
         self.assertIsInstance(sub.received[0], BusJobCancelMessage)
+
+
+class TestBusMessageQueue(unittest.IsolatedAsyncioTestCase):
+    async def test_put_returns_messages_in_priority_order(self):
+        """Messages added with put() come out as themselves, system first."""
+        queue = BusMessageQueue()
+        data = BusDataMessage(source="data")
+        cancel = BusCancelMessage(source="runner")
+
+        await queue.put(data)
+        await queue.put(cancel)
+
+        self.assertIs(await queue.get(), cancel)
+        self.assertIs(await queue.get(), data)
 
 
 class _FailingSub(BusSubscriber):
