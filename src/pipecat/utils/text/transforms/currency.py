@@ -36,8 +36,10 @@ _SCALE_ABBREVIATIONS: dict[str, str] = {
 # ("$2.5bn"), which multiplies the whole amount, so the fraction is part of the
 # number rather than a subunit. The amount must end at a word boundary, so an
 # unrecognised suffix ("$1.5x") is left alone instead of being read as cents.
+# The whole amount accepts Indian lakh/crore grouping ("₹1,00,000") as well as
+# thousands grouping ("$1,000,000").
 _CURRENCY_RE = re.compile(
-    r"([€£¥₹\$])\s*(\d{1,3}(?:,\d{3})*|\d+)(?!\d)(?:\.(\d+))?(?!\.\d)"
+    r"([€£¥₹\$])\s*(\d{1,2}(?:,\d{2})+,\d{3}|\d{1,3}(?:,\d{3})*|\d+)(?!\d)(?:\.(\d+))?(?!\.\d)"
     r"(?:\s+(thousand|million|billion|trillion)\b|(k|mn|m|bn|b|tn|t)\b)?(?!\w)",
     re.IGNORECASE,
 )
