@@ -57,6 +57,53 @@ class TestSentenceAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert received_down[-1].text == "Okay."
 
+    async def test_text_after_a_boundary_stays_with_the_next_sentence(self):
+        aggregator = SentenceAggregator()
+
+        (received_down, _) = await run_test(
+            aggregator,
+            frames_to_send=[
+                TextFrame(text="Hello, world. How"),
+                TextFrame(text=" are you?"),
+            ],
+            expected_down_frames=[TextFrame, TextFrame],
+        )
+        assert received_down[0].text == "Hello, world."
+        assert received_down[1].text == " How are you?"
+
+    async def test_several_sentences_in_one_frame_are_emitted_separately(self):
+        aggregator = SentenceAggregator()
+
+        (received_down, _) = await run_test(
+            aggregator,
+            frames_to_send=[TextFrame(text="Hello, world. How are you?")],
+            expected_down_frames=[TextFrame, TextFrame],
+        )
+        assert received_down[0].text == "Hello, world."
+        assert received_down[1].text == " How are you?"
+
+    async def test_abbreviation_before_a_boundary_stays_in_its_sentence(self):
+        aggregator = SentenceAggregator()
+
+        (received_down, _) = await run_test(
+            aggregator,
+            frames_to_send=[TextFrame(text="We met at 5 p.m. Then we left.")],
+            expected_down_frames=[TextFrame, TextFrame],
+        )
+        assert received_down[0].text == "We met at 5 p.m."
+        assert received_down[1].text == " Then we left."
+
+    async def test_partial_sentence_after_a_boundary_is_flushed_at_end(self):
+        aggregator = SentenceAggregator()
+
+        (received_down, _) = await run_test(
+            aggregator,
+            frames_to_send=[TextFrame(text="Hello, world. How")],
+            expected_down_frames=[TextFrame, TextFrame],
+        )
+        assert received_down[0].text == "Hello, world."
+        assert received_down[1].text == " How"
+
 
 class TestGatedAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_gated_aggregator(self):
