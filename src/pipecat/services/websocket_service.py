@@ -240,11 +240,12 @@ class WebsocketService(ABC):
     def _websocket(self) -> WebsocketConnection | None:
         """The connection the service is using, if any.
 
-        Replacing or clearing it aborts the connection it held unless that
-        connection is already closed, so the service never loses track of an
-        open connection. The abort is synchronous: a disconnect cancelled
-        before its close completes still ends the connection when it clears
-        the reference.
+        Replacing or clearing it aborts a ``websockets`` client connection it
+        held unless that connection is already closed, so the service never
+        loses track of an open connection. The abort is synchronous: a
+        disconnect cancelled before its close completes still ends the
+        connection when it clears the reference. Any other
+        :class:`WebsocketConnection` is left for its owner to close.
         """
         return self.__websocket_connection
 
