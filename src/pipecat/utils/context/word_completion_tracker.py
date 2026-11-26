@@ -222,8 +222,8 @@ class WordCompletionTracker:
         self._frame_word = self._tts_text[self._segment_map.raw_pos :]
         self._user_facing_pos = len(self._user_facing_text)
         if self._llm_text is not None:
-            # The whole remainder is this frame's by definition, tags included.
-            self._llm_consumed = self._llm_text[self._llm_spoken_pos :]
+            # Everything no word has recorded yet is this frame's, tags included.
+            self._llm_consumed = self._llm_text[self._llm_pos :]
             self._llm_pos = len(self._llm_text)
             self._llm_spoken_pos = len(self._llm_text)
         self._force_completed = True
@@ -311,7 +311,8 @@ class WordCompletionTracker:
 
         - **One step inside a rewritten span.** ``"$42.50"`` is spoken as five
           words, none of which the transcript should contain; the word that
-          finishes the span carries ``"$42.50"`` for all of them.
+          finishes the span, or force-completes the frame, carries ``"$42.50"``
+          for all of them.
         - **A word with no span of its own.** A provider reporting ``","`` on
           its own, after ``"Yeah"`` took the comma into its span, has nothing
           left to record. The context falls back to the spoken text when a word
@@ -322,7 +323,7 @@ class WordCompletionTracker:
         there are no spans at all, so nothing is suppressed and every word is
         recorded from its spoken text as usual.
         """
-        return self._segment_map.in_transformed_segment or (
+        return (self._segment_map.in_transformed_segment and not self._force_completed) or (
             self._llm_text is not None and not (self._llm_consumed or "").strip()
         )
 
@@ -417,12 +418,24 @@ class WordCompletionTracker:
         """Return what this frame still has left to speak, as the LLM wrote it.
 
         The companion to :meth:`get_remaining_tts_text` when ending a frame
-        early: that supplies the text to emit, this the text to record. None
-        without an ``llm_text``, or when nothing is left.
+        early: that supplies the text to emit, this the text it is checked
+        against. None without an ``llm_text``, or when nothing is left.
         """
         if self._llm_text is None:
             return None
         remaining = self._llm_text[self._llm_spoken_pos :].strip()
+        return remaining if remaining else None
+
+    def get_unattributed_llm_text(self) -> str | None:
+        """Return the LLM text no word has recorded yet.
+
+        The text to record when ending a frame early. Unlike
+        :meth:`get_remaining_llm_text`, it leaves out a mark an earlier word
+        already recorded. None without an ``llm_text``, or when nothing is left.
+        """
+        if self._llm_text is None:
+            return None
+        remaining = self._llm_text[self._llm_pos :].strip()
         return remaining if remaining else None
 
     @property

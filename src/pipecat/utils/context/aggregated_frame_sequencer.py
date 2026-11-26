@@ -695,7 +695,17 @@ class AggregatedFrameSequencer:
                     if self.llm_markup:
                         llm_words = self.llm_markup.sub("", llm_words)
                     llm_words = " ".join(llm_words.split())
-                    if raw_remaining and remaining_words and remaining_words not in llm_words:
+                    # A text transform may have rewritten those words, so the words
+                    # left in the user-facing text count as well.
+                    user_facing_words = " ".join(
+                        strip_complete_markup(slot.tracker.get_remaining_user_facing_text()).split()
+                    )
+                    if (
+                        raw_remaining
+                        and remaining_words
+                        and remaining_words not in llm_words
+                        and user_facing_words not in llm_words
+                    ):
                         logger.warning(
                             f"{self._name} force-complete: raw_remaining {repr(raw_remaining)} "
                             f"does not contain remaining_text {repr(remaining_text)}, discarding"
@@ -719,7 +729,9 @@ class AggregatedFrameSequencer:
                                 last_word_pts,
                                 slot.context_id,
                                 segment_id=slot.frame.id,
-                                raw_text=raw_remaining,
+                                raw_text=slot.tracker.get_unattributed_llm_text()
+                                if raw_remaining
+                                else None,
                                 includes_inter_frame_spaces=slot.includes_inter_frame_spaces,
                             )
                         )
