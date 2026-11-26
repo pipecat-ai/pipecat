@@ -163,6 +163,10 @@ class SonioxReconnectTracker:
         if self._disconnected_at is None:
             self._disconnected_at = self._clock()
 
+    def mark_reconnected(self):
+        """End the reconnect window, once the missing messages are resent."""
+        self._disconnected_at = None
+
     def create_reconnect_request(self) -> str:
         """Create the first message for a reconnect connection.
 
@@ -196,7 +200,6 @@ class SonioxReconnectTracker:
                 raise SonioxReconnectRefusedError(error)
             raise ConnectionError(f"Soniox reconnect failed ({error})")
         self._reconnect_token = reply["reconnect_token"]
-        self._disconnected_at = None
         # Soniox never sends pongs lost with the old connection.
         self._pending_pings.clear()
         received_count = reply["last_request"]
@@ -447,7 +450,7 @@ class SonioxWebSocket:
         logger.debug("Reconnecting to the Soniox stream")
         while True:
             try:
-                self._websocket = await self._reconnect_once()
+                websocket = await self._reconnect_once()
             except SonioxReconnectRefusedError as e:
                 logger.warning(f"Soniox refused the reconnect ({e})")
                 self._websocket = lost
@@ -463,6 +466,8 @@ class SonioxWebSocket:
             except BaseException:
                 self._websocket = lost
                 raise
+            self._websocket = websocket
+            self._tracker.mark_reconnected()
             self._next_ping_at = self._clock() + self._ping_interval
             logger.debug("Reconnected to the Soniox stream")
             return
