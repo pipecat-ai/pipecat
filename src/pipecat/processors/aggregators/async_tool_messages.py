@@ -93,6 +93,15 @@ _INTERMEDIATE_DESCRIPTION = (
 # their flight, order, or booking was cancelled.
 _CANCELLED_RESULT = "CANCELLED: this tool call was cancelled before it returned a result"
 
+# Result recorded for a sync tool call that an interruption cancelled. The call may
+# have already committed its side effect, so the result says the outcome is unknown
+# rather than implying the action did not happen.
+INTERRUPTED_TOOL_RESULT = (
+    "INTERRUPTED: this tool call was interrupted before it returned a result. "
+    "Its action may already have taken effect, so the outcome is unknown; "
+    "do not assume it failed."
+)
+
 # Description shipped on the message that settles a cancelled task.
 _CANCELLED_DESCRIPTION = (
     "The asynchronous task associated with this tool_call_id was cancelled "
