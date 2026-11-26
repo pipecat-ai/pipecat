@@ -1929,6 +1929,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # so that `BotStoppedSpeakingFrame` knows to push a context frame. Multiple results
         # arriving in the same speaking window are bundled into a single deferred push.
         self._push_context_on_bot_stopped_speaking: bool = False
+        self._push_context_on_user_stopped_speaking: bool = False
 
         # A function call result asked to run inference and the push hasn't happened yet:
         # it was held for results still queued, or for a user who is speaking. Whichever
@@ -2016,6 +2017,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await super().reset()
         await self._reset_thought_aggregation()  # Just to be safe
         self._push_context_on_bot_stopped_speaking = False
+        self._push_context_on_user_stopped_speaking = False
         self._context_push_owed = False
 
     async def _reset_thought_aggregation(self):
@@ -2109,6 +2111,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
             await self.push_frame(frame, direction)
+            if self._push_context_on_user_stopped_speaking:
+                self._push_context_on_user_stopped_speaking = False
+                await self._maybe_push_context()
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
             await self.push_frame(frame, direction)
@@ -2229,6 +2234,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         frame = await super().push_context_frame(direction)
         self._push_context_on_bot_stopped_speaking = False
+        self._push_context_on_user_stopped_speaking = False
         self._context_push_owed = False
         return frame
 
@@ -2409,6 +2415,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         if run_llm:
             self._context_push_owed = True
+            if self._user_speaking:
+                self._push_context_on_user_stopped_speaking = True
 
         if self._context_push_owed and not self._user_speaking:
             await self._maybe_push_context()
