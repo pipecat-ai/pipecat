@@ -40,6 +40,7 @@ class VoiceFormatter:
         expand_numbers: bool = False,
         number_digit_cutoff: int | None = None,
         expand_percentages: bool = True,
+        percentage_trailing_zeros: bool = False,
         expand_units: bool = True,
         email_to_speech: bool = True,
         normalize_dates: bool = True,
@@ -67,6 +68,10 @@ class VoiceFormatter:
                 as words). Only used when ``expand_numbers=True``.
             expand_percentages: Expand percentage expressions (e.g. ``"50%"`` →
                 ``"fifty percent"``). Requires ``num2words``.
+            percentage_trailing_zeros: Read every written fraction digit of a
+                percentage, including trailing zeros (``"1.0%"`` → ``"one point
+                zero percent"`` instead of ``"one percent"``). Defaults to ``False``.
+                Only used when ``expand_percentages=True``.
             expand_units: Expand unit abbreviations (e.g. ``"5km"`` →
                 ``"5 kilometers"``). Enabled by default.
             email_to_speech: Transform email addresses to spoken form. Enabled by
@@ -113,7 +118,9 @@ class VoiceFormatter:
                 expand_percentages as _expand_percentages,
             )
 
-            self._transforms.append(_expand_percentages)
+            self._transforms.append(
+                _expand_percentages(read_trailing_zeros=percentage_trailing_zeros)
+            )
 
         # expand_units must run before normalize_acronyms: uppercase unit abbreviations
         # like "MB" or "MPH" would be letter-spaced first and then not recognized.

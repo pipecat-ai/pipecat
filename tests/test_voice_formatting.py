@@ -338,34 +338,48 @@ class TestNormalizeCollapsesCaseAndSplitReplacements(unittest.IsolatedAsyncioTes
 
 class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
     async def test_integer_percent(self):
-        result = await expand_percentages("50% off", "*")
+        result = await expand_percentages()("50% off", "*")
         self.assertIn("percent", result)
         self.assertNotIn("%", result)
 
     async def test_decimal_percent(self):
-        result = await expand_percentages("3.5% rate", "*")
+        result = await expand_percentages()("3.5% rate", "*")
         self.assertIn("percent", result)
 
     async def test_alnum_changes(self):
         text = "50%"
-        result = await expand_percentages(text, "*")
+        result = await expand_percentages()(text, "*")
         self.assertNotEqual(alnum_only(result), alnum_only(text))
 
     async def test_thousands_separator(self):
         # The separator is part of the number, not a prefix left in front of it.
         self.assertEqual(
-            await expand_percentages("1,500%", "*"), "one thousand, five hundred percent"
+            await expand_percentages()("1,500%", "*"), "one thousand, five hundred percent"
         )
         self.assertEqual(
-            await expand_percentages("12,500%", "*"), "twelve thousand, five hundred percent"
+            await expand_percentages()("12,500%", "*"), "twelve thousand, five hundred percent"
         )
-        self.assertEqual(await expand_percentages("1,000,000%", "*"), "one million percent")
+        self.assertEqual(await expand_percentages()("1,000,000%", "*"), "one million percent")
         self.assertEqual(
-            await expand_percentages("1,234.5%", "*"),
+            await expand_percentages()("1,234.5%", "*"),
             "one thousand, two hundred and thirty-four point five percent",
         )
         # A long number without a separator is still read whole.
-        self.assertEqual(await expand_percentages("1000%", "*"), "one thousand percent")
+        self.assertEqual(await expand_percentages()("1000%", "*"), "one thousand percent")
+
+    async def test_fraction_read_as_quantity_by_default(self):
+        # By default a decimal is a quantity, so trailing zeros are not spoken.
+        self.assertEqual(await expand_percentages()("1.10%", "*"), "one point one percent")
+        self.assertEqual(await expand_percentages()("1.0%", "*"), "one percent")
+        self.assertEqual(await expand_percentages()("0.25%", "*"), "zero point two five percent")
+
+    async def test_fraction_read_digit_by_digit_with_trailing_zeros(self):
+        # Opting in reads every written fraction digit, as expand_numbers does.
+        transform = expand_percentages(read_trailing_zeros=True)
+        self.assertEqual(await transform("1.10%", "*"), "one point one zero percent")
+        self.assertEqual(await transform("1.0%", "*"), "one point zero percent")
+        self.assertEqual(await transform("0.25%", "*"), "zero point two five percent")
+        self.assertEqual(await transform("50%", "*"), "fifty percent")
 
 
 class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
@@ -582,6 +596,11 @@ class TestVoiceFormatter(unittest.IsolatedAsyncioTestCase):
     async def test_expand_numbers_enabled(self):
         formatter = VoiceFormatter(expand_numbers=True, number_digit_cutoff=2025)
         self.assertIn("forty-two", await formatter("Room 42", "*"))
+
+    async def test_percentage_trailing_zeros(self):
+        self.assertIn("one percent", await VoiceFormatter()("Up 1.0%", "*"))
+        formatter = VoiceFormatter(percentage_trailing_zeros=True)
+        self.assertIn("one point zero percent", await formatter("Up 1.0%", "*"))
 
     async def test_all_caps_email_not_mangled_by_acronym_expander(self):
         # email_to_speech must run before normalize_acronyms so all-caps addresses

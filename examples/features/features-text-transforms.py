@@ -134,7 +134,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ("*", normalize_acronyms),
         ("*", email_to_speech),
         ("*", expand_currency),
-        ("*", expand_percentages),
+        ("*", expand_percentages()),
         ("*", custom_subs),
     ]
 
