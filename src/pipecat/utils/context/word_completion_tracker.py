@@ -395,10 +395,19 @@ class WordCompletionTracker:
         return self._tts_text[: self._segment_map.raw_pos]
 
     def get_accumulated_llm_text(self) -> str | None:
-        """Return everything spoken so far, as the LLM wrote it.
+        """Return the consumed prefix of the frame, as the LLM wrote it.
 
-        The whole frame up to the cursor, where :meth:`get_llm_consumed`
-        describes only the most recent word. None without an ``llm_text``.
+        The whole frame up to the speech cursor (``llm_spoken_pos``). While
+        words are arriving, that is the provider-reported position; force
+        completion and explicit remainder emission advance it so this prefix
+        covers the text that went out. :meth:`get_llm_consumed` describes only
+        the most recent word. None without an ``llm_text``.
+
+        While words are arriving, this is not necessarily the exact complement
+        of :meth:`get_remaining_llm_text`. A word can sweep trailing punctuation
+        into its attributed span before the provider reports that punctuation.
+        Such a mark lies after ``llm_spoken_pos`` but before the attributed
+        cursor (``llm_pos``), so it is in neither returned piece.
         """
         if self._llm_text is None:
             return None
@@ -423,8 +432,10 @@ class WordCompletionTracker:
 
         The companion to :meth:`get_remaining_tts_text` when ending a frame
         early: that supplies the text to emit, this the text to record. It starts
-        at the attributed cursor, so punctuation already recorded with a spoken
-        word is not recorded again. None without an ``llm_text``, or when nothing
+        at the attributed cursor (``llm_pos``), so punctuation already recorded
+        with a spoken word is not recorded again. After such a punctuation sweep,
+        this and :meth:`get_accumulated_llm_text` do not necessarily form an exact
+        partition of ``llm_text``. None without an ``llm_text``, or when nothing
         is left.
         """
         if self._llm_text is None:

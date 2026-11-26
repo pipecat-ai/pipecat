@@ -1547,8 +1547,9 @@ class TestWordCompletionTrackerAccumulatedText(unittest.TestCase):
     """Tests for get_accumulated_tts_text() and get_accumulated_llm_text().
 
     These methods return the prefix of tts_text / llm_text that has already been
-    consumed by word-timestamp events — the complement of get_remaining_tts_text()
-    and get_remaining_llm_text() which return the unspoken suffix.
+    consumed by word-timestamp events. The TTS accessors share one cursor; the
+    LLM accessors can use different cursors after a punctuation sweep, when a
+    mark can sit in neither piece.
     """
 
     # ------------------------------------------------------------------ #

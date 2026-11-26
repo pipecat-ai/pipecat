@@ -48,9 +48,14 @@ That is why the map tracks a *third* text. The two it compares are `tts_text` an
 
 The LLM side needs two because one position cannot answer both questions. A word
 takes a mark stuck to its end (`Yeah,` not `Yeah`), so the context reassembles without
-a space before it — but until the provider reports that mark, it has not been spoken,
-and a frame ending early still owes it. `llm_pos` answers the first, `llm_spoken_pos`
-the second, and the text between them is attributed but not yet spoken.
+a space before it. `llm_pos` is that attribution cursor. `llm_spoken_pos` is the
+cursor for what the provider has reported and stays before the mark until the
+provider reports it; the text between them is attributed but not yet spoken.
+
+When those cursors differ, a frame ending early has two different tails. The speech
+tail still owes the mark, so `get_remaining_tts_text()` includes it. The context tail
+must not record the mark a second time, so `get_remaining_llm_text()` starts at
+`llm_pos` and omits it.
 
 All three are **zero-based character indices**, and each points *just past* what has been
 consumed: `text[:pos]` is everything spoken so far, `text[pos]` is the next character. A
