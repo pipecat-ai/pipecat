@@ -40,6 +40,19 @@ _UNIT_MAP: dict[str, tuple[str, str]] = {
     "ghz": ("gigahertz", "gigahertz"),
 }
 
+# Maps a time unit written after a slash to its spoken form, making the unit
+# before the slash a rate: "km/h", "m/s", "MB/s".
+_PER_UNIT_MAP: dict[str, str] = {
+    "h": "hour",
+    "hr": "hour",
+    "hour": "hour",
+    "s": "second",
+    "sec": "second",
+    "second": "second",
+    "min": "minute",
+    "minute": "minute",
+}
+
 # Single-letter units that are also common English words: only expand when
 # they appear immediately after a digit with no intervening space, e.g. "5m"
 # but not "1 m people" (where "m" is a word) or "1 in 5" (preposition).
@@ -50,6 +63,17 @@ _sorted_unambiguous = sorted(
 )
 # Liters are also written with a capital "L".
 _sorted_ambiguous = sorted(_AMBIGUOUS_UNITS | {"L"}, key=len, reverse=True)
+
+# A rate expands whole, so it is matched before single units. The slash marks
+# any unit as one, so even an ambiguous unit may follow a space ("9.8 m/s").
+_RATE_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*("
+    + "|".join(re.escape(u) for u in sorted(_UNIT_MAP, key=len, reverse=True))
+    + r")/("
+    + "|".join(re.escape(u) for u in sorted(_PER_UNIT_MAP, key=len, reverse=True))
+    + r")\b",
+    re.IGNORECASE,
+)
 
 # Unambiguous units allow optional whitespace between the number and the unit.
 _UNIT_RE = re.compile(
@@ -102,6 +126,10 @@ async def expand_units(text: str, text_type: str | TextType) -> str:
         degrees = "degree" if number == "1" else "degrees"
         return f"{number} {degrees}{_DEGREE_SCALES.get(match.group(2) or '', '')}"
 
+    def _replace_rate(match: re.Match) -> str:
+        return f"{_replace(match)} per {_PER_UNIT_MAP[match.group(3).lower()]}"
+
     text = _DEGREE_RE.sub(_replace_degrees, text)
+    text = _RATE_RE.sub(_replace_rate, text)
     text = _UNIT_RE.sub(_replace, text)
     return _AMBIGUOUS_UNIT_RE.sub(_replace, text)
