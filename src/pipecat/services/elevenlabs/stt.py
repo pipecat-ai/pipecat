@@ -179,7 +179,8 @@ class ElevenLabsSTTSettings(STTSettings):
             (coughing) in the transcription.
         keyterms: List of key terms or phrases to bias transcription towards.
         no_verbatim: Whether to drop filler words, false starts and non-speech
-            sounds from the transcript. Supported by ``scribe_v2`` only.
+            sounds from the transcript. Supported by ``scribe_v2``,
+            ``scribe_v2_medical`` and ``scribe_v3``.
         diarize: Whether to annotate which speaker is talking. Each contiguous
             speaker run of a segment is emitted as its own frame with ElevenLabs'
             speaker id (e.g. ``"speaker_0"``) as ``speaker.label``.
@@ -206,7 +207,7 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
         keyterms: List of key terms or phrases to bias transcription towards.
         no_verbatim: Whether to drop filler words, false starts and non-speech
             sounds from the transcript.
-        vad_silence_threshold_secs: Seconds of silence before VAD commits (0.3-3.0).
+        vad_silence_threshold_secs: Seconds of silence before VAD commits (0.192-3.0).
         vad_threshold: VAD sensitivity (0.1-0.9, lower is more sensitive).
         min_speech_duration_ms: Minimum speech duration for VAD (50-2000ms).
         min_silence_duration_ms: Minimum silence duration for VAD (50-2000ms).
@@ -508,7 +509,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         Parameters:
             language_code: ISO-639-1 or ISO-639-3 language code. Leave None for auto-detection.
             commit_strategy: How to segment speech - manual (Pipecat VAD) or vad (ElevenLabs VAD).
-            vad_silence_threshold_secs: Seconds of silence before VAD commits (0.3-3.0).
+            vad_silence_threshold_secs: Seconds of silence before VAD commits (0.192-3.0).
                 Only used when commit_strategy is VAD. None uses ElevenLabs default.
             vad_threshold: VAD sensitivity (0.1-0.9, lower is more sensitive).
                 Only used when commit_strategy is VAD. None uses ElevenLabs default.

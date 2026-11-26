@@ -1,0 +1,1 @@
+- `ElevenLabsSTTService.Settings.no_verbatim` now documents the models ElevenLabs supports it on: `scribe_v2`, `scribe_v2_medical` and `scribe_v3`.

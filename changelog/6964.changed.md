@@ -1,0 +1,1 @@
+- `ElevenLabsRealtimeSTTService` now documents `vad_silence_threshold_secs` as accepting 0.192-3.0 seconds, the range ElevenLabs takes.
