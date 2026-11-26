@@ -120,6 +120,9 @@ class ActionConfig(TypedDict, total=False):
         append_text_to_context: For the built-in TTS actions ("tts_say" and
             "end_conversation"), whether the spoken ``text`` is appended to the
             LLM context. Defaults to True.
+        interruptible: For the "tts_say" action, whether the user can talk over
+            the text. False keeps it whole, as before a transfer. Defaults to
+            True.
 
     Note:
         Additional fields are allowed and passed to the handler.
@@ -129,6 +132,7 @@ class ActionConfig(TypedDict, total=False):
     handler: LegacyActionHandler | FlowActionHandler
     text: str
     append_text_to_context: bool
+    interruptible: bool
 
 
 class ContextStrategy(Enum):

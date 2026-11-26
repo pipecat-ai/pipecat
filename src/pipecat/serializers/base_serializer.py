@@ -6,6 +6,7 @@
 
 """Frame serialization interfaces for Pipecat."""
 
+import asyncio
 from abc import abstractmethod
 from typing import Any
 
@@ -37,6 +38,12 @@ class FrameSerializer(BaseObject):
     audio to the pipeline's input rate, outgoing audio to the wire's rate.
     Outgoing audio has already been paced by the output transport, and the
     stream resampler keeps that pace.
+
+    A serializer whose wire protocol reports how far the peer has played the
+    audio sent to it sets :attr:`supports_playback_marks`. It serializes a
+    :class:`~pipecat.frames.frames.PlaybackMarkFrame` into the protocol's mark,
+    and calls :meth:`_playback_mark_reached` with the mark's name when the peer
+    reports playback reached it.
     """
 
     class InputParams(BaseModel):
@@ -89,6 +96,8 @@ class FrameSerializer(BaseObject):
         self._input_resampler = create_stream_resampler()
         self._output_resampler = create_stream_resampler()
         self._output_resampler_rate = 0
+        # Marks sent to the peer, by name, until it reports playback reached them.
+        self._playback_marks: dict[str, asyncio.Future[None]] = {}
 
     @property
     def audio_in_sample_rate(self) -> int | None:
@@ -99,6 +108,40 @@ class FrameSerializer(BaseObject):
     def audio_out_sample_rate(self) -> int | None:
         """Sample rate of the audio sent on the wire, or None if the wire format carries it."""
         return self._params.audio_out_sample_rate
+
+    @property
+    def supports_playback_marks(self) -> bool:
+        """Whether the wire protocol reports when the peer has played the audio before a mark."""
+        return False
+
+    def expect_playback_mark(self, name: str) -> asyncio.Future[None]:
+        """Wait for the peer to report that playback reached a mark.
+
+        The output transport calls it before sending the mark, so a report
+        that comes back quickly isn't missed. Cancelling the future stops the
+        wait.
+
+        Args:
+            name: The name the mark is sent with.
+
+        Returns:
+            A future done once the peer reports playback reached the mark.
+        """
+        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._playback_marks[name] = future
+
+        def forget(done: asyncio.Future[None]):
+            if self._playback_marks.get(name) is done:
+                del self._playback_marks[name]
+
+        future.add_done_callback(forget)
+        return future
+
+    def _playback_mark_reached(self, name: str):
+        """Report that the peer's playback reached the mark ``name``."""
+        future = self._playback_marks.get(name)
+        if future and not future.done():
+            future.set_result(None)
 
     def should_ignore_frame(self, frame: Frame) -> bool:
         """Check if a frame should be ignored during serialization.

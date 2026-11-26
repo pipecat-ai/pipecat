@@ -2933,6 +2933,26 @@ class TTSStoppedFrame(ControlFrame):
     context_id: str | None = None
 
 
+@dataclass
+class PlaybackMarkFrame(ControlFrame):
+    """Frame marking a point in the bot's output audio.
+
+    The output transport holds the frame until the user has heard the audio
+    queued before it, then pushes it on, so whatever waits for it downstream
+    (the end of the pipeline, say) acts once the user has heard everything
+    said before. A transport whose peer reports playback, such as a telephony
+    provider that echoes marks back, pushes it when the peer says playback
+    reached it; any other transport pushes it once the audio before it has
+    been written. Without an output transport, it flows on like any other
+    frame.
+
+    Subclass it for a frame that must act after the user has heard the bot.
+    It is uninterruptible, so the user talking over the bot can't drop it.
+    """
+
+    interruptible: bool = field(default=False, init=False)
+
+
 # Covariant so a bare ``ServiceUpdateSettingsFrame`` annotation still accepts the
 # subclasses. Gotcha: ``delta`` is mutable, so writing through the base type is
 # unsound and goes unreported — treat a base-typed frame as read-only::

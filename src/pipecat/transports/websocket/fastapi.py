@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
+    PlaybackMarkFrame,
     StartFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
@@ -537,6 +538,25 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             frame: The transport message frame to send.
         """
         await self._write_frame(frame)
+
+    async def write_playback_mark(self, frame: PlaybackMarkFrame) -> asyncio.Future[None] | None:
+        """Send a playback mark through the serializer, if its protocol reports playback.
+
+        Args:
+            frame: The playback mark.
+
+        Returns:
+            A future done once the peer reports playback reached the mark, or
+            None if the serializer's protocol can't report it.
+        """
+        serializer = self._params.serializer
+        if not serializer or not serializer.supports_playback_marks:
+            return None
+        reached = serializer.expect_playback_mark(frame.name)
+        if not await self._write_frame(frame):
+            reached.cancel()
+            return None
+        return reached
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the WebSocket with timing simulation.

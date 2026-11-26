@@ -25,8 +25,9 @@ import warnings
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from pipecat.flows.actions import ActionManager
+from pipecat.flows.actions import ActionFinishedFrame, ActionManager, FunctionActionFrame
 from pipecat.flows.exceptions import ActionError
+from pipecat.frames.frames import PlaybackMarkFrame
 from tests.flows_test_helpers import (
     assert_end_frame_queued,
     assert_tts_speak_frames_queued,
@@ -133,6 +134,28 @@ class TestActionManager(unittest.IsolatedAsyncioTestCase):
             [],
             "Flows must not pass None to TTSSpeakFrame",
         )
+
+    async def test_tts_action_interruptible(self):
+        """Test that tts_say can keep the user from talking over its text."""
+        await self.action_manager.execute_actions(
+            [{"type": "tts_say", "text": "Transferring you now", "interruptible": False}]
+        )
+        [frame] = get_queued_tts_speak_frames(self.mock_worker)
+        self.assertFalse(frame.interruptible)
+
+        self.mock_worker.queue_frame.reset_mock()
+        await self.action_manager.execute_actions([{"type": "tts_say", "text": "Hello"}])
+        [frame] = get_queued_tts_speak_frames(self.mock_worker)
+        self.assertTrue(frame.interruptible)
+
+    async def test_action_frames_survive_interruptions(self):
+        """Test that a function action waits for playback and an interruption drops neither frame."""
+        frame = FunctionActionFrame(action={}, function=AsyncMock())
+
+        # The output transport holds it until the user has heard the bot.
+        self.assertIsInstance(frame, PlaybackMarkFrame)
+        self.assertFalse(frame.interruptible)
+        self.assertFalse(ActionFinishedFrame().interruptible)
 
     async def test_end_conversation_append_text_to_context(self):
         """Test that end_conversation maps append_text_to_context onto its goodbye frame."""
