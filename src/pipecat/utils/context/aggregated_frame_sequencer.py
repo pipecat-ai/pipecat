@@ -687,8 +687,15 @@ class AggregatedFrameSequencer:
         for slot in self._slots:
             if slot.spoken and not slot.complete and slot.context_id == context_id:
                 if slot.tracker:
-                    remaining_text = slot.tracker.get_remaining_tts_text()
-                    raw_remaining = slot.tracker.get_remaining_llm_text()
+                    # Words that carry their own spacing get no space put before
+                    # them, so the rest of the text brings the one it starts with.
+                    strip = not slot.includes_inter_frame_spaces
+                    remaining_text = slot.tracker.get_remaining_tts_text(strip=strip).rstrip()
+                    raw_remaining = slot.tracker.get_remaining_llm_text(strip=strip)
+                    if raw_remaining is not None:
+                        raw_remaining = raw_remaining.rstrip()
+                    if not remaining_text.strip():
+                        remaining_text = ""
                     # The words left, not the markup the service was sent for its
                     # tags, are what the LLM's text has to hold, read without its
                     # own tags.

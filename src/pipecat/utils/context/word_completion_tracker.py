@@ -433,17 +433,23 @@ class WordCompletionTracker:
         remaining = self._tts_text[self._segment_map.raw_pos :]
         return remaining.strip() if strip else remaining
 
-    def get_remaining_llm_text(self) -> str | None:
+    def get_remaining_llm_text(self, strip: bool = True) -> str | None:
         """Return what this frame still has left to speak, as the LLM wrote it.
 
         The companion to :meth:`get_remaining_tts_text` when ending a frame
         early: that supplies the text to emit, this the text to record. None
-        without an ``llm_text``, or when nothing is left.
+        without an ``llm_text``, or when nothing but whitespace is left.
+
+        Args:
+            strip: Whether to trim surrounding whitespace. Pass False to keep the
+                leading space, as :meth:`get_remaining_tts_text` does.
         """
         if self._llm_text is None:
             return None
-        remaining = self._llm_text[self._llm_spoken_pos :].strip()
-        return remaining if remaining else None
+        remaining = self._llm_text[self._llm_spoken_pos :]
+        if not remaining.strip():
+            return None
+        return remaining.strip() if strip else remaining
 
     @property
     def is_complete(self) -> bool:
