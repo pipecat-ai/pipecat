@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     MetricsFrame,
+    STTMuteFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -331,3 +332,77 @@ async def test_usage_includes_trailing_silence():
     audio_seconds = await _drive_one_segment_with_usage(service)
 
     assert audio_seconds == pytest.approx((len(PCM) + len(DEFAULT_SILENCE)) / (SAMPLE_RATE * 2))
+
+
+def _marked_audio(sample: int) -> InputAudioRawFrame:
+    """Audio whose every 16-bit sample is ``sample``, to tell the phases apart."""
+    return InputAudioRawFrame(
+        audio=bytes([sample, 0]) * 160, sample_rate=SAMPLE_RATE, num_channels=1
+    )
+
+
+def _muted_turn() -> list[Frame]:
+    return [
+        STTMuteFrame(mute=True),
+        VADUserStartedSpeakingFrame(),
+        _marked_audio(3),
+        VADUserStoppedSpeakingFrame(),
+    ]
+
+
+def _mute_mid_segment() -> list[Frame]:
+    return [
+        VADUserStartedSpeakingFrame(),
+        _marked_audio(2),
+        STTMuteFrame(mute=True),
+        _marked_audio(3),
+        STTMuteFrame(mute=False),
+        _marked_audio(4),
+        VADUserStoppedSpeakingFrame(),
+    ]
+
+
+def _audio_before_a_muted_turn() -> list[Frame]:
+    return [_marked_audio(1), *_muted_turn()]
+
+
+def _unmuted_before_speech() -> list[Frame]:
+    return [
+        _marked_audio(1),
+        STTMuteFrame(mute=True),
+        _marked_audio(3),
+        STTMuteFrame(mute=False),
+        _marked_audio(4),
+        VADUserStartedSpeakingFrame(),
+        _marked_audio(2),
+        VADUserStoppedSpeakingFrame(),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "frames, expected",
+    [
+        pytest.param(_muted_turn, [], id="turn spoken while muted"),
+        pytest.param(_mute_mid_segment, [(2, 4)], id="mute in the middle of a segment"),
+        pytest.param(_audio_before_a_muted_turn, [], id="audio before a muted turn"),
+        pytest.param(_unmuted_before_speech, [(4, 2)], id="unmuted before speech"),
+    ],
+)
+async def test_audio_received_while_muted_is_not_transcribed(frames, expected):
+    service = _make_capturing_service(wants_wav=False, trailing_silence_secs=0)
+
+    await run_test(service, frames_to_send=frames())
+
+    assert service.captured == [
+        b"".join(_marked_audio(sample).audio for sample in segment) for segment in expected
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_muted_turn_is_not_sent_as_trailing_silence():
+    service = _make_capturing_service()
+
+    await run_test(service, frames_to_send=_muted_turn())
+
+    assert service.captured == []

@@ -1274,8 +1274,23 @@ class SegmentedSTTService(STTService):
         self._speech_buffer.start()
         self._segment_count += 1
 
+    async def _handle_stt_mute(self, frame: STTMuteFrame):
+        """Mute or unmute transcription, dropping the audio kept from before speech."""
+        await super()._handle_stt_mute(frame)
+        # Outside a segment, the buffer holds the audio from before speech, which
+        # would open the next segment: a turn spoken entirely while muted would
+        # still be transcribed. A segment already under way keeps what was said
+        # before the mute.
+        if frame.mute and not self._speech_buffer.speaking:
+            self._speech_buffer.stop()
+
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         segment = self._speech_buffer.stop()
+
+        # No audio was kept, e.g. the whole turn was spoken while muted. The
+        # trailing silence alone is nothing to transcribe.
+        if not segment:
+            return
 
         # A service that can no longer work can't transcribe this segment.
         if not self.is_usable:
@@ -1359,12 +1374,16 @@ class SegmentedSTTService(STTService):
         Continuously buffers audio, growing the buffer while user is speaking and
         maintaining a small buffer when not speaking to account for VAD delay.
 
-        If the frame has a user_id, it is stored for later use in transcription.
+        If the service is muted, the frame is dropped. If the frame has a
+        user_id, it is stored for later use in transcription.
 
         Args:
             frame: The audio frame to process.
             direction: The direction of frame processing.
         """
+        if self._muted:
+            return
+
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
         if isinstance(frame, UserAudioRawFrame):
             self._user_id = frame.user_id
