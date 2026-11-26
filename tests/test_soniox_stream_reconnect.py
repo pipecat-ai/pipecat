@@ -216,6 +216,28 @@ def test_reconnect_window_starts_at_the_first_disconnect():
     assert not tracker.can_reconnect
 
 
+def test_the_reconnect_window_stays_open_until_the_reconnect_completes():
+    clock = _Clock()
+    tracker = _tracker_with_offer(clock)
+    tracker.mark_disconnected()
+    tracker.handle_reconnect_reply(
+        {"type": "reconnected", "reconnect_token": "t2", "last_request": 0}
+    )
+
+    clock.now = 21
+    assert not tracker.can_reconnect
+
+
+def test_a_completed_reconnect_ends_the_reconnect_window():
+    clock = _Clock()
+    tracker = _tracker_with_offer(clock)
+    tracker.mark_disconnected()
+    tracker.mark_reconnected()
+
+    clock.now = 21
+    assert tracker.can_reconnect
+
+
 _DROPPED = object()
 _CLOSED = object()
 
@@ -419,3 +441,34 @@ async def test_iteration_stops_when_the_stream_is_closed():
     assert websocket.state is State.CLOSED
     assert urls == []
     assert len(received) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_reconnect_that_drops_while_resending_still_ends_with_the_window():
+    clock = _Clock()
+    first = _FakeConnection(RECONNECT_OFFER)
+    second = _FakeConnection(_reconnected(last_request=0))
+
+    async def fail_resend(message):
+        if message == b"a":
+            second.drop()
+            raise ConnectionClosedError(None, None)
+        second.sent.append(message)
+
+    second.send = fail_resend
+    attempts = iter([second])
+
+    async def connect(url):
+        clock.now += 10
+        connection = next(attempts, None)
+        if connection is None:
+            raise OSError("unreachable")
+        return connection
+
+    websocket = SonioxWebSocket(first, connect, ping_interval=60, retry_delay=0, clock=clock)
+    await websocket.send(b"a")
+
+    first.drop()
+
+    with pytest.raises(ConnectionClosedError):
+        await _recv(websocket)
