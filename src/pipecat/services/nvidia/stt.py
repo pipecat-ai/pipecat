@@ -108,7 +108,7 @@ def language_to_nvidia_nemotron_speech_language(language: Language) -> str:
 
 def _speaker_tagged_words(alternative) -> list[tuple[str, int | None]] | None:
     """Return an alternative's ``(word, speaker_tag)`` pairs, or ``None`` without words."""
-    # Models such as canary-1b-asr return no words, so there is nothing to split.
+    # Some models return no words, so there is nothing to split.
     words = getattr(alternative, "words", None)
     if not words:
         return None
@@ -771,16 +771,15 @@ class NvidiaSTTService(STTService):
 class NvidiaSegmentedSTTService(SegmentedSTTService):
     """Speech-to-text service using NVIDIA Nemotron Speech's offline/batch models.
 
-    By default, this service uses NVIDIA's Nemotron Speech Canary ASR API to perform speech-to-text
-    transcription on audio segments. It inherits from SegmentedSTTService to handle
-    audio buffering and speech detection.
+    By default, this service uses NVIDIA's hosted multilingual Parakeet ASR API to perform
+    speech-to-text transcription on audio segments. It inherits from SegmentedSTTService to
+    handle audio buffering and speech detection.
 
-    Speaker diarization needs a model that returns word-level results. The
-    default ``canary-1b-asr`` returns none, so with it every segment is emitted
-    whole, with no ``speaker``. ``parakeet-ctc-1.1b-asr`` does: pass its
-    ``model_name`` and ``function_id`` (from
-    https://build.nvidia.com/nvidia/parakeet-ctc-1_1b-asr) in
-    ``model_function_map``.
+    Speaker diarization needs a model that both returns word-level results and
+    tags them with a speaker. A model that returns no words, or returns them
+    untagged, has every segment emitted whole, with no ``speaker``. To use a
+    different model, pass its ``model_name`` and ``function_id`` (from the
+    model's page on https://build.nvidia.com) in ``model_function_map``.
     """
 
     Settings = NvidiaSegmentedSTTSettings
@@ -821,9 +820,9 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         model_function_map: Mapping[str, str] = {
             # The function id identifies NVIDIA's hosted deployment of the model
             # and changes when NVIDIA redeploys it. The current id is on
-            # https://build.nvidia.com/nvidia/canary-1b-asr/api
-            "function_id": "b0e8b4a5-217c-40b7-9b96-17d84e666317",
-            "model_name": "canary-1b-asr",
+            # https://build.nvidia.com/nvidia/parakeet-1_1b-rnnt-multilingual-asr/api
+            "function_id": "71203149-d3b7-4460-8231-1be2543a1fca",
+            "model_name": "parakeet-1.1b-rnnt-multilingual",
         },
         sample_rate: int | None = None,
         params: InputParams | None = None,
