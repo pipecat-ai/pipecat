@@ -3245,3 +3245,25 @@ class TestTagsOnlyTheLLMTextCarries(unittest.TestCase):
         )
         tracker.add_word_and_check_complete("I'm")
         self.assertEqual(tracker.get_remaining_llm_text(), "so sorry.")
+
+
+class TestWordsCarryingTheirOwnSpacing(unittest.TestCase):
+    """A word that carries its own spacing gets no space put before it downstream,
+    so the space the text has in front of it comes with the word.
+    """
+
+    def test_word_brings_the_space_before_it(self):
+        text = "ค่ะ คุณ"
+        tracker = WordCompletionTracker(text, llm_text=text)
+        tracker.add_word_and_check_complete("ค่ะ", includes_inter_frame_spaces=True)
+        tracker.add_word_and_check_complete("คุ", includes_inter_frame_spaces=True)
+        self.assertEqual(tracker.get_word_for_frame(), " คุ")
+        self.assertEqual(tracker.get_llm_consumed(), " คุ")
+
+    def test_word_based_timestamps_are_trimmed(self):
+        text = "Hello world"
+        tracker = WordCompletionTracker(text, llm_text=text)
+        tracker.add_word_and_check_complete("Hello")
+        tracker.add_word_and_check_complete("world")
+        self.assertEqual(tracker.get_word_for_frame(), "world")
+        self.assertEqual(tracker.get_llm_consumed(), "world")

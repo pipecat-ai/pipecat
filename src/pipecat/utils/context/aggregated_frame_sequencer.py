@@ -548,7 +548,9 @@ class AggregatedFrameSequencer:
                     )
                     return []
 
-            is_complete = active.tracker.add_word_and_check_complete(word)
+            is_complete = active.tracker.add_word_and_check_complete(
+                word, includes_inter_frame_spaces=includes_inter_frame_spaces
+            )
             raw_overflow_word = active.tracker.get_overflow_word()
         elif self._streaming and active is None:
             self._buffered_words.append(
