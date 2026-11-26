@@ -414,6 +414,9 @@ class XAITTSService(WebsocketTTSService):
         self._base_url = base_url
         self._codec = codec
         self._receive_task = None
+        # text.clear messages xAI has not acknowledged with audio.clear yet. Until
+        # then it keeps streaming the cleared utterance, which must not be played.
+        self._pending_clears = 0
 
         self._timestamp_context_id: str | None = None
         self._partial_word: str = ""
@@ -502,6 +505,7 @@ class XAITTSService(WebsocketTTSService):
             url = self._build_url()
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self._websocket = await self._websocket_connect(url, additional_headers=headers)
+            self._pending_clears = 0
 
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -537,6 +541,8 @@ class XAITTSService(WebsocketTTSService):
         """Cancel the current xAI utterance on barge-in without reconnecting."""
         await self.stop_all_metrics()
         if self._websocket and self._websocket.state is State.OPEN:
+            # Count before sending so the acknowledgement can't be read first.
+            self._pending_clears += 1
             await self._get_websocket().send(json.dumps({"type": "text.clear"}))
         self._reset_timestamp_state()
         await super().on_audio_context_interrupted(context_id)
@@ -585,6 +591,9 @@ class XAITTSService(WebsocketTTSService):
             msg_type = msg.get("type")
             context_id = self.get_active_audio_context_id()
 
+            if self._pending_clears and msg_type in ("audio.delta", "audio.done"):
+                continue
+
             if msg_type == "audio.delta":
                 audio_b64 = msg.get("delta")
                 if audio_b64:
@@ -618,6 +627,7 @@ class XAITTSService(WebsocketTTSService):
                     await self._close_audio_context(context_id)
                 await self.push_error(error_msg=f"xAI TTS error: {error_detail}")
             elif msg_type == "audio.clear":
+                self._pending_clears = max(0, self._pending_clears - 1)
                 logger.trace(f"{self}: xAI acknowledged audio clear")
             else:
                 logger.debug(f"{self}: unhandled xAI message type: {msg_type}")
