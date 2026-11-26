@@ -13,6 +13,8 @@ from pipecat.frames.frames import (
     BackgroundWorkStartedFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    FunctionCallFromLLM,
+    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     FunctionCallsStartedFrame,
@@ -38,6 +40,15 @@ from tests.frame_processor_helpers import frame_processor_setup
 
 USER_IDLE_TIMEOUT = 0.2
 USER_WAITING_TIMEOUT = 0.2
+
+
+def _function_call_progress_frame(tool_call_id: str, *, async_call: bool):
+    return FunctionCallInProgressFrame(
+        function_name="lookup",
+        tool_call_id=tool_call_id,
+        arguments={},
+        cancel_on_interruption=not async_call,
+    )
 
 
 class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
@@ -718,13 +729,152 @@ class TestUserWaiting(unittest.IsolatedAsyncioTestCase):
         await self.controller.process_frame(
             FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
-        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="call_1"))
+        await self.controller.process_frame(_function_call_progress_frame("123", async_call=True))
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="backend-task"))
         await self.controller.process_frame(BotStartedSpeakingFrame())
         await self.controller.process_frame(BotStoppedSpeakingFrame())
         await self._let_timers_run()
 
         self.assertEqual(self.events, ["waiting"])
         self.assertFalse(self.controller.waiting_for_user)
+
+    async def test_a_second_async_call_preserves_the_waiting_deadline(self):
+        waiting_timeout = 3.0
+        await self.controller.process_frame(UserWaitingTimeoutUpdateFrame(timeout=waiting_timeout))
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        first_call = FunctionCallFromLLM("lookup", "first", {}, LLMContext())
+        await self.controller.process_frame(FunctionCallsStartedFrame(function_calls=[first_call]))
+        await self.controller.process_frame(_function_call_progress_frame("first", async_call=True))
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="work-first"))
+        await asyncio.sleep(waiting_timeout * 0.3)
+        self.assertEqual(self.events, [])
+
+        second_call = FunctionCallFromLLM("lookup", "second", {}, LLMContext())
+        await self.controller.process_frame(FunctionCallsStartedFrame(function_calls=[second_call]))
+        await self.controller.process_frame(
+            _function_call_progress_frame("second", async_call=True)
+        )
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="work-second"))
+        await asyncio.sleep(waiting_timeout * 0.8)
+
+        self.assertEqual(self.events, ["waiting"])
+
+    async def test_a_new_async_call_starts_a_fresh_waiting_interval_after_waiting_fires(self):
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="first"))
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+        self.assertEqual(self.events, ["waiting"])
+
+        second_call = FunctionCallFromLLM("lookup", "second", {}, LLMContext())
+        await self.controller.process_frame(FunctionCallsStartedFrame(function_calls=[second_call]))
+        await self.controller.process_frame(
+            _function_call_progress_frame("second", async_call=True)
+        )
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="work-second"))
+        await asyncio.sleep(USER_WAITING_TIMEOUT * 0.3)
+
+        self.assertEqual(self.events, ["waiting"])
+
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting", "waiting"])
+
+    async def test_a_synchronous_call_delays_waiting_until_it_settles(self):
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        async_call = FunctionCallFromLLM("lookup", "async", {}, LLMContext())
+        await self.controller.process_frame(FunctionCallsStartedFrame(function_calls=[async_call]))
+        await self.controller.process_frame(_function_call_progress_frame("async", async_call=True))
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="async"))
+        await asyncio.sleep(USER_WAITING_TIMEOUT * 0.3)
+
+        sync_call = FunctionCallFromLLM("lookup", "sync", {}, LLMContext())
+        await self.controller.process_frame(FunctionCallsStartedFrame(function_calls=[sync_call]))
+        await self.controller.process_frame(_function_call_progress_frame("sync", async_call=False))
+        await self.controller.process_frame(BotStartedSpeakingFrame())
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, [])
+
+        await self.controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="lookup", tool_call_id="sync", arguments={}, result="ok"
+            )
+        )
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
+
+    async def test_a_synchronous_call_started_during_async_work_suppresses_waiting(self):
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        async_call = FunctionCallFromLLM("lookup", "async", {}, LLMContext())
+        await self.controller.process_frame(FunctionCallsStartedFrame(function_calls=[async_call]))
+        await self.controller.process_frame(_function_call_progress_frame("async", async_call=True))
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="async"))
+        await asyncio.sleep(USER_WAITING_TIMEOUT * 0.3)
+
+        sync_call = FunctionCallFromLLM("lookup", "sync", {}, LLMContext())
+        await self.controller.process_frame(FunctionCallsStartedFrame(function_calls=[sync_call]))
+        await self.controller.process_frame(_function_call_progress_frame("sync", async_call=False))
+        await asyncio.sleep(USER_WAITING_TIMEOUT)
+
+        self.assertEqual(self.events, [])
+
+        await self.controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="lookup", tool_call_id="sync", arguments={}, result="ok"
+            )
+        )
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
+
+    async def test_sync_call_id_does_not_classify_unrelated_background_work_as_async(self):
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="same-id"))
+
+        sync_call = FunctionCallFromLLM("lookup", "same-id", {}, LLMContext())
+        await self.controller.process_frame(FunctionCallsStartedFrame(function_calls=[sync_call]))
+        await self.controller.process_frame(
+            _function_call_progress_frame("same-id", async_call=False)
+        )
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, [])
+
+        await self.controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="lookup", tool_call_id="same-id", arguments={}, result="ok"
+            )
+        )
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
+
+    async def test_waiting_timeout_update_does_not_start_while_sync_call_is_pending(self):
+        await self.controller.process_frame(BotStoppedSpeakingFrame())
+        async_call = FunctionCallFromLLM("lookup", "async", {}, LLMContext())
+        await self.controller.process_frame(FunctionCallsStartedFrame(function_calls=[async_call]))
+        await self.controller.process_frame(_function_call_progress_frame("async", async_call=True))
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="async"))
+        sync_call = FunctionCallFromLLM("lookup", "sync", {}, LLMContext())
+        await self.controller.process_frame(FunctionCallsStartedFrame(function_calls=[sync_call]))
+        await self.controller.process_frame(_function_call_progress_frame("sync", async_call=False))
+        await self.controller.process_frame(
+            UserWaitingTimeoutUpdateFrame(timeout=USER_WAITING_TIMEOUT)
+        )
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, [])
+
+        await self.controller.process_frame(
+            FunctionCallResultFrame(
+                function_name="lookup", tool_call_id="sync", arguments={}, result="ok"
+            )
+        )
+        await self._let_timers_run()
+
+        self.assertEqual(self.events, ["waiting"])
 
     async def test_a_pending_synchronous_call_starts_no_timer(self):
         await self.controller.process_frame(
@@ -930,7 +1080,8 @@ class TestUserWaiting(unittest.IsolatedAsyncioTestCase):
         await self.controller.process_frame(
             FunctionCallsStartedFrame(function_calls=[unittest.mock.Mock(tool_call_id="123")])
         )
-        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="w1"))
+        await self.controller.process_frame(_function_call_progress_frame("123", async_call=True))
+        await self.controller.process_frame(BackgroundWorkStartedFrame(work_id="backend-task"))
         await self.controller.process_frame(BotStartedSpeakingFrame())
         await self.controller.process_frame(BotStoppedSpeakingFrame())
         await self.controller.process_frame(UserStartedSpeakingFrame())
@@ -1039,6 +1190,29 @@ class TestUserWaitingHosts(unittest.IsolatedAsyncioTestCase):
         (up,) = self._waiting_frames(received_up)
         self.assertGreaterEqual(down.quiet_secs, USER_WAITING_TIMEOUT)
         self.assertEqual(up.quiet_secs, down.quiet_secs)
+
+    async def test_the_user_aggregator_waits_on_async_tool_work(self):
+        context = LLMContext()
+        user, assistant = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(user_waiting_timeout=USER_WAITING_TIMEOUT),
+        )
+        call = FunctionCallFromLLM("lookup", "async", {}, context)
+
+        received_down, _ = await run_test(
+            Pipeline([user, assistant]),
+            frames_to_send=[
+                BotStoppedSpeakingFrame(),
+                FunctionCallsStartedFrame(function_calls=[call]),
+                # The pipeline prioritizes the background-work system frame
+                # over the function-call control frame queued before it.
+                _function_call_progress_frame("async", async_call=True),
+                BackgroundWorkStartedFrame(work_id="async"),
+                SleepFrame(USER_WAITING_TIMEOUT + 0.2),
+            ],
+        )
+
+        self.assertEqual(len(self._waiting_frames(received_down)), 1)
 
     async def test_the_user_aggregator_broadcasts_the_idle_frame(self):
         user, assistant = LLMContextAggregatorPair(
