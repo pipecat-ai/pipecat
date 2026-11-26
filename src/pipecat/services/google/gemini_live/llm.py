@@ -120,6 +120,7 @@ try:
         SpeechConfig,
         StartSensitivity,
         ThinkingConfig,
+        ThinkingLevel,
         TurnCoverage,
         VoiceConfig,
     )
@@ -471,7 +472,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
     # Lowest thinking_level the Live thinking models accept (they reject
     # MINIMAL), applied when no level is configured. Lowest keeps reply
     # latency down, matching the thinking defaults of GoogleLLMService.
-    _DEFAULT_THINKING_LEVEL = "LOW"
+    _DEFAULT_THINKING_LEVEL = ThinkingLevel.LOW
 
     @property
     def _is_gemini_3(self) -> bool:
@@ -548,7 +549,7 @@ class GeminiLiveLLMService(LLMService[GeminiLiveLLMAdapter]):
                 update={"thinking_level": self._DEFAULT_THINKING_LEVEL}
             )
             logger.debug(
-                f"{self}: defaulting thinking_level to {self._DEFAULT_THINKING_LEVEL} "
+                f"{self}: defaulting thinking_level to {self._DEFAULT_THINKING_LEVEL.value} "
                 f"({self._settings.model} requires one)"
             )
         return thinking
