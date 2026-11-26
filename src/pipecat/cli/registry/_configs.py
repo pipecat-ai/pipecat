@@ -758,6 +758,16 @@ SERVICE_CONFIGS = {
         "    ),\n"
         ")\n"
     ),
+    "inworld_realtime": (
+        "llm = InworldRealtimeLLMService(\n"
+        '    api_key=os.getenv("INWORLD_API_KEY"),\n'
+        '    llm_model=os.getenv("INWORLD_MODEL"),\n'
+        '    voice=os.getenv("INWORLD_VOICE_ID"),\n'
+        "    settings=InworldRealtimeLLMService.Settings(\n"
+        '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "    ),\n"
+        ")\n"
+    ),
     "xai_realtime": (
         "session_properties = SessionProperties(\n"
         '    voice=os.getenv("XAI_VOICE_ID"),\n'
@@ -784,6 +794,22 @@ SERVICE_CONFIGS = {
         '    api_key=os.getenv("OPENAI_API_KEY"),\n'
         "    settings=OpenAIRealtimeLLMService.Settings(\n"
         "        session_properties=session_properties,\n"
+        '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "    ),\n"
+        ")\n"
+    ),
+    "openai_live_realtime": (
+        "llm = OpenAILiveLLMService(\n"
+        '    api_key=os.getenv("OPENAI_API_KEY"),\n'
+        "    settings=OpenAILiveLLMService.Settings(\n"
+        '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
+        "    ),\n"
+        ")\n"
+    ),
+    "rime_realtime": (
+        "# The Rime SDK reads RIME_API_KEY from the environment.\n"
+        "llm = RimeRealtimeLLMService(\n"
+        "    settings=RimeRealtimeLLMService.Settings(\n"
         '        system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
         "    ),\n"
         ")\n"

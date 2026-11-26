@@ -103,11 +103,11 @@ EXCLUDED_SERVICES: dict[str, str] = {
     "DeepgramSegmentedSTTService": "The streaming DeepgramSTTService is offered.",
     "NvidiaSegmentedSTTService": "The streaming NvidiaSTTService is offered.",
     "WhisperSTTServiceMLX": "Runs only on Apple Silicon; WhisperSTTService is offered.",
-    # Not yet offered by the CLI
-    "InworldRealtimeLLMService": "Not yet offered by the CLI.",
-    "NvidiaOmniLLMService": "Not yet offered by the CLI.",
-    "OpenAILiveLLMService": "Not yet offered by the CLI.",
-    "RimeRealtimeLLMService": "Not yet offered by the CLI.",
+    # Doesn't fit the CLI's bot templates
+    "NvidiaOmniLLMService": (
+        "Hears the user but replies with text, so it needs a TTS service and no STT; "
+        "neither the cascade nor the realtime bot template fits that."
+    ),
 }
 
 
@@ -1254,6 +1254,15 @@ class ServiceRegistry:
             manual_config=True,
         ),
         ServiceDefinition(
+            value="inworld_realtime",
+            label="Inworld Realtime",
+            package="pipecat-ai",
+            class_name=["InworldRealtimeLLMService"],
+            env_prefix="INWORLD",
+            include_params=["api_key"],
+            manual_config=True,
+        ),
+        ServiceDefinition(
             value="xai_realtime",
             label="Grok Realtime",
             package="pipecat-ai[xai]",
@@ -1276,6 +1285,24 @@ class ServiceRegistry:
                 "InputAudioNoiseReduction",
             ],
             env_prefix="OPENAI",
+            include_params=[],
+            manual_config=True,
+        ),
+        ServiceDefinition(
+            value="openai_live_realtime",
+            label="OpenAI Live",
+            package="pipecat-ai[openai]",
+            class_name=["OpenAILiveLLMService"],
+            env_prefix="OPENAI",
+            include_params=["api_key"],
+            manual_config=True,
+        ),
+        ServiceDefinition(
+            value="rime_realtime",
+            label="Rime Realtime",
+            package="pipecat-ai[rime]",
+            class_name=["RimeRealtimeLLMService"],
+            env_prefix="RIME",
             include_params=[],
             manual_config=True,
         ),
@@ -1410,6 +1437,32 @@ MANUAL_SERVICE_CONFIGS = {
         '    api_key=os.getenv("OPENAI_API_KEY"),\n'
         "    settings=OpenAIRealtimeLLMService.Settings(\n"
         "        session_properties=session_properties,\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
+    "inworld_realtime": (
+        "llm = InworldRealtimeLLMService(\n"
+        '    api_key=os.getenv("INWORLD_API_KEY"),\n'
+        '    llm_model=os.getenv("INWORLD_MODEL"),\n'
+        '    voice=os.getenv("INWORLD_VOICE_ID"),\n'
+        "    settings=InworldRealtimeLLMService.Settings(\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
+    "openai_live_realtime": (
+        "llm = OpenAILiveLLMService(\n"
+        '    api_key=os.getenv("OPENAI_API_KEY"),\n'
+        "    settings=OpenAILiveLLMService.Settings(\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
+    "rime_realtime": (
+        "# The Rime SDK reads RIME_API_KEY from the environment.\n"
+        "llm = RimeRealtimeLLMService(\n"
+        "    settings=RimeRealtimeLLMService.Settings(\n"
         f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
         "    ),\n"
         ")"
