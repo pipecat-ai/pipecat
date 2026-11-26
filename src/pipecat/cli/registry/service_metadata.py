@@ -1423,7 +1423,7 @@ MANUAL_SERVICE_CONFIGS = {
         "    service_type=ServiceType.LIVE_AVATAR,\n"
         "    session=session,\n"
         "    session_request=LiveAvatarNewSessionRequest(\n"
-        '        avatar_id="HEYGEN_AVATAR_ID",\n'
+        '        avatar_id=os.getenv("HEYGEN_AVATAR_ID"),\n'
         "    ),\n"
         ")"
     ),
