@@ -168,9 +168,29 @@ class HeyGenHttpTTSSettings(TTSSettings):
             clone in your workspace. A professional clone needs the
             ``heygen-voice-1`` model; the Turbo models refuse it.
         language: Language of the text. If ``None``, HeyGen detects it.
+        apply_text_normalization: Text normalization mode (``"auto"``, ``"on"`` or
+            ``"off"``). If ``None``, HeyGen uses ``"auto"``.
+        expressiveness_boost: Voice expressiveness from 0.0 to 1.0. If ``None``,
+            HeyGen chooses it.
+        speed: Speaking rate from 0.75 to 1.25. If ``None``, HeyGen uses the
+            voice's own rate.
+        pitch_shift: Pitch shift in semitones, from -4.0 to 4.0. If ``None``,
+            HeyGen keeps the voice's pitch.
+        pitch_variance: Pitch variation from 0.5 to 2.0, where 1.0 is the voice's
+            own variation. If ``None``, HeyGen keeps it.
+        seed: Generation seed from 0 to 4294967295, which makes a repeated
+            request sound the same on a best-effort basis. If ``None``, HeyGen
+            picks one at random.
     """
 
-    pass
+    apply_text_normalization: Literal["auto", "on", "off"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    expressiveness_boost: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch_shift: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch_variance: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    seed: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class HeyGenHttpTTSService(TTSService):
@@ -211,6 +231,12 @@ class HeyGenHttpTTSService(TTSService):
             model="heygen-voice-1-turbo",
             voice=_DEFAULT_VOICE_ID,
             language=None,
+            apply_text_normalization=None,
+            expressiveness_boost=None,
+            speed=None,
+            pitch_shift=None,
+            pitch_variance=None,
+            seed=None,
         )
 
         if settings is not None:
@@ -283,6 +309,17 @@ class HeyGenHttpTTSService(TTSService):
         language = assert_given(self._settings.language)
         if language in _LANGUAGES:
             payload["language"] = language
+        for name in (
+            "apply_text_normalization",
+            "expressiveness_boost",
+            "speed",
+            "pitch_shift",
+            "pitch_variance",
+            "seed",
+        ):
+            value = getattr(self._settings, name)
+            if value is not None:
+                payload[name] = value
 
         try:
             async with self._session.post(self._url, json=payload, headers=headers) as response:
