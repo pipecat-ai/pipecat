@@ -117,11 +117,14 @@ class SonioxReconnectTracker:
         if message_type == "pong":
             self._handle_pong(content.get("id"))
             return True
-        if (seq := content.get("seq")) is not None:
-            self._last_seq = seq
-        elif self._reconnect_token is None and "error_code" not in content:
+        if content.get("error_code") or content.get("finished"):
+            # The stream has ended.
+            self._disable()
+        elif self._reconnect_token is None:
             # A response before any reconnect offer: reconnect is unavailable.
             self._disable()
+        elif (seq := content.get("seq")) is not None:
+            self._last_seq = seq
         return False
 
     def create_ping(self) -> str:
@@ -180,6 +183,7 @@ class SonioxReconnectTracker:
         if reply.get("type") != "reconnected":
             error = f"{reply.get('error_type')}: {reply.get('error_message')}"
             if reply.get("error_type") == "reconnect_failed":
+                self._disable()
                 raise SonioxReconnectRefusedError(error)
             raise ConnectionError(f"Soniox reconnect failed ({error})")
         self._reconnect_token = reply["reconnect_token"]
