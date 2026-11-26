@@ -8,7 +8,10 @@ import unittest
 
 from pipecat.frames.frames import (
     EndFrame,
+    EndWorkerFrame,
     Frame,
+    StopFrame,
+    StopWorkerFrame,
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -18,9 +21,48 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.filters.frame_filter import FrameFilter
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.filters.identity_filter import IdentityFilter
+from pipecat.processors.filters.null_filter import NullFilter
 from pipecat.processors.filters.wake_check_filter import WakeCheckFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import run_test
+
+
+async def _block_all(frame: Frame) -> bool:
+    return False
+
+
+async def _pushed_by(processor: FrameProcessor, frame: Frame, direction: FrameDirection):
+    """The frames a processor pushes while processing one frame."""
+    pushed = []
+
+    async def record(frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        pushed.append((frame, direction))
+
+    processor.push_frame = record
+    await processor.process_frame(frame, direction)
+    return pushed
+
+
+class TestFiltersPassFramesThatEndOrStopTheWorker(unittest.IsolatedAsyncioTestCase):
+    """The worker waits for these frames, so a filter that drops one hangs it."""
+
+    async def test_stop_and_worker_frames_pass(self):
+        filters = {
+            "FrameFilter": lambda: FrameFilter(types=(TextFrame,)),
+            "NullFilter": NullFilter,
+            "FunctionFilter": lambda: FunctionFilter(filter=_block_all, direction=None),
+        }
+        cases = [
+            (StopFrame, FrameDirection.DOWNSTREAM),
+            (EndWorkerFrame, FrameDirection.UPSTREAM),
+            (StopWorkerFrame, FrameDirection.UPSTREAM),
+        ]
+        for name, make_filter in filters.items():
+            for frame_cls, direction in cases:
+                with self.subTest(filter=name, frame=frame_cls.__name__):
+                    frame = frame_cls()
+                    pushed = await _pushed_by(make_filter(), frame, direction)
+                    self.assertEqual(pushed, [(frame, direction)])
 
 
 class TestIdentifyFilter(unittest.IsolatedAsyncioTestCase):
