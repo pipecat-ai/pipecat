@@ -57,13 +57,16 @@ def language_to_together_language(language: Language) -> str:
         The corresponding Together AI language code.
     """
     LANGUAGE_MAP = {
+        Language.DE: "de",
         Language.EN: "en",
         Language.ES: "es",
         Language.FR: "fr",
         Language.HI: "hi",
         Language.IT: "it",
         Language.JA: "ja",
+        Language.KO: "ko",
         Language.PT: "pt",
+        Language.RU: "ru",
         Language.ZH: "zh",
         Language.ZH_HK: "zh-hk",
     }

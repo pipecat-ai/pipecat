@@ -1,0 +1,1 @@
+- `TogetherTTSService` now resolves German, Korean and Russian to verified Together language codes, the languages Qwen3-TTS adds over the service's previous set.
