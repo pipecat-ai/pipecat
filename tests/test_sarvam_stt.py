@@ -1849,10 +1849,55 @@ async def test_realtime_websocket_receives_keyterms():
 
 
 @pytest.mark.asyncio
-async def test_keyterms_cannot_be_updated_mid_stream():
-    service = SarvamRealtimeSTTService(api_key="test-key")
-    with pytest.raises(ValueError, match="keyterms"):
-        await service.update_config(keyterms=["Sarvam"])
+async def test_update_config_sends_keyterms_as_a_json_array():
+    service = SarvamRealtimeSTTService(api_key="test-key", keyterms=["New Delhi"])
+    service._websocket = _FakeWebsocket()
+    terms = ["Sarvam", "नाम"]
+
+    await service.update_config(keyterms=terms)
+    terms.append("not part of the update")
+
+    # config.update takes the list itself; only the query string wants it
+    # JSON-encoded into a string.
+    assert service._websocket.sent == [
+        json.dumps({"event": "config.update", "keyterms": ["Sarvam", "नाम"]})
+    ]
+    assert service._settings.keyterms == ["Sarvam", "नाम"]
+
+
+@pytest.mark.asyncio
+async def test_updated_keyterms_survive_a_reconnect():
+    service = SarvamRealtimeSTTService(api_key="test-key", keyterms=["New Delhi"])
+    service._websocket = _FakeWebsocket()
+
+    await service._update_settings(SarvamRealtimeSTTService.Settings(keyterms=["Sarvam"]))
+
+    assert service._websocket.sent == [
+        json.dumps({"event": "config.update", "keyterms": ["Sarvam"]})
+    ]
+    # A reconnect rebuilds the query from the settings store, so it has to
+    # carry the updated terms and not the ones the service was built with.
+    assert json.loads(_query(service)["keyterms"][0]) == ["Sarvam"]
+
+
+@pytest.mark.asyncio
+async def test_keyterms_can_be_cleared_mid_stream():
+    service = SarvamRealtimeSTTService(api_key="test-key", keyterms=["New Delhi"])
+    service._websocket = _FakeWebsocket()
+
+    await service._update_settings(SarvamRealtimeSTTService.Settings(keyterms=None))
+
+    assert service._websocket.sent == [json.dumps({"event": "config.update", "keyterms": None})]
+    assert "keyterms" not in _query(service)
+
+
+def test_settings_keyterms_take_precedence_over_the_constructor_argument():
+    service = SarvamRealtimeSTTService(
+        api_key="test-key",
+        keyterms=["New Delhi"],
+        settings=SarvamRealtimeSTTService.Settings(keyterms=["Sarvam"]),
+    )
+    assert json.loads(_query(service)["keyterms"][0]) == ["Sarvam"]
 
 
 # ---------------------------------------------------------------------------
