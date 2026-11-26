@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
+    TranscriptionSpeaker,
     TTSTextFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -32,6 +33,7 @@ from pipecat.observers.bot_speech_observer import BotSpeechObserver
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
+from pipecat.services.soniox.stream_reconnect import SonioxWebSocket
 from pipecat.services.soniox.stt import (
     DEFAULT_AGENT_TEXT_LEAD_MS,
     END_TOKEN,
@@ -56,6 +58,7 @@ class _FakeWebsocket:
         self.state = state
         self.closed = False
         self.send = AsyncMock(side_effect=send_side_effect)
+        self.transport = MagicMock()
 
     async def close(self):
         self.closed = True
@@ -206,6 +209,75 @@ async def test_receive_messages_sets_final_transcription_language(monkeypatch):
         {"text": " computer", "is_final": True, "language": "en"},
     ]
     assert traced_transcriptions == [("Ik zoek computer", True, Language.NL)]
+
+
+async def _final_frames_for(service, tokens, monkeypatch) -> list[TranscriptionFrame]:
+    pushed_frames = []
+
+    async def fake_push_frame(frame):
+        pushed_frames.append(frame)
+
+    messages = [
+        json.dumps({"tokens": [*tokens, {"text": END_TOKEN, "is_final": True}]}),
+        json.dumps({"tokens": [], "finished": True}),
+    ]
+    service._websocket = _FakeWebsocket(messages)
+    monkeypatch.setattr(service, "push_frame", fake_push_frame)
+
+    await service._receive_messages()
+
+    return [frame for frame in pushed_frames if isinstance(frame, TranscriptionFrame)]
+
+
+@pytest.mark.asyncio
+async def test_diarized_transcript_emits_one_frame_per_speaker_run(monkeypatch):
+    service = SonioxSTTService(
+        api_key="test-key",
+        settings=SonioxSTTService.Settings(
+            enable_speaker_diarization=True, speaker_format="{speaker}: {text}"
+        ),
+    )
+    service._user_id = "session-user"
+    tokens = [
+        {"text": "Hel", "is_final": True, "speaker": "1"},
+        {"text": "lo.", "is_final": True, "speaker": "1"},
+        {"text": " Hi", "is_final": True, "speaker": "2"},
+        {"text": " there.", "is_final": True, "speaker": "2"},
+    ]
+
+    frames = await _final_frames_for(service, tokens, monkeypatch)
+
+    assert [(f.speaker, f.text, f.finalized) for f in frames] == [
+        (TranscriptionSpeaker("1", 1), "1: Hello.", False),
+        (TranscriptionSpeaker("2", 2), "2: Hi there.", True),
+    ]
+    assert all(f.user_id == "session-user" for f in frames)
+
+
+@pytest.mark.asyncio
+async def test_transcript_is_not_split_without_diarization(monkeypatch):
+    service = SonioxSTTService(api_key="test-key")
+    tokens = [
+        {"text": "Hello.", "is_final": True, "speaker": "1"},
+        {"text": " Hi.", "is_final": True, "speaker": "2"},
+    ]
+
+    frames = await _final_frames_for(service, tokens, monkeypatch)
+
+    assert [(f.speaker, f.text) for f in frames] == [(None, "Hello. Hi.")]
+
+
+@pytest.mark.asyncio
+async def test_speaker_format_update_does_not_reconnect():
+    service = SonioxSTTService(api_key="test-key")
+    service._request_reconnect = AsyncMock()
+
+    changed = await service._update_settings(
+        SonioxSTTService.Settings(speaker_format="{speaker}: {text}")
+    )
+
+    assert "speaker_format" in changed
+    service._request_reconnect.assert_not_awaited()
 
 
 def _instrumented_service(monkeypatch, events, **kwargs):
@@ -1142,9 +1214,13 @@ async def test_agent_text_drops_the_words_timed_against_the_previous_connection(
 
 
 @pytest.mark.parametrize("interruptible", [False, True])
+@pytest.mark.parametrize("enable_reconnect", [False, True])
 @pytest.mark.asyncio
-async def test_agent_text_drops_dequeued_words_on_a_reconnect(monkeypatch, interruptible):
+async def test_agent_text_drops_dequeued_words_on_a_reconnect(
+    monkeypatch, interruptible, enable_reconnect
+):
     service, observer, websocket = _agent_text_service()
+    service._settings.enable_reconnect = enable_reconnect
     config_started = asyncio.Event()
     finish_config = asyncio.Event()
 
@@ -1177,6 +1253,7 @@ async def test_agent_text_drops_dequeued_words_on_a_reconnect(monkeypatch, inter
         reconnect = asyncio.create_task(service._reconnect_websocket(1))
         try:
             await asyncio.wait_for(config_started.wait(), timeout=1)
+            assert service._websocket is None
             clock.get_time = lambda: 62_000_000_000
             await observer.on_push_frame(
                 _pushed(_word("While configuring", pts=62_000_000_000, interruptible=False))
@@ -1186,6 +1263,7 @@ async def test_agent_text_drops_dequeued_words_on_a_reconnect(monkeypatch, inter
             finish_config.set()
             assert await asyncio.wait_for(reconnect, timeout=1)
         assert websocket.closed
+        assert isinstance(service._websocket, SonioxWebSocket) is enable_reconnect
 
         clock.get_time = lambda: 63_000_000_000
         await observer.on_push_frame(_pushed(_word("New due", pts=63_000_000_000)))
@@ -1342,3 +1420,80 @@ async def test_setup_does_not_observe_the_pipeline_for_a_model_without_agent_tex
     await service.setup(frame_processor_setup(TaskManager(), pipeline_worker=worker))
 
     assert not worker.add_observer.called
+
+
+async def _connect_with_reconnect(monkeypatch, enabled):
+    """Connect a service to a fake socket, with reconnect on or off."""
+    websocket = _FakeWebsocket([], state=State.OPEN)
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(enable_reconnect=enabled)
+    )
+    await service._connect_websocket()
+    return service, websocket
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.asyncio
+async def test_connect_requests_reconnect_only_when_enabled(monkeypatch, enabled):
+    _, websocket = await _connect_with_reconnect(monkeypatch, enabled)
+
+    config = json.loads(_sent_payloads(websocket)[0])
+    assert config.get("enable_reconnect") is (True if enabled else None)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.asyncio
+async def test_connect_wraps_the_connection_only_when_reconnect_is_enabled(monkeypatch, enabled):
+    service, websocket = await _connect_with_reconnect(monkeypatch, enabled)
+
+    assert isinstance(service._websocket, SonioxWebSocket) is enabled
+    assert service._websocket.state is State.OPEN
+
+
+@pytest.mark.asyncio
+async def test_audio_after_the_config_is_sent_through_the_reconnecting_connection(monkeypatch):
+    service, websocket = await _connect_with_reconnect(monkeypatch, True)
+
+    async for _ in service.run_stt(b"audio"):
+        pass
+
+    assert _sent_payloads(websocket)[1:] == [b"audio"]
+
+
+@pytest.mark.asyncio
+async def test_disconnecting_closes_the_reconnecting_connection(monkeypatch):
+    service, websocket = await _connect_with_reconnect(monkeypatch, True)
+
+    await service._disconnect_websocket()
+
+    # A close, with status 1000, ends the Soniox stream.
+    assert websocket.closed
+    assert service._websocket is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_config_send_aborts_the_connection(monkeypatch):
+    websocket = _FakeWebsocket([], send_side_effect=ConnectionResetError("send failed"))
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(enable_reconnect=True)
+    )
+    monkeypatch.setattr(service, "push_error", AsyncMock())
+
+    await service._connect_websocket()
+
+    assert service._websocket is None
+    websocket.transport.abort.assert_called()

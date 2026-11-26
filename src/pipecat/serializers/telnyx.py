@@ -6,7 +6,6 @@
 
 """Telnyx WebSocket frame serializer for Pipecat."""
 
-import audioop
 import base64
 import json
 from typing import Any, cast
@@ -15,6 +14,7 @@ import aiohttp
 from loguru import logger
 from pydantic import model_validator
 
+from pipecat.audio import g711
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -174,9 +174,9 @@ class TelnyxFrameSerializer(FrameSerializer):
                 return None
 
             if self._params.inbound_encoding == "PCMU":
-                serialized_data = audioop.lin2ulaw(data, 2)
+                serialized_data = g711.pcm_to_ulaw(data)
             elif self._params.inbound_encoding == "PCMA":
-                serialized_data = audioop.lin2alaw(data, 2)
+                serialized_data = g711.pcm_to_alaw(data)
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.inbound_encoding}")
 
@@ -276,9 +276,9 @@ class TelnyxFrameSerializer(FrameSerializer):
             payload = base64.b64decode(payload_base64)
 
             if self._params.outbound_encoding == "PCMU":
-                deserialized_data = audioop.ulaw2lin(payload, 2)
+                deserialized_data = g711.ulaw_to_pcm(payload)
             elif self._params.outbound_encoding == "PCMA":
-                deserialized_data = audioop.alaw2lin(payload, 2)
+                deserialized_data = g711.alaw_to_pcm(payload)
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.outbound_encoding}")
 

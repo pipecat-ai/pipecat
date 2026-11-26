@@ -53,6 +53,9 @@ if platform.system() == "Darwin" and platform.machine() == "arm64":
 # ratio as repetitive, and a computed ratio is never equal to a fixed value.
 _HALLUCINATION_COMPRESSION_RATIO = 2.4
 
+# Whisper models read 16 kHz audio.
+_WHISPER_SAMPLE_RATE = 16000
+
 
 class Model(StrEnum):
     """Whisper model selection options for Faster Whisper.
@@ -241,6 +244,11 @@ class WhisperSTTService(SegmentedSTTService):
         """Receive segments as raw 16-bit PCM, which the model reads directly."""
         return False
 
+    @property
+    def segment_sample_rate(self) -> int:
+        """Receive segments at 16 kHz, the rate Whisper reads."""
+        return _WHISPER_SAMPLE_RATE
+
     def __init__(
         self,
         *,
@@ -412,7 +420,7 @@ class WhisperSTTService(SegmentedSTTService):
         """Transcribe audio data using Whisper.
 
         Args:
-            audio: Raw audio bytes in 16-bit PCM format.
+            audio: Raw 16-bit PCM audio at 16 kHz.
 
         Yields:
             Frame: Either a TranscriptionFrame containing the transcribed text
@@ -585,7 +593,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         MLX Whisper will handle the conversion internally.
 
         Args:
-            audio: Raw audio bytes in 16-bit PCM format.
+            audio: Raw 16-bit PCM audio at 16 kHz.
 
         Yields:
             Frame: Either a TranscriptionFrame containing the transcribed text

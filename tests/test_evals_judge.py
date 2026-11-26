@@ -186,6 +186,18 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(verdict.verdict, "no")
         self.assertEqual(set(classifier.asked[0]["questions"]["verdict"].options), {"yes", "no"})
 
+    async def test_one_reply_can_be_judged_yes_or_no_while_the_judge_allows_continue(self):
+        judge, classifier = _judge([{"verdict": _choice("yes")}, {"verdict": _choice("continue")}])
+        judge.add_user_message("Run the tests.")
+        judge.add_assistant_message("Still on it, the tests are running now.")
+        verdict = await judge.evaluate("says it is still working", allow_continue=False)
+        self.assertEqual(verdict.verdict, "yes")
+        self.assertEqual(set(classifier.asked[0]["questions"]["verdict"].options), {"yes", "no"})
+        # The same reply asked the same question with continue allowed is a new question.
+        verdict = await judge.evaluate("says it is still working")
+        self.assertEqual(verdict.verdict, "continue")
+        self.assertEqual(len(classifier.asked), 2)
+
     async def test_a_verdict_is_cached_by_criterion_and_conversation(self):
         judge, classifier = _judge([{"verdict": _choice("yes")}])
         judge.add_assistant_message("It rains.")
@@ -193,7 +205,21 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
         await judge.evaluate("mentions weather")
         self.assertEqual(len(classifier.asked), 1)
 
-    async def test_a_failed_question_is_asked_again_then_gives_a_no(self):
+    async def test_a_failed_question_is_not_cached(self):
+        judge, classifier = _judge([ClassifierError("down")] * 2 + [{"verdict": _choice("yes")}])
+        judge.add_assistant_message("It rains.")
+        self.assertEqual((await judge.evaluate("mentions weather")).verdict, "none")
+        self.assertTrue((await judge.evaluate("mentions weather")).passed)
+        self.assertEqual(len(classifier.asked), 3)
+
+        judge, classifier = _judge(
+            [ClassifierError("down")] * 2 + [{"answer": YesNoResult(probability=0.9)}]
+        )
+        self.assertEqual((await judge.evaluate_call("book", {}, "books")).verdict, "none")
+        self.assertTrue((await judge.evaluate_call("book", {}, "books")).passed)
+        self.assertEqual(len(classifier.asked), 3)
+
+    async def test_a_failed_question_is_asked_again_then_gives_no_verdict(self):
         judge, classifier = _judge([ClassifierError("boom"), {"verdict": _choice("yes")}])
         judge.add_assistant_message("It rains.")
         self.assertTrue((await judge.evaluate("mentions weather")).passed)
@@ -202,16 +228,25 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
         judge, classifier = _judge([ClassifierError("boom")] * 2)
         judge.add_assistant_message("anything")
         verdict = await judge.evaluate("anything")
-        self.assertEqual(verdict.verdict, "no")
-        self.assertEqual(verdict.reason, "judge call failed")
+        self.assertEqual(verdict.verdict, "none")
+        self.assertEqual(verdict.reason, "judge call failed: boom")
         self.assertEqual(len(classifier.asked), 2)
+
+    async def test_a_failed_questions_reason_masks_credentials(self):
+        judge, _ = _judge(
+            [ClassifierError("401: invalid key sk-proj-abcdefghijklmnopqrstuvwxyz123456")] * 2
+        )
+        judge.add_assistant_message("anything")
+        verdict = await judge.evaluate("anything")
+        self.assertNotIn("abcdefghijklmnopqrstuvwxyz", verdict.reason)
+        self.assertIn("[REDACTED]", verdict.reason)
 
     async def test_an_answer_of_the_wrong_type_fails_the_question(self):
         judge, _ = _judge([{"verdict": YesNoResult(probability=0.9)}] * 2)
         judge.add_assistant_message("anything")
         verdict = await judge.evaluate("anything")
-        self.assertEqual(verdict.verdict, "no")
-        self.assertEqual(verdict.reason, "judge call failed")
+        self.assertEqual(verdict.verdict, "none")
+        self.assertTrue(verdict.reason.startswith("judge call failed: "), verdict.reason)
 
 
 class TestJudgeExplainer(unittest.IsolatedAsyncioTestCase):
@@ -326,6 +361,23 @@ class TestJudgeEvaluateRun(unittest.IsolatedAsyncioTestCase):
             return {name: _turn(turns[reply]) for name in questions}
 
         return respond
+
+    async def test_a_run_with_a_failed_question_is_not_cached(self):
+        replies = {"Let me check. Done, six o'clock.": 0.8, "You're welcome.": 0.9}
+        down = self._answer(0.9, replies, failing="goal")
+        up = self._answer(0.9, replies)
+        state = {"answer": down}
+        judge, classifier = _judge(lambda s, q: state["answer"](s, q))
+        self._converse(judge)
+
+        failed = await judge.evaluate_run({"polite": "is polite"}, "a table is booked")
+        state["answer"] = up
+        judged = await judge.evaluate_run({"polite": "is polite"}, "a table is booked")
+        again = await judge.evaluate_run({"polite": "is polite"}, "a table is booked")
+
+        self.assertEqual(failed.goal.verdict, "none")
+        self.assertTrue(judged.goal.passed)
+        self.assertIs(again, judged)  # a run that decided everything is cached
 
     async def test_the_goal_is_asked_over_the_whole_conversation(self):
         judge, classifier = _judge(
@@ -680,6 +732,37 @@ class TestJudgeExplainerPrompts(unittest.IsolatedAsyncioTestCase):
         judge.add_assistant_message("Hello.")
         await judge.evaluate("describes the weather")
         self.assertEqual(llm.calls[0]["max_tokens"], 64)
+
+    async def _explain_run(self, **kwargs) -> int:
+        """The ``max_tokens`` a run with three verdicts to explain asks the explainer with."""
+        llm = _FakeLLMService(
+            ['{"goal": "never booked", "turns": {"polite": {"1": "curt", "2": "curt"}}}']
+        )
+        judge, _ = _judge(
+            lambda state, questions: (
+                {"answer": YesNoResult(probability=0.1)}
+                if "latest_bot_reply" not in state
+                else {name: _turn(0.1) for name in questions}
+            ),
+            explainer=llm,
+            **kwargs,
+        )
+        judge.add_user_message("Book a table at six.")
+        judge.add_assistant_message("No.")
+        judge.add_user_message("Please?")
+        judge.add_assistant_message("Still no.")
+        verdicts = await judge.evaluate_run({"polite": "is polite"}, "a table is booked")
+        self.assertEqual(verdicts.goal.reason, "never booked")
+        self.assertEqual([v.reason for v in verdicts.turns["polite"]], ["curt", "curt"])
+        self.assertEqual(len(llm.calls), 1)
+        return llm.calls[0]["max_tokens"]
+
+    async def test_max_tokens_raises_the_cap_on_a_run(self):
+        self.assertEqual(await self._explain_run(max_tokens=2000), 2000)
+
+    async def test_a_run_keeps_room_for_its_reasons_under_a_small_max_tokens(self):
+        self.assertEqual(await self._explain_run(max_tokens=64), 300)
+        self.assertEqual(await self._explain_run(), 300)
 
 
 class TestJudgeConfig(unittest.IsolatedAsyncioTestCase):

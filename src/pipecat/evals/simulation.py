@@ -81,10 +81,16 @@ Fields:
     turns, ``duration`` the conversation's seconds from its first line to the
     hang-up, ``words`` the longest bot reply in words (each Chinese or Japanese
     character counts as one), and ``latency`` the slowest
-    reply in seconds: from the persona's send to the reply's first token in
-    text mode, from the bot noticing the persona stop to its first spoken
-    sentence in audio mode, which a failure's reason spells out, since the two
-    are not comparable. The per-reply measures bound every reply.
+    reply in seconds, each end following its own side's modality: from the
+    persona's send for text input, or the bot noticing the persona stop for
+    spoken input, to the reply's first token for a text judge, or the bot
+    starting to speak for an audio judge. A failure's reason spells out which,
+    since they are not comparable. For spoken input this leaves out the
+    bot's end-of-turn wait (its VAD ``stop_secs``, any smart-turn wait), so
+    it isn't voice-to-voice latency, which ``UserBotLatencyObserver`` reports
+    on the bot's side. A turn still unanswered when the run ends
+    by silence or its time limit counts with its wait up to the end. The
+    per-reply measures bound every reply.
     ``function_calls`` takes a ``calls:`` list instead of a range: the calls the
     bot should make, each a name or a ``name`` with ``args`` (a subset of the
     call's arguments), in any order. Every listed call must have happened and
@@ -106,6 +112,7 @@ Fields:
     anecdote and three are a check.
 """
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -160,6 +167,77 @@ class EvalSimulationMetric:
     min_value: float | None = None
     max_value: float | None = None
     calls: list[EvalFunctionCall] | None = None
+
+
+@dataclass
+class EvalRubric:
+    """What a conversation is judged on, without the caller a simulation plays.
+
+    It judges a conversation the harness didn't drive, such as a production
+    call recorded by
+    :class:`~pipecat.evals.conversation_observer.EvalConversationObserver`,
+    with :class:`~pipecat.evals.simulation_judge.EvalSimulationJudge`. In a
+    scenario file (:mod:`pipecat.evals.scenario`), an entry with a
+    ``success:`` and neither ``persona:`` nor ``turns:`` is a rubric. Its
+    metrics are judged ones: a measured metric needs a live run.
+
+    Parameters:
+        name: The rubric's name.
+        success: What counts as the bot having done its job, judged over the
+            whole conversation.
+        metrics: The criteria every reply is judged on.
+        judge: Judge LLM config, as a simulation's ``judge``.
+
+    Raises:
+        ValueError: If the rubric has a measured metric.
+    """
+
+    name: str
+    success: str
+    metrics: list[EvalSimulationMetric] = field(default_factory=list)
+    judge: dict = field(default_factory=lambda: dict(_DEFAULT_JUDGE))
+
+    def __post_init__(self):
+        for metric in self.metrics:
+            if metric.measure is not None:
+                raise ValueError(
+                    f"rubric {self.name!r}: metric {metric.name!r} is measured; a rubric's "
+                    "metrics are judged ('criterion:'), since a measure needs a live run"
+                )
+
+    @classmethod
+    def from_dict(cls, data: dict, *, source: str | Path = "rubric") -> "EvalRubric":
+        """Build a rubric from a mapping with a rubric entry's keys.
+
+        Args:
+            data: ``name``, ``success``, and the optional ``metrics`` and
+                ``judge`` block, each as a scenario file writes it; other keys
+                are ignored.
+            source: Where the mapping came from, for error messages.
+
+        Returns:
+            The rubric.
+
+        Raises:
+            ValueError: If a key is invalid, or ``name`` or ``success`` is missing.
+        """
+        where = Path(source)
+        name = data.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError(f"{where}: missing or invalid 'name:' field")
+        success = data.get("success")
+        if not success or not isinstance(success, str) or not success.strip():
+            raise ValueError(f"{where}: missing or invalid 'success:' field (a non-empty string)")
+        _, _, judge = _parse_judge_block(data.get("judge"), where)
+        try:
+            return cls(
+                name=name,
+                success=success.strip(),
+                metrics=_parse_metrics(data.get("metrics"), where),
+                judge=judge,
+            )
+        except ValueError as e:
+            raise ValueError(f"{where}: {e}") from e
 
 
 @dataclass
@@ -399,8 +477,8 @@ def _positive_int(data: dict, key: str, default: int, path: Path) -> int:
 
 def _positive_number(data: dict, key: str, default: float, path: Path) -> float:
     value = data.get(key, default)
-    if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
-        raise ValueError(f"{path}: '{key}:' must be a positive number")
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 < value < math.inf:
+        raise ValueError(f"{path}: '{key}:' must be a finite positive number")
     return float(value)
 
 

@@ -8,7 +8,13 @@
 
 import pytest
 
-from pipecat.expressive.perception import PerceptionSignal, format_perception, merge_perception
+from pipecat.expressive.perception import (
+    PerceptionCapabilities,
+    PerceptionSignal,
+    PerceptionTerm,
+    format_perception,
+    merge_perception,
+)
 from pipecat.frames.frames import (
     EagerTranscriptionFrame,
     Frame,
@@ -113,6 +119,26 @@ def test_merging_keeps_the_signals_only_one_reading_has_in_the_order_first_read(
 
     assert [signal.name for signal in merged] == ["tone", "hesitation", "sarcasm"]
     assert merge_perception(None, later) == later
+
+
+def test_merging_signals_keeps_every_label_and_the_first_description_in_order():
+    earlier = PerceptionCapabilities(
+        [PerceptionTerm("emotion", labels=["calm", "angry"]), PerceptionTerm("speech_rate")]
+    )
+    later = PerceptionCapabilities(
+        [
+            PerceptionTerm("emotion", "How the user felt.", labels=["angry", "sad"]),
+            PerceptionTerm("sarcasm", "The chance it's sarcastic."),
+        ]
+    )
+
+    assert earlier.merge(later) == PerceptionCapabilities(
+        [
+            PerceptionTerm("emotion", "How the user felt.", labels=["calm", "angry", "sad"]),
+            PerceptionTerm("speech_rate"),
+            PerceptionTerm("sarcasm", "The chance it's sarcastic."),
+        ]
+    )
 
 
 @pytest.mark.asyncio

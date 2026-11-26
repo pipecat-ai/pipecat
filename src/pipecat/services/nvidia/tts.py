@@ -208,6 +208,13 @@ class NvidiaTTSService(TTSService):
                 e.g. ``{"NVIDIA": "ɛn.vɪ.diː.ʌ"}``. See
                 https://docs.nvidia.com/nim/speech/latest/tts/phoneme-support.html
                 for the list of supported IPA phonemes.
+
+                Another way to guide pronunciation is to pass
+                :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace
+                rules through the ``text_transforms`` parameter. Pipecat applies them
+                before the text reaches the provider, so the same rules can work across
+                TTS services and depend less on what each provider supports. They're
+                worth trying if this setting isn't giving you the results you want.
             zero_shot_audio_prompt_file: Optional audio prompt file for Magpie
                 zero-shot voice cloning. NVIDIA recommends a 16-bit mono WAV
                 prompt, sample rate 22.05 kHz or higher, and duration 3 to 10

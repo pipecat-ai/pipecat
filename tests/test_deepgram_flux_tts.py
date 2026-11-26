@@ -443,6 +443,7 @@ async def test_flux_tts_query_params():
                 voice="flux-thalia-en",
                 speed=1.05,
                 expressivity=-1,
+                normalize_volume=False,
             ),
         )
 
@@ -455,13 +456,14 @@ async def test_flux_tts_query_params():
     assert query["sample_rate"] == ["8000"]
     assert query["speed"] == ["1.05"]
     assert query["expressivity"] == ["-1"]
+    assert query["normalize_volume"] == ["false"]
     assert query["mip_opt_out"] == ["true"]
     assert query["tag"] == ["tag-a", "tag-b"]
 
 
 @pytest.mark.asyncio
 async def test_flux_tts_unset_voice_controls_are_omitted():
-    """Speed and expressivity are left out of the query string when unset."""
+    """Speed, expressivity and normalize_volume are left out of the query string when unset."""
     captured: dict = {"messages": []}
 
     async with serve(_flux_server_handler(captured), "127.0.0.1", 0) as server:
@@ -478,6 +480,7 @@ async def test_flux_tts_unset_voice_controls_are_omitted():
     query = parse_qs(urlparse(captured["request_path"]).query)
     assert "speed" not in query
     assert "expressivity" not in query
+    assert "normalize_volume" not in query
 
 
 def _connected_service(**kwargs) -> tuple[DeepgramFluxTTSService, AsyncMock]:

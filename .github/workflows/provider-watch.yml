@@ -118,7 +118,7 @@ jobs:
     steps:
       - name: Generate app token
         id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.PROVIDER_WATCH_APP_ID }}
           private-key: ${{ secrets.PROVIDER_WATCH_APP_PRIVATE_KEY }}
@@ -141,7 +141,7 @@ jobs:
           path: _reports
 
       - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version: "latest"
           enable-cache: false
@@ -189,8 +189,9 @@ jobs:
           done
 
       - name: Run provider research
+        id: research
         timeout-minutes: 55
-        uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1.0.264
+        uses: anthropics/claude-code-action@5a856893345e332afa621934082d8c660c26d689 # v1.0.282
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # Researcher launches must block until the researcher returns
@@ -227,6 +228,18 @@ jobs:
             --max-turns 120
             --allowedTools "Read,Write,Edit,Glob,Grep,Bash,Agent,Task,WebFetch,WebSearch"
 
+      - name: Show why the research session stopped
+        # The action hides the session's output, since this repo's logs are
+        # public. The final result line says why a failed session ended (an
+        # API error, or the model's last words), so it alone is printed,
+        # capped at 500 characters.
+        if: failure() && steps.research.outputs.execution_file != ''
+        env:
+          EXECUTION_FILE: ${{ steps.research.outputs.execution_file }}
+        run: |
+          jq -r 'last(.[] | select(.type == "result")) | .result // .subtype' "$EXECUTION_FILE" | head -c 500
+          echo
+
       - name: Verify the group was researched
         # A run that exits cleanly without doing the work should fail loudly,
         # not upload an empty artifact and stay green.
@@ -241,7 +254,7 @@ jobs:
       - name: Generate app token for publishing
         id: publish-token
         if: always() && inputs.dry_run != true
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.PROVIDER_WATCH_APP_ID }}
           private-key: ${{ secrets.PROVIDER_WATCH_APP_PRIVATE_KEY }}
@@ -270,6 +283,9 @@ jobs:
           name: provider-watch-${{ github.run_id }}-${{ matrix.group.name }}
           if-no-files-found: ignore
           retention-days: 14
+          # .pw-scratch is a hidden directory, which upload-artifact skips
+          # unless told otherwise.
+          include-hidden-files: true
           path: |
             _reports/reports
             _reports/digests
@@ -292,7 +308,7 @@ jobs:
     steps:
       - name: Generate app token
         id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.PROVIDER_WATCH_APP_ID }}
           private-key: ${{ secrets.PROVIDER_WATCH_APP_PRIVATE_KEY }}
@@ -312,7 +328,7 @@ jobs:
           path: _reports
 
       - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version: "latest"
           enable-cache: false
@@ -338,7 +354,7 @@ jobs:
 
       - name: Author the digest
         timeout-minutes: 20
-        uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1.0.264
+        uses: anthropics/claude-code-action@5a856893345e332afa621934082d8c660c26d689 # v1.0.282
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ steps.app-token.outputs.token }}

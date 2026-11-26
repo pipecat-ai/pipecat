@@ -143,8 +143,8 @@ class MoonshineSTTService(SegmentedSTTService):
     Runs on the CPU via ONNX Runtime, so it needs no GPU and no API key. The model
     downloads once on first use and is cached. Each VAD-segmented utterance is
     transcribed in a single batch call (``transcribe_without_streaming``); any
-    model works, including the streaming-capable ones. Audio is expected as 16-bit
-    mono PCM at 16 kHz.
+    model works, including the streaming-capable ones. Segments are resampled to
+    the 16 kHz the model reads.
 
     Models are language-specific, so a language change reloads the model. Arabic,
     Chinese, Japanese, Korean and Ukrainian decode at the raised token rate
@@ -163,6 +163,11 @@ class MoonshineSTTService(SegmentedSTTService):
         """Receive segments as raw 16-bit PCM, which the model reads directly."""
         return False
 
+    @property
+    def segment_sample_rate(self) -> int:
+        """Receive segments at 16 kHz, the rate Moonshine reads."""
+        return MOONSHINE_SAMPLE_RATE
+
     def __init__(self, *, settings: Settings | None = None, **kwargs):
         """Initialize the Moonshine STT service.
 
@@ -177,7 +182,7 @@ class MoonshineSTTService(SegmentedSTTService):
         if settings is not None:
             default_settings.apply_update(settings)
 
-        super().__init__(sample_rate=MOONSHINE_SAMPLE_RATE, settings=default_settings, **kwargs)
+        super().__init__(settings=default_settings, **kwargs)
 
         self._transcriber = self._load()
 

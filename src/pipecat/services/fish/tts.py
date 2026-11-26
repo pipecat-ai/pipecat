@@ -52,6 +52,9 @@ class FishAudioTTSSettings(TTSSettings):
     """Settings for FishAudioTTSService.
 
     Parameters:
+        language: BCP-47 tag of the text, such as ``en`` or ``es-MX``. Fish Audio uses it
+            only to spell out numbers, dates, units and symbols; it does not change the
+            voice. Unset detects the language of each chunk.
         latency: Latency mode ("normal" or "balanced"). Defaults to "balanced".
         normalize: Whether to normalize audio output. Defaults to True.
         temperature: Controls randomness in speech generation (0.0-1.0).
@@ -102,7 +105,7 @@ class FishAudioTTSService(InterruptibleTTSService):
     audio generation with interruption handling.
 
     Uses the ``s2.1-pro`` model by default. Set ``Settings(model=...)`` to use
-    another Fish Audio model, such as ``s1``, ``s2-pro``, or ``drama-3``.
+    another Fish Audio model, such as ``s2-pro`` or ``drama-3``.
     """
 
     Settings = FishAudioTTSSettings
@@ -361,6 +364,9 @@ class FishAudioTTSService(InterruptibleTTSService):
                 value = getattr(self._settings, name)
                 if value is not None:
                     request_settings[name] = value
+
+            if self._settings.language is not None:
+                request_settings["language"] = str(self._settings.language)
             start_message = {"event": "start", "request": {"text": "", **request_settings}}
             await websocket.send(ormsgpack.packb(start_message))
             logger.debug("Sent start message to Fish Audio")

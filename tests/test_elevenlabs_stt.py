@@ -4,13 +4,20 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import base64
+import json
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlparse
 
 import aiohttp
+import numpy as np
 import pytest
 from aiohttp import web
+from websockets.protocol import State
 
-from pipecat.frames.frames import TranscriptionFrame
+from pipecat.audio.utils import create_stream_resampler
+from pipecat.frames.frames import InputAudioRawFrame, TranscriptionFrame, TranscriptionSpeaker
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.elevenlabs.stt import (
     CommitStrategy,
     ElevenLabsRealtimeSTTService,
@@ -89,6 +96,62 @@ async def test_elevenlabs_stt_sends_keyterms_multipart_fields(aiohttp_client):
         "Pipecat",
         "Scribe V2",
     ]
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_stt_diarized_segment_emits_one_frame_per_speaker_run(aiohttp_client):
+    captured_fields = []
+
+    async def handler(request):
+        reader = await request.multipart()
+        async for part in reader:
+            if part.name == "file":
+                await part.read()
+            else:
+                captured_fields.append((part.name, await part.text()))
+
+        return web.json_response(
+            {
+                "text": "Hi there. Hello.",
+                "language_code": "eng",
+                "words": [
+                    {"text": "Hi", "type": "word", "speaker_id": "speaker_0"},
+                    {"text": " ", "type": "spacing"},
+                    {"text": "there.", "type": "word", "speaker_id": "speaker_0"},
+                    {"text": " ", "type": "spacing"},
+                    {"text": "Hello.", "type": "word", "speaker_id": "speaker_1"},
+                ],
+            }
+        )
+
+    app = web.Application()
+    app.router.add_post("/v1/speech-to-text", handler)
+    client = await aiohttp_client(app)
+    base_url = str(client.make_url("/")).rstrip("/")
+
+    async with aiohttp.ClientSession() as session:
+        service = ElevenLabsSTTService(
+            api_key="test-key",
+            aiohttp_session=session,
+            base_url=base_url,
+            settings=ElevenLabsSTTService.Settings(
+                diarize=True, speaker_format="{speaker}: {text}"
+            ),
+        )
+        service._user_id = "session-user"
+
+        frames = [
+            frame
+            async for frame in service.run_stt(b"RIFF")
+            if isinstance(frame, TranscriptionFrame)
+        ]
+
+    assert ("diarize", "true") in captured_fields
+    assert [(f.speaker, f.text) for f in frames] == [
+        (TranscriptionSpeaker("speaker_0", 1), "speaker_0: Hi there."),
+        (TranscriptionSpeaker("speaker_1", 2), "speaker_1: Hello."),
+    ]
+    assert all(f.user_id == "session-user" for f in frames)
 
 
 @pytest.mark.asyncio
@@ -286,3 +349,23 @@ async def test_elevenlabs_realtime_plain_committed_emitted_without_options():
     assert len(captured) == 1
     assert captured[0].text == COMMITTED_TEXT
     assert captured[0].language is None
+
+
+@pytest.mark.asyncio
+async def test_realtime_audio_at_a_rate_elevenlabs_does_not_take_is_sent_at_16_khz():
+    service = ElevenLabsRealtimeSTTService(api_key="test-key")
+    service._sample_rate = 32000
+    sent: list[str] = []
+    service._websocket = MagicMock(state=State.OPEN, send=AsyncMock(side_effect=sent.append))
+    t = np.arange(3200) / 32000
+    audio = (np.sin(2 * np.pi * 220 * t) * 8000).astype(np.int16).tobytes()
+    frame = InputAudioRawFrame(audio=audio, sample_rate=32000, num_channels=1)
+
+    await service.process_audio_frame(frame, FrameDirection.DOWNSTREAM)
+
+    message = json.loads(sent[0])
+    assert audio_format_from_sample_rate(service.send_sample_rate) == "pcm_16000"
+    assert message["sample_rate"] == 16000
+    assert base64.b64decode(message["audio_base_64"]) == (
+        await create_stream_resampler().resample(audio, 32000, 16000)
+    )

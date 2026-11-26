@@ -35,7 +35,10 @@ DEFAULT_SILENCE = bytes(int(SAMPLE_RATE * 0.5) * 2)
 
 
 def _make_capturing_service(
-    wants_wav: bool | None = None, transcribe_secs: float = 0.0, **kwargs
+    wants_wav: bool | None = None,
+    segment_sample_rate: int | None = None,
+    transcribe_secs: float = 0.0,
+    **kwargs,
 ) -> SegmentedSTTService:
     """Build a SegmentedSTTService that captures the bytes handed to run_stt().
 
@@ -46,6 +49,8 @@ def _make_capturing_service(
     Args:
         wants_wav: If None, inherit the base default; otherwise force the
             ``wants_wav_segments`` contract to this value.
+        segment_sample_rate: If None, inherit the base default; otherwise force
+            ``segment_sample_rate`` to this value.
         transcribe_secs: When set, ``run_stt`` takes this long and then yields
             a ``TranscriptionFrame`` naming the segment ("segment 1", ...).
         **kwargs: Passed to the service constructor.
@@ -69,6 +74,10 @@ def _make_capturing_service(
 
     if wants_wav is not None:
         _CapturingSegmentedSTTService.wants_wav_segments = property(lambda self: wants_wav)
+    if segment_sample_rate is not None:
+        _CapturingSegmentedSTTService.segment_sample_rate = property(
+            lambda self: segment_sample_rate
+        )
 
     return _CapturingSegmentedSTTService(**kwargs)
 
@@ -224,6 +233,39 @@ async def test_passthrough_mode_preserves_exact_pcm():
     assert len(service.captured) == 1
     # Raw PCM, byte-for-byte: no WAV header prepended.
     assert service.captured[0] == PCM
+
+
+@pytest.mark.asyncio
+async def test_segment_is_resampled_to_the_segment_sample_rate():
+    service = _make_capturing_service(
+        wants_wav=False, segment_sample_rate=SAMPLE_RATE // 2, trailing_silence_secs=0
+    )
+
+    await _drive_one_segment(service)
+
+    # The same duration at half the rate.
+    assert len(service.captured) == 1
+    assert len(service.captured[0]) == len(PCM) // 2
+
+
+@pytest.mark.asyncio
+async def test_wav_segment_is_labeled_with_the_segment_sample_rate():
+    service = _make_capturing_service(segment_sample_rate=SAMPLE_RATE // 2, trailing_silence_secs=0)
+
+    await _drive_one_segment(service)
+
+    with wave.open(io.BytesIO(service.captured[0]), "rb") as wav:
+        assert wav.getframerate() == SAMPLE_RATE // 2
+        assert wav.getnframes() == len(PCM) // 4
+
+
+@pytest.mark.asyncio
+async def test_usage_measures_the_input_audio_of_a_resampled_segment():
+    service = _make_capturing_service(segment_sample_rate=SAMPLE_RATE // 2, trailing_silence_secs=0)
+
+    audio_seconds = await _drive_one_segment_with_usage(service)
+
+    assert audio_seconds == pytest.approx(len(PCM) / (SAMPLE_RATE * 2))
 
 
 @pytest.mark.asyncio

@@ -70,6 +70,10 @@ OpenAIImageQuality = Literal[
 # used the same way as `OpenAIImageSize` above.
 OpenAIImageModeration = Literal["low", "auto"]
 
+# Hint set for the `complexity` argument to `images.generate`, redeclared and
+# used the same way as `OpenAIImageSize` above.
+OpenAIImageComplexity = Literal["low", "medium", "high"]
+
 
 @dataclass
 class OpenAIImageGenSettings(ImageGenSettings):
@@ -84,11 +88,19 @@ class OpenAIImageGenSettings(ImageGenSettings):
         moderation: Content-moderation level applied to generated images, either
             ``"low"`` for less restrictive filtering or ``"auto"``. ``None``
             leaves OpenAI's default in place.
+        complexity: How much the model plans before rendering, ``"low"``,
+            ``"medium"`` or ``"high"``. Higher levels help with dense text and
+            complex layouts at the cost of latency. Only the GPT Image 2.6
+            models accept it; earlier models reject the request. ``None``
+            leaves the model's default in place.
     """
 
     image_size: OpenAIImageSize | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     quality: OpenAIImageQuality | str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     moderation: OpenAIImageModeration | str | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    complexity: OpenAIImageComplexity | str | None | NotGiven = field(
         default_factory=lambda: NOT_GIVEN
     )
 
@@ -141,6 +153,7 @@ class OpenAIImageGenService(ImageGenService):
             image_size=None,
             quality=None,
             moderation=None,
+            complexity=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -174,6 +187,12 @@ class OpenAIImageGenService(ImageGenService):
         size = cast(OpenAIImageSize | None, assert_given(self._settings.image_size))
         quality = cast(OpenAIImageQuality | None, assert_given(self._settings.quality))
         moderation = cast(OpenAIImageModeration | None, assert_given(self._settings.moderation))
+        complexity = cast(OpenAIImageComplexity | None, assert_given(self._settings.complexity))
+        # `complexity` became a named argument of `images.generate` in openai
+        # 3.46.0, later than the floor of our dependency range, so it travels as
+        # an extra body field and reaches the API the same way on every SDK we
+        # support.
+        extra_body = {"complexity": complexity} if complexity is not None else None
         image = await self._client.images.generate(
             prompt=prompt,
             model=assert_given(self._settings.model),
@@ -181,6 +200,7 @@ class OpenAIImageGenService(ImageGenService):
             size=size,
             quality=quality,
             moderation=moderation,
+            extra_body=extra_body,
         )
 
         if not image.data:

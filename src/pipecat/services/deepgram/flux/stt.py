@@ -61,6 +61,10 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
     - on_eager_end_of_turn(service, transcript): Deepgram predicted end of turn (EagerEOT)
     - on_turn_resumed(service): User resumed speaking after EagerEOT
 
+    The turn events follow Flux's turns. With ``vad_force_turn_endpoint=True``
+    those aren't the pipeline's turns: ``on_end_of_turn`` fires on every Flux
+    finalization, so possibly several times per user turn.
+
     Example::
 
         @stt.event_handler("on_end_of_turn")
@@ -119,6 +123,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         tag: list | None = None,
         params: InputParams | None = None,
         should_interrupt: bool = True,
+        vad_force_turn_endpoint: bool = False,
         watchdog_min_timeout: float = 0.5,
         enable_eager_end_of_turn: bool = False,
         settings: Settings | None = None,
@@ -152,7 +157,12 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
                 the user is speaking. Passed along to the user turn strategies
                 this service recommends, which own the interruption; a
                 user-supplied ``user_turn_strategies`` overrides the
-                recommendation and this setting with it.
+                recommendation and this setting with it. Ignored with
+                ``vad_force_turn_endpoint=True``.
+            vad_force_turn_endpoint: Whether the pipeline's user turn strategies
+                decide when user turns end, instead of Flux. Each
+                ``VADUserStoppedSpeakingFrame`` then asks Flux to finalize the
+                audio sent so far. Defaults to False.
             watchdog_min_timeout: Minimum silence duration in seconds before the watchdog
                 sends silence to prevent dangling turns. Defaults to 0.5.
             enable_eager_end_of_turn: Whether to answer Flux's predicted end
@@ -167,6 +177,10 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             settings: Runtime-updatable settings. When provided alongside deprecated
                 parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent classes.
+
+        Raises:
+            ValueError: If ``enable_eager_end_of_turn`` and
+                ``vad_force_turn_endpoint`` are both set.
 
         Examples:
             Basic usage with default parameters::
@@ -208,6 +222,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             numerals=None,
             profanity_filter=None,
             redact=None,
+            redact_usage=None,
             language_hints=None,
         )
 
@@ -240,6 +255,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
             mip_opt_out=mip_opt_out,
             tag=tag,
             should_interrupt=should_interrupt,
+            vad_force_turn_endpoint=vad_force_turn_endpoint,
             watchdog_min_timeout=watchdog_min_timeout,
             enable_eager_end_of_turn=enable_eager_end_of_turn,
             settings=default_settings,
@@ -250,13 +266,7 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
         self._api_key = api_key
         self._url = url
-        self._websocket_url = None
         self._receive_task = None
-
-    @property
-    def supports_ttfs(self) -> bool:
-        """TTFS doesn't apply: Flux defines turn boundaries directly."""
-        return False
 
     # ------------------------------------------------------------------
     # Transport interface implementation
@@ -294,7 +304,6 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         # `DeepgramFluxSTTBase._connect` is abstract and doesn't chain on, so
         # call the websocket side directly.
         await WebsocketService._connect(self)
-        self._websocket_url = f"{self._url}?{self._build_query_string()}"
         await self._connect_websocket()
         if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
@@ -327,11 +336,8 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
             self._connection_established_event.clear()
             self._user_is_speaking = False
-            # `_connect` sets `_websocket_url` before calling us; the assert
-            # narrows for pyright.
-            assert self._websocket_url is not None
             websocket = await self._websocket_connect(
-                self._websocket_url,
+                f"{self._url}?{self._build_query_string()}",
                 additional_headers={"Authorization": f"Token {self._api_key}"},
             )
             self._websocket = websocket

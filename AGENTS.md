@@ -27,6 +27,9 @@ uv run pytest tests/test_name.py::test_function_name
 # Preview changelog
 uv run towncrier build --draft --version Unreleased
 
+# Check changelog fragment names (CI runs this on every PR)
+uv run python scripts/check-changelog-fragments.py
+
 # Run a behavioral eval scenario against a running bot (started with `python bot.py`)
 pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860/ws
 
@@ -79,7 +82,7 @@ All data flows as **Frame** objects through a pipeline of **FrameProcessors**:
 
 - **Serializers** (`src/pipecat/serializers/`): Convert frames to/from wire formats for WebSocket transports. `FrameSerializer` base class defines `serialize()` and `deserialize()`. Telephony serializers (Twilio, Plivo, Vonage, Telnyx, Exotel, Genesys) handle provider-specific protocols and audio encoding (e.g., μ-law).
 
-- **RTVI** (`src/pipecat/processors/frameworks/rtvi/`): Real-Time Voice Interface protocol bridging clients and the pipeline. `RTVIProcessor` handles incoming client messages (text input, audio, DTMF keypresses, function call results). `RTVIObserver` converts pipeline frames to outgoing messages: user/bot speaking events, transcriptions, LLM/TTS lifecycle, function calls, metrics, and audio levels.
+- **RTVI** (`src/pipecat/processors/frameworks/rtvi/`): Real-Time Voice Interface protocol bridging clients and the pipeline. `RTVIProcessor` handles incoming client messages (text input, audio, DTMF keypresses, function call results). `RTVIObserver` converts pipeline frames to outgoing messages: user/bot speaking events, transcriptions, LLM/TTS lifecycle, function calls, metrics, and audio levels. The protocol's specification lives in `rtvi/spec/`: a change to what the server sends or accepts goes in `MESSAGES` there too, and a released version's wire format never changes — see `rtvi/spec/README.md`.
 
 - **Observers** (`src/pipecat/observers/`): Monitor frame flow without modifying the pipeline. Passed to `PipelineWorker` via the `observers` parameter. Implement `on_process_frame()` and `on_push_frame()` callbacks.
 
@@ -247,7 +250,7 @@ To confirm a behavior while developing:
 1. Run the bot with the dev runner: `python bot.py --port 7860`
 2. Run a scenario of either kind against it: `pipecat eval run scenarios/<name>.yaml --bot-url ws://localhost:7860/ws -v`
 
-Every simulation run saves its conversation (what each side said and the bot's function calls) to `<stem>.conversation.json`, in the format the `pipecat.evals.conversation` module docstring describes. `pipecat eval judge <scenario.yaml> -s <name> <files...>` judges saved conversations again against the simulation's `success` and judged metrics, with a reason for every verdict and without the bot; from Python, `EvalSimulationJudge(simulation).judge(messages)` (`src/pipecat/evals/simulation_judge.py`) does the same. Use it to tune a criterion's wording on runs you already have. `EvalConversationObserver` (`pipecat.evals.conversation_observer`) records the same file from a bot's own pipeline, so a real call is judged the same way.
+Every simulation run saves its conversation (what each side said and the bot's function calls) to `<stem>.conversation.json`, in the format the `pipecat.evals.conversation` module docstring describes. `pipecat eval judge <scenario.yaml> -s <name> <files...>` judges saved conversations again against a simulation's `success` and judged metrics, or a rubric's (an entry with `success:` and no `persona:` or `turns:`, `EvalRubric`), with a reason for every verdict and without the bot; from Python, `EvalSimulationJudge(simulation).judge(messages)` (`src/pipecat/evals/simulation_judge.py`) does the same. Use it to tune a criterion's wording on runs you already have. `EvalConversationObserver` (`pipecat.evals.conversation_observer`) records the same file from a bot's own pipeline, so a real call is judged the same way.
 
 For many bots at once, `pipecat eval suite <manifest.yaml>` spawns each bot and runs its scenarios in parallel; a manifest lists both kinds under `scenarios:`, and `-k simulation` runs only the simulations. A manifest entry may also carry a `runner_body:` (the `/start` body the bot would normally get, as a `path:` to a file or inline `data:`), a `concurrency:` cap of its own, and a `name:` that labels its runs when several entries share one bot. Reusable scenarios and the pre-release validation manifest live in `evals/release/` — see its `README.md` for the full workflow (prerequisites: `TYPESAFE_API_KEY` exported for the Jev judge, a local Ollama `gemma4:12b` for the judge's explainer and the simulated caller, plus Kokoro/Moonshine for audio mode) and the `pipecat.evals.script` and `pipecat.evals.simulation` module docstrings for the two file formats.
 

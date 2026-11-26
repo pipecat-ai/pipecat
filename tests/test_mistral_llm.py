@@ -30,10 +30,12 @@ def _build_params(settings=None):
 def test_seed_is_sent_as_random_seed(seed):
     params = _build_params(MistralLLMService.Settings(seed=seed))
 
-    assert params["random_seed"] == seed
+    assert params["extra_body"]["random_seed"] == seed
+    assert "random_seed" not in params
 
 
 def test_unset_seed_is_not_sent():
     params = _build_params()
 
     assert "random_seed" not in params
+    assert "random_seed" not in params.get("extra_body", {})

@@ -87,7 +87,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             api_key=os.environ["SPEECHMATICS_API_KEY"],
             settings=SpeechmaticsSTTService.Settings(
                 language=Language.EN,
-                speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
+                enable_diarization=True,
+                speaker_format="<{speaker}>{text}</{speaker}>",
             ),
         )
 

@@ -65,7 +65,7 @@ class LLMClassifier(BaseClassifier):
 
     Example::
 
-        classifier = LLMClassifier(llm=OpenAILLMService(model="gpt-4o-mini"))
+        classifier = LLMClassifier(llm=OpenAILLMService(model="gpt-6-luna"))
         results = await classifier.yes_no(
             "Hi, you've reached Dana. Leave a message.",
             {"voicemail": YesNoQuestion(instructions="is this a voicemail greeting?")},

@@ -6,12 +6,14 @@
 
 """Tests for the wire sample rates of the telephony serializers."""
 
-import audioop
 import base64
 import json
 import unittest
 import warnings
 
+import numpy as np
+
+from pipecat.audio import g711
 from pipecat.frames.frames import InterruptionFrame, OutputAudioRawFrame
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.serializers.exotel import ExotelFrameSerializer
@@ -154,5 +156,5 @@ class TestTwilioWireAudio(unittest.IsolatedAsyncioTestCase):
         message = None
         while not message:
             message = await self.serializer.serialize(silence)
-        decoded = audioop.ulaw2lin(base64.b64decode(json.loads(message)["media"]["payload"]), 2)
-        self.assertLess(audioop.max(decoded, 2), 100)
+        decoded = g711.ulaw_to_pcm(base64.b64decode(json.loads(message)["media"]["payload"]))
+        self.assertLess(np.abs(np.frombuffer(decoded, dtype=np.int16)).max(), 100)

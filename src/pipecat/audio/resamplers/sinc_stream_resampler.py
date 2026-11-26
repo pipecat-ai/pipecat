@@ -17,6 +17,7 @@ import time
 from pipecat_resampler import StreamResampler
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
+from pipecat.utils.deprecation import warn_deprecated
 
 
 class SincStreamAudioResampler(BaseAudioResampler):
@@ -25,7 +26,10 @@ class SincStreamAudioResampler(BaseAudioResampler):
     The output keeps pace with the input: every call returns exactly the
     audio its input amounts to at the output rate, so equal input chunks come
     out as equal output chunks, the first one included. The filter delays the
-    audio by a few milliseconds instead of holding output back.
+    audio by a few milliseconds instead of holding output back. Call
+    :meth:`flush` where a stream ends to emit those milliseconds, or
+    :meth:`reset` where a stream is dropped, so the next stream doesn't start
+    with the end of this one.
 
     The filter keeps the lower rate's band flat up to 90% of its Nyquist
     frequency, and attenuates aliasing and images by about 90 dB. The
@@ -37,16 +41,27 @@ class SincStreamAudioResampler(BaseAudioResampler):
         - A resampler converts between one pair of rates.
     """
 
-    def __init__(self, *, clear_after_secs: float | None = 0.2, **kwargs):
+    def __init__(self, *, clear_after_secs: float | None = None, **kwargs):
         """Initialize the resampler.
 
         Args:
             clear_after_secs: Seconds of inactivity after which the audio held in
-                the filter is discarded, so a new stream doesn't start with the
-                end of the previous one. Set to ``None`` to never discard it.
-                Defaults to ``0.2``.
+                the filter is discarded. Defaults to ``None``, which never
+                discards it.
+
+                .. deprecated:: 1.16.0
+                    Use :meth:`flush` or :meth:`reset` at the end of each stream
+                    instead. Will be removed in 2.0.0.
+
             **kwargs: Reserved for forward compatibility; currently ignored.
         """
+        if clear_after_secs is not None:
+            warn_deprecated(
+                "`SincStreamAudioResampler(clear_after_secs=...)` is deprecated since 1.16.0 "
+                "and will be removed in 2.0.0. Use `flush()` or `reset()` at the end of each "
+                "stream instead.",
+                stacklevel=2,
+            )
         self._clear_after_secs = clear_after_secs
         self._resampler: StreamResampler | None = None
         self._last_resample_time = 0.0

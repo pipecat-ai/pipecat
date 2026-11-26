@@ -17,6 +17,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from http import HTTPStatus
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from websockets.asyncio.server import serve
@@ -149,6 +150,30 @@ async def test_a_dropped_connection_is_replaced_by_one_new_connection():
     assert server.audio_per_connection[1] > 0
 
 
+@pytest.mark.asyncio
+async def test_reconnect_uses_the_updated_end_of_turn_threshold():
+    server = _FakeFlux()
+
+    def configure(service):
+        @service.event_handler("on_connected")
+        async def change_threshold(service):
+            if len(server.connections) == 1:
+                await service._update_settings(service.Settings(eot_threshold=0.9))
+                await server.connections[0].close()
+
+    await _run(
+        server,
+        seconds=0.5,
+        configure=configure,
+        settings=DeepgramFluxSTTService.Settings(eot_threshold=0.7),
+    )
+
+    assert [
+        parse_qs(urlsplit(connection.request.path).query)["eot_threshold"]
+        for connection in server.connections
+    ] == [["0.7"], ["0.9"]]
+
+
 def _turn_ends(down) -> tuple[list[tuple[str, bool]], list[int]]:
     """The transcriptions pushed and the positions of proposed turn stops."""
     transcripts = [(f.text, f.finalized) for f in down if isinstance(f, TranscriptionFrame)]
@@ -264,7 +289,6 @@ async def _wait_for(condition, timeout: float = 2.0) -> bool:
 
 async def _connected_service(server: _FakeFlux, url: str) -> DeepgramFluxSTTService:
     service = DeepgramFluxSTTService(api_key="test-key", url=url)
-    service._websocket_url = url
     await service._connect_websocket()
     assert await _wait_for(lambda: server.open_connections == 1)
     return service

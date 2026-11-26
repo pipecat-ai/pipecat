@@ -14,6 +14,7 @@ from loguru import logger
 from pipecat.adapters.llm.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.deprecation import deprecated
 from pipecat.utils.types import NOT_GIVEN, NotGiven, is_given
 
 
@@ -35,12 +36,22 @@ class InceptionLLMSettings(BaseOpenAILLMService.Settings):
     realtime: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
+@deprecated(
+    "`InceptionLLMService` is deprecated since 1.17.0 and will be removed in 2.0.0. "
+    "No replacement. Inception stops serving the Mercury API after December 28, 2026, "
+    "so the service may be removed in an earlier release after that date."
+)
 class InceptionLLMService(OpenAILLMService):
     """A service for interacting with Inception's API using the OpenAI-compatible interface.
 
     This service extends OpenAILLMService to connect to Inception's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
     Supports Mercury-3, Inception's diffusion-based reasoning model.
+
+    .. deprecated:: 1.17.0
+        No replacement. Inception stops serving the Mercury API after
+        December 28, 2026. Will be removed in 2.0.0, or in an earlier
+        release after that date.
     """
 
     # Inception doesn't support the "developer" message role.

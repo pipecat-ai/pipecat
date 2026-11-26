@@ -13,10 +13,11 @@ import time
 from collections import Counter
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, ClassVar
 
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import ClientConnection
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -27,7 +28,6 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
-    TranscriptionFrame,
     TTSTextFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -36,6 +36,7 @@ from pipecat.observers.bot_speech_observer import BotSpeechObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.soniox.errors import classify_error_code
+from pipecat.services.soniox.stream_reconnect import SonioxWebSocket
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -248,7 +249,10 @@ class SonioxSTTSettings(STTSettings):
         language_hints_strict: If true, strictly enforce language hints.
         context: Customization for transcription. Either a
             :class:`SonioxContextObject` or a plain string of background text.
-        enable_speaker_diarization: Whether to enable speaker diarization.
+        enable_speaker_diarization: Whether to enable speaker diarization. Each
+            contiguous speaker run of a final transcript is emitted as its own frame
+            with Soniox's speaker label as ``speaker.label``. Interim transcripts
+            are not labelled.
         enable_language_identification: Whether to enable language identification.
         max_endpoint_delay_ms: Max ms after speech ends before endpoint detection returns
             an endpoint (500-3000).
@@ -273,6 +277,15 @@ class SonioxSTTSettings(STTSettings):
             500 to 1000 is the documented range. 0 sends each word as it starts
             playing. Only used with ``enable_echo_cancellation``, and only for a
             TTS service that reports word timestamps.
+        enable_reconnect: Whether to reconnect a dropped connection to the same
+            Soniox stream, keeping the transcript and the audio sent around the
+            drop. Soniox bills the up to 20 s a dropped stream waits for the
+            reconnect. Defaults to False.
+        speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
+            speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
+            speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
+            ``"{speaker}: {text}"``. If ``None``, transcript text is not modified. Applied locally,
+            so changing it does not reconnect.
 
     Endpoint detection runs in both turn detection modes. With
     ``vad_force_turn_endpoint=True`` it only ends transcripts, so
@@ -296,6 +309,11 @@ class SonioxSTTSettings(STTSettings):
     enable_agent_text_input: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_echo_cancellation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     agent_text_lead_ms: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_reconnect: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    #: Fields applied locally to transcripts — changing them needs no reconnect.
+    LOCAL_FIELDS: ClassVar[frozenset[str]] = frozenset({"speaker_format"})
 
 
 def _move_language_to_hints(delta: SonioxSTTSettings) -> None:
@@ -404,6 +422,8 @@ class SonioxSTTService(WebsocketSTTService):
             enable_agent_text_input=True,
             enable_echo_cancellation=False,
             agent_text_lead_ms=DEFAULT_AGENT_TEXT_LEAD_MS,
+            enable_reconnect=False,
+            speaker_format=None,
         )
 
         # --- 2. Deprecated direct-arg overrides ---
@@ -475,8 +495,7 @@ class SonioxSTTService(WebsocketSTTService):
         # Set when the turn is interrupted. A word decides whether it is still
         # wanted when its turn to be sent comes round.
         self._agent_text_turn = asyncio.Event()
-        self._agent_text_connection_retired = asyncio.Event()
-        self._agent_text_configuring = False
+        self._agent_text_stream_retired = asyncio.Event()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -545,6 +564,7 @@ class SonioxSTTService(WebsocketSTTService):
 
         if changed:
             await self._update_agent_text_observer()
+        if changed.keys() - self.Settings.LOCAL_FIELDS:
             await self._request_reconnect()
 
         return changed
@@ -718,8 +738,6 @@ class SonioxSTTService(WebsocketSTTService):
 
     def _queue_agent_text(self, frame: TTSTextFrame):
         """Queue a timed word behind the words reported before it."""
-        if self._agent_text_configuring:
-            return
         assert frame.pts
         if frame.pts < self._agent_text_last_pts:
             logger.warning(
@@ -740,9 +758,7 @@ class SonioxSTTService(WebsocketSTTService):
         while True:
             frame, interrupted = await self._agent_text_words.get()
             try:
-                await self._send_bot_word_at(
-                    frame, interrupted, self._agent_text_connection_retired
-                )
+                await self._send_bot_word_at(frame, interrupted, self._agent_text_stream_retired)
             finally:
                 self._agent_text_words.task_done()
 
@@ -750,7 +766,7 @@ class SonioxSTTService(WebsocketSTTService):
         self,
         frame: TTSTextFrame,
         interrupted: asyncio.Event,
-        connection_retired: asyncio.Event,
+        stream_retired: asyncio.Event,
     ):
         """Send a word ``agent_text_lead_ms`` before it is played.
 
@@ -765,14 +781,14 @@ class SonioxSTTService(WebsocketSTTService):
         delay = nanoseconds_to_seconds(frame.pts - self.get_clock().get_time())
         delay -= assert_given(self._settings.agent_text_lead_ms) / 1000
         # Uninterruptible speech plays through a turn interruption, but the
-        # text still belongs to the connection that carried its audio.
-        stop_waiting = interrupted if frame.interruptible else connection_retired
+        # text still belongs to the Soniox stream that carried its audio.
+        stop_waiting = interrupted if frame.interruptible else stream_retired
         if frame.interruptible or delay > 0:
             try:
                 await asyncio.wait_for(stop_waiting.wait(), max(delay, 0))
             except TimeoutError:
                 pass
-        if connection_retired.is_set() or stop_waiting.is_set():
+        if stream_retired.is_set() or stop_waiting.is_set():
             return
         await self._send_bot_text(frame)
 
@@ -792,9 +808,9 @@ class SonioxSTTService(WebsocketSTTService):
         await self._send_agent_text("", end_of_segment=True)
 
     def _drop_agent_text_words(self):
-        """Drop the words waiting on the clock, uninterruptible ones too."""
-        self._agent_text_connection_retired.set()
-        self._agent_text_connection_retired = asyncio.Event()
+        """Retire timed words when the Soniox stream changes or observation stops."""
+        self._agent_text_stream_retired.set()
+        self._agent_text_stream_retired = asyncio.Event()
         self._agent_text_turn.set()
         self._agent_text_turn = asyncio.Event()
         while not self._agent_text_words.empty():
@@ -836,24 +852,31 @@ class SonioxSTTService(WebsocketSTTService):
 
         await self._disconnect_websocket()
 
+    async def _connect_to(self, url: str) -> ClientConnection:
+        """Open a connection to a Soniox URL, authenticated with the API key.
+
+        Args:
+            url: The URL to connect to.
+
+        Returns:
+            The connection.
+        """
+        return await self._websocket_connect(
+            url, additional_headers={"Authorization": f"Bearer {self._api_key}"}
+        )
+
     async def _connect_websocket(self):
         """Establish the websocket connection to Soniox."""
+        websocket = None
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
             logger.debug("Connecting to Soniox STT")
 
-            websocket = await self._websocket_connect(
-                self._url,
-                additional_headers={"Authorization": f"Bearer {self._api_key}"},
-            )
-            # Retire text timed against the old session before exposing the
-            # new socket, whose audio has no matching words yet.
-            self._drop_agent_text_words()
-            self._websocket = websocket
+            websocket = await self._connect_to(self._url)
 
-            if not self._websocket:
+            if not websocket:
                 await self.push_error(error_msg=f"Unable to connect to Soniox API at {self._url}")
                 raise Exception(f"Unable to connect to Soniox API at {self._url}")
 
@@ -886,14 +909,19 @@ class SonioxSTTService(WebsocketSTTService):
             # Left out unless enabled: older models reject the field.
             if self._agent_text_input_enabled():
                 config["enable_agent_text_input"] = True
+            if s.enable_reconnect:
+                config["enable_reconnect"] = True
 
-            # Audio has no timeline on the replacement until it is configured.
-            self._agent_text_configuring = True
-            try:
-                await self._websocket.send(json.dumps(config))
-            finally:
-                if self._websocket is websocket:
-                    self._agent_text_configuring = False
+            # Send the configuration message.
+            await websocket.send(json.dumps(config))
+            # Wrapped after the config, which Soniox leaves out of the client
+            # messages it counts.
+            self._websocket = (
+                SonioxWebSocket(websocket, self._connect_to) if s.enable_reconnect else websocket
+            )
+            # The new session has no open segment, and words timed against the
+            # old one's audio would be placed where the bot's voice is not,
+            # where they can cancel the caller's own speech.
             self._agent_text_segment_open = False
             self._drop_agent_text_words()
 
@@ -901,6 +929,9 @@ class SonioxSTTService(WebsocketSTTService):
             logger.debug("Connected to Soniox STT")
         except Exception as e:
             self._websocket = None
+            if websocket:
+                # Clearing `_websocket` aborts only a connection stored unwrapped.
+                websocket.transport.abort()
             await self.push_error(error_msg=f"Unable to connect to Soniox: {e}", exception=e)
 
     async def _disconnect_websocket(self):
@@ -939,22 +970,20 @@ class SonioxSTTService(WebsocketSTTService):
 
         async def send_endpoint_transcript():
             if self._final_transcription_buffer:
-                text = "".join(map(lambda token: token["text"], self._final_transcription_buffer))
-                language = _language_from_tokens(self._final_transcription_buffer)
+                tokens = self._final_transcription_buffer
+                text = "".join(map(lambda token: token["text"], tokens))
+                language = _language_from_tokens(tokens)
+                words = None
+                if self._settings.enable_speaker_diarization:
+                    words = [(token["text"], token.get("speaker")) for token in tokens]
+                runs = self._diarized_runs(text, words)
                 # Report usage before the transcription frame so tracing can
                 # attach it to the STT span the frame closes.
                 await self.emit_stt_usage_metrics()
                 # Soniox only pushes TranscriptionFrame when an end token is received,
                 # so every TranscriptionFrame is inherently finalized
-                await self.push_frame(
-                    TranscriptionFrame(
-                        text=text,
-                        user_id=self._user_id,
-                        timestamp=time_now_iso8601(),
-                        language=language,
-                        result=self._final_transcription_buffer,
-                        finalized=True,
-                    )
+                await self._push_transcription_runs(
+                    runs, language=language, result=tokens, finalized=True
                 )
                 await self._handle_transcription(text, is_final=True, language=language)
                 self._final_transcription_buffer = []

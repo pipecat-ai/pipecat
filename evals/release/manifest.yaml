@@ -60,6 +60,10 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-deepgram-flux.py
     scenarios: [scripted/capital_question]
+  - bot: voice/voice-deepgram-flux-eager.py
+    scenarios: [scripted/capital_question, scripted/filter_incomplete_turns]
+  - bot: voice/voice-deepgram-flux-manual.py
+    scenarios: [scripted/capital_question, scripted/interruption]
   - bot: voice/voice-deepgram-http.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-elevenlabs.py
@@ -68,6 +72,18 @@ suite:
     scenarios: [scripted/capital_question]
   - bot: voice/voice-elevenlabs-dialogue.py
     scenarios: [scripted/capital_question]
+  # Several TTSSpeakFrames pushed at once, each synthesized in its own
+  # context, on the TTS services that synthesize contexts concurrently.
+  - bot: voice/voice-concurrent-tts.py
+    name: voice/voice-concurrent-tts-cartesia
+    runner_body:
+      data: { tts: cartesia }
+    scenarios: [scripted/concurrent_tts_contexts]
+  - bot: voice/voice-concurrent-tts.py
+    name: voice/voice-concurrent-tts-elevenlabs
+    runner_body:
+      data: { tts: elevenlabs }
+    scenarios: [scripted/concurrent_tts_contexts]
   - bot: voice/voice-fal.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-fish.py
@@ -91,6 +107,10 @@ suite:
   - bot: voice/voice-gradium.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-groq.py
+    scenarios: [scripted/capital_question]
+  - bot: voice/voice-heygen.py
+    scenarios: [scripted/capital_question]
+  - bot: voice/voice-heygen-http.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-inworld.py
     scenarios: [scripted/capital_question]
@@ -125,6 +145,10 @@ suite:
   - bot: voice/voice-openai-responses-http.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-piper.py
+    scenarios: [scripted/capital_question]
+  - bot: voice/voice-plivo.py
+    scenarios: [scripted/capital_question]
+  - bot: voice/voice-plivo-http.py
     scenarios: [scripted/capital_question]
   - bot: voice/voice-resemble.py
     scenarios: [scripted/capital_question]
@@ -183,6 +207,8 @@ suite:
   - bot: realtime/realtime-inworld.py
     scenarios: [scripted/weather_function_call_audio]
   - bot: realtime/realtime-openai.py
+    scenarios: [scripted/weather_function_call_audio]
+  - bot: realtime/realtime-rime.py
     scenarios: [scripted/weather_function_call_audio]
   - bot: realtime/realtime-ultravox-async-tool.py
     scenarios: [scripted/weather_function_call_audio]
@@ -297,6 +323,7 @@ suite:
     scenarios:
       - scripted/weather_function_call
       - scripted/async_tool
+      - scripted/async_tool_wait_reassurance
       - scripted/function_call_timeout
       # gpt-4.1 answers that it is working on the report without calling
       # write_report, so neither cancellation scenario reaches what it tests.
@@ -307,6 +334,9 @@ suite:
       - scripted/async_tool
       - scripted/async_tool_cancellation
       - scripted/function_call_timeout
+  # Only the weather tool: no cancellation or timeout tools to exercise.
+  - bot: realtime/realtime-rime-async-tool.py
+    scenarios: [scripted/async_tool]
 
   #
   # Function calling with video: the bot calls a vision function that requests a
@@ -440,6 +470,62 @@ suite:
     scenarios: [scripted/dtmf_menu]
 
   #
+  # Speaker diarization: a recorded call between two people plays to the bot,
+  # whose STT labels each transcript with its speaker. One bot covers every
+  # streaming STT service that diarizes; the runner body picks the service.
+  #
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/assemblyai
+    runner_body:
+      data: {stt: assemblyai}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/aws
+    runner_body:
+      data: {stt: aws}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/deepgram
+    runner_body:
+      data: {stt: deepgram}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/meta
+    runner_body:
+      data: {stt: meta}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/nvidia
+    runner_body:
+      data: {stt: nvidia}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/smallest
+    runner_body:
+      data: {stt: smallest}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/soniox
+    runner_body:
+      data: {stt: soniox}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/speechmatics
+    runner_body:
+      data: {stt: speechmatics}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/xai
+    runner_body:
+      data: {stt: xai}
+    scenarios: [scripted/speaker_diarization]
+  - bot: features/features-speaker-diarization.py
+    name: speaker-diarization/zoom_ai
+    runner_body:
+      data: {stt: zoom_ai}
+    scenarios: [scripted/speaker_diarization]
+
+  #
   # Voicemail detection: the bot holds its speech until a classifier decides
   # whether a person or a voicemail answered the outbound call.
   #
@@ -477,6 +563,8 @@ suite:
     scenarios: [scripted/expression_tagger, scripted/perception]
   - bot: expressive-conversation/expressive-conversation-hume-audio-decisions.py
     scenarios: [scripted/perception]
+  - bot: expressive-conversation/expressive-conversation-voice-reader.py
+    scenarios: [scripted/perception]
 
   #
   # Video avatar services
@@ -489,7 +577,7 @@ suite:
   # scenarios asserting on node transitions, function calls, and context
   # strategies. The Python bots pick their LLM from $LLM_PROVIDER (default
   # openai_responses; hello_world always uses Google); the YAML bots use
-  # OpenAI.
+  # OpenAI, except clinic_appointments, which uses Google.
   #
   - bot: flows/python/hello_world.py
     scenarios: [scripted/hello_world]
@@ -509,6 +597,8 @@ suite:
     scenarios: [scripted/patient_intake]
   - bot: flows/yaml/restaurant_reservation/bot.py
     scenarios: [scripted/restaurant_reservation]
+  - bot: flows/yaml/clinic_appointments/bot.py
+    scenarios: [scripted/clinic_appointments]
   # Constructs and switches between OpenAI, Google, and Anthropic, so all
   # three API keys must be set.
   - bot: flows/python/llm_switching.py

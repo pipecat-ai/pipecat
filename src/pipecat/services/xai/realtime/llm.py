@@ -67,6 +67,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
@@ -183,6 +184,7 @@ class GrokRealtimeLLMSettings(LLMSettings):
         return instance
 
 
+@traced_realtime_llm
 class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
     """Grok Realtime Voice Agent LLM service providing real-time audio and text communication.
 
@@ -718,6 +720,9 @@ class GrokRealtimeLLMService(LLMService[GrokRealtimeLLMAdapter]):
         :meth:`_handle_context`). Before the session's conversation is set up,
         nothing is sent: the setup sends the context, which the aggregator
         records the messages in.
+
+        The messages are taken from this frame, not read from the context.
+        ``LLMUserAggregator._realtime_handle_messages_append`` explains why.
         """
         if not self._api_session_ready or self._llm_needs_conversation_setup:
             return

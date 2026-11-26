@@ -6,22 +6,24 @@
 
 """Frame serializer for a Pipecat pipeline acting as an RTVI *client*.
 
-This is the client-side mirror of how a bot emits RTVI. It deserializes the RTVI
-*server* messages a bot sends (``bot-llm-text``, ``user-transcription``, ...) into
-pipeline frames, and serializes a client's outgoing frames (audio, and RTVI client
-messages the caller builds) onto the wire. Pair it with a WebSocket client
-transport to let a Pipecat pipeline talk to a bot that runs an RTVI *server*
-transport (e.g. the eval transport).
+This is the client-side mirror of how a bot emits RTVI. It hands the RTVI
+*server* messages a bot sends to the pipeline, and serializes a client's
+outgoing frames (audio, and RTVI client messages the caller builds) onto the
+wire. Pair it with a WebSocket client transport to let a Pipecat pipeline talk
+to a bot that runs an RTVI *server* transport (e.g. the eval transport).
 
 It is the inverse of
 :class:`~pipecat.processors.frameworks.rtvi.observer.RTVIObserver`, which turns
 pipeline frames into server messages on the bot side.
 
-.. note::
-    This covers the messages a conversation needs (the LLM response lifecycle,
-    the TTS's spoken text, transcriptions, speaking/interruption signals, function
-    calls). Metrics and inbound bot audio are added as the eval-simulation work
-    progresses.
+Every message from the bot stays a raw message, an
+:class:`~pipecat.frames.frames.InputTransportMessageFrame`. The bot's messages
+are about the bot (its speaking, its LLM's text, its function calls, ...) or
+about this pipeline as the bot sees it (its ``user-transcription``), and this
+pipeline's own frames would pass them off as its own: a
+``BotStartedSpeakingFrame`` here means this pipeline's output started playing.
+Kept as one kind of frame, they also reach the pipeline in the order the bot
+sent them.
 """
 
 import base64
@@ -31,26 +33,13 @@ from loguru import logger
 
 import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     Frame,
-    FunctionCallCancelFrame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
-    InterimTranscriptionFrame,
-    InterruptionFrame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
-    LLMMarkerResponseFrame,
-    LLMTextFrame,
+    InputTransportMessageFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
-    TranscriptionFrame,
-    TTSTextFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer
-from pipecat.utils.text.base_text_aggregator import TextType
 
 
 class RTVIClientSerializer(FrameSerializer):
@@ -104,14 +93,14 @@ class RTVIClientSerializer(FrameSerializer):
         return None
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
-        """Deserialize an incoming RTVI server message into a pipeline frame.
+        """Deserialize an incoming RTVI server message, as the raw message it is.
 
         Args:
             data: JSON text (or bytes) sent by the bot.
 
         Returns:
-            The corresponding frame, or ``None`` if the message is not an RTVI
-            message or has no frame mapping yet (handled elsewhere).
+            The bot's message as an ``InputTransportMessageFrame``, or ``None`` if
+            it is not an RTVI message.
         """
         try:
             message = json.loads(data)
@@ -122,63 +111,4 @@ class RTVIClientSerializer(FrameSerializer):
         if not isinstance(message, dict) or message.get("label") != RTVI.MESSAGE_LABEL:
             return None
 
-        msg_type = message.get("type")
-        payload = message.get("data") or {}
-
-        match msg_type:
-            case "bot-llm-started":
-                return LLMFullResponseStartFrame()
-            case "bot-llm-text":
-                return LLMTextFrame(text=payload.get("text", ""))
-            case "bot-llm-marker":
-                return LLMMarkerResponseFrame(
-                    raw=payload.get("raw", ""),
-                    marker=payload.get("text") or None,
-                    kind=payload.get("kind"),
-                    markers=list(payload.get("markers") or []),
-                )
-            case "bot-llm-stopped":
-                return LLMFullResponseEndFrame()
-            case "bot-tts-text":
-                # The message carries only the text; its type (sentence, word)
-                # isn't on the wire.
-                return TTSTextFrame(text=payload.get("text", ""), text_type=TextType.SENTENCE)
-            case "bot-started-speaking":
-                return BotStartedSpeakingFrame()
-            case "bot-stopped-speaking":
-                return BotStoppedSpeakingFrame()
-            case "bot-interrupted":
-                return InterruptionFrame()
-            case "llm-function-call-in-progress":
-                # function_name/arguments may be absent at the bot's default
-                # report level; "" maps back to "no name reported" downstream.
-                return FunctionCallInProgressFrame(
-                    function_name=payload.get("function_name") or "",
-                    tool_call_id=payload.get("tool_call_id", ""),
-                    arguments=payload.get("arguments") or {},
-                )
-            case "llm-function-call-stopped":
-                # A call ends either by being cancelled or by returning; the two
-                # map to the frames the bot itself would have pushed.
-                if payload.get("cancelled"):
-                    return FunctionCallCancelFrame(
-                        function_name=payload.get("function_name") or "",
-                        tool_call_id=payload.get("tool_call_id", ""),
-                    )
-                return FunctionCallResultFrame(
-                    function_name=payload.get("function_name") or "",
-                    tool_call_id=payload.get("tool_call_id", ""),
-                    arguments={},
-                    result=payload.get("result"),
-                )
-            case "user-transcription":
-                text = payload.get("text", "")
-                user_id = payload.get("user_id", "")
-                timestamp = payload.get("timestamp", "")
-                if payload.get("final", True):
-                    return TranscriptionFrame(text=text, user_id=user_id, timestamp=timestamp)
-                return InterimTranscriptionFrame(text=text, user_id=user_id, timestamp=timestamp)
-            case _:
-                # bot-ready (handshake) and not-yet-mapped messages (metrics, bot
-                # audio) are handled elsewhere / later.
-                return None
+        return InputTransportMessageFrame(message=message)

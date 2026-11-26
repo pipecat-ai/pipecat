@@ -47,6 +47,7 @@ from pipecat.services.google.utils import (
     _MODELS_SUPPORTING_THINKING_LEVEL,
     _model_name,
     _thinking_default,
+    gemini_api_http_options,
     stream_with_retry,
     update_google_client_http_options,
 )
@@ -337,7 +338,9 @@ class GoogleLLMService(LLMService[GeminiLLMAdapter]):
 
     def create_client(self):
         """Create the Gemini client instance. Subclasses can override this."""
-        self._client = genai.Client(api_key=self._api_key, http_options=self._http_options)
+        self._client = genai.Client(
+            api_key=self._api_key, http_options=gemini_api_http_options(self._http_options)
+        )
 
     @staticmethod
     def model_supports_response_schema(model: str) -> bool:

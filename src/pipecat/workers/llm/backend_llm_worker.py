@@ -116,7 +116,7 @@ ERROR_UPDATE_TYPE = "error"
 #: writes a note paragraph and then a marked one, so a mark at the start of a
 #: later line splits the message, a note before it and a spoken message from
 #: it on, rather than losing the result. The turn-completion markers are
-#: read the same way (``user_turn_completion_mixin``).
+#: read the same way (``user_turn_completion``).
 SPOKEN_MARK = ">>"
 
 #: Where a message's spoken part starts: the first line that begins with the mark.
@@ -500,6 +500,7 @@ class BackendLLMWorker(LLMContextWorker):
         pairing_instruction: str = BACKEND_PAIRING_INSTRUCTION,
         user_params: LLMUserAggregatorParams | None = None,
         assistant_params: LLMAssistantAggregatorParams | None = None,
+        **kwargs: Any,
     ):
         """Initialize the backend worker.
 
@@ -527,6 +528,9 @@ class BackendLLMWorker(LLMContextWorker):
                 default VAD and turn-analysis strategies (and the model the
                 latter loads) have nothing to do here.
             assistant_params: Optional parameters for the assistant aggregator.
+            **kwargs: Additional arguments forwarded to :class:`LLMContextWorker`
+                and on to ``PipelineWorker``, such as ``enable_tracing`` or
+                ``observers``.
 
         Raises:
             ValueError: If the LLM service declines the role.
@@ -543,6 +547,7 @@ class BackendLLMWorker(LLMContextWorker):
             context=context,
             user_params=user_params,
             assistant_params=assistant_params,
+            **kwargs,
         )
         self._attached: _AttachedFrontend | None = None
         self._transform_output = transform_output

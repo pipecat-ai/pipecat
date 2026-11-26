@@ -353,6 +353,24 @@ async def test_every_interruption_clears_simli_buffer(simli_video):
 
 
 @pytest.mark.asyncio
+async def test_an_interruption_starts_a_new_simli_resampler(simli_video):
+    service = simli_video.SimliVideoService(api_key="key", face_id="face")
+    resampler = service._simli_resampler
+
+    await run_test(
+        service,
+        frames_to_send=[
+            SpeechOutputAudioRawFrame(audio=SPEECH, sample_rate=24000, num_channels=1),
+            SleepFrame(sleep=0.1),
+            InterruptionFrame(),
+            SleepFrame(sleep=0.1),
+        ],
+    )
+
+    assert service._simli_resampler is not resampler
+
+
+@pytest.mark.asyncio
 async def test_user_turn_without_interruption_keeps_simli_buffer(simli_video):
     # With interruptions disabled, as with OpenAILiveLLMService, a user turn starts
     # without an InterruptionFrame and the bot may keep talking.

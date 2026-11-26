@@ -71,6 +71,7 @@ except ModuleNotFoundError as e:
 # tool calls, so it gets low effort. "between_tools" is Sonnet 5.5's lowest
 # setting, and "disabled" is already the default on the Claude 4 models.
 _THINKING_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
+    "claude-fable-5-2": {"output_config": {"effort": "low"}},
     "claude-fable-5-1": {"output_config": {"effort": "low"}},
     "claude-fable-5": {"output_config": {"effort": "low"}},
     "claude-opus-5-5": {"output_config": {"effort": "low"}},

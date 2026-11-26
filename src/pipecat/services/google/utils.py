@@ -8,6 +8,7 @@
 
 import asyncio
 import json
+import os
 import re
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
@@ -172,6 +173,45 @@ def update_google_client_http_options(http_options: dict[str, Any] | Any | None)
         else:
             http_options.headers.update(client_header)
 
+    return http_options
+
+
+#: The Gemini Developer API version clients use unless their http_options name one.
+#: google-genai 3 defaults to v1, which doesn't serve the Gemini Live models or
+#: preview models such as the default TTS model.
+GEMINI_API_VERSION = "v1beta"
+
+
+def gemini_api_http_options(http_options: dict[str, Any] | Any | None) -> Any:
+    """The http_options for a Gemini Developer API client, on v1beta unless they name a version.
+
+    When ``GOOGLE_GENAI_USE_VERTEXAI`` or ``GOOGLE_GENAI_USE_ENTERPRISE`` makes
+    google-genai build a Vertex AI client instead (express mode, with an API
+    key), the http_options are returned as given, so the client keeps the SDK's
+    Vertex default: Vertex AI serves no ``v1beta``.
+
+    Args:
+        http_options: The client's http_options: None, a dictionary, or an
+            object with an ``api_version`` attribute, which is set in place.
+
+    Returns:
+        The http_options with an API version, or as given for a Vertex AI client.
+    """
+    # google-genai's precedence: GOOGLE_GENAI_USE_ENTERPRISE, when set, wins.
+    use_vertex = os.environ.get(
+        "GOOGLE_GENAI_USE_ENTERPRISE", os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "")
+    )
+    if use_vertex.lower() in ("true", "1"):
+        return http_options
+    if http_options is None:
+        return {"api_version": GEMINI_API_VERSION}
+    if isinstance(http_options, dict):
+        return {
+            **http_options,
+            "api_version": http_options.get("api_version") or GEMINI_API_VERSION,
+        }
+    if not getattr(http_options, "api_version", None):
+        http_options.api_version = GEMINI_API_VERSION
     return http_options
 
 

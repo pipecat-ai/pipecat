@@ -312,9 +312,17 @@ class WebsocketClientInputTransport(BaseInputTransport):
         if isinstance(frame, InputAudioRawFrame) and self._params.audio_in_enabled:
             await self.push_audio_frame(frame)
         elif isinstance(frame, InputTransportMessageFrame):
-            await self.broadcast_frame(InputTransportMessageFrame, message=frame.message)
+            await self._push_transport_message(frame)
         else:
             await self.push_frame(frame)
+
+    async def _push_transport_message(self, frame: InputTransportMessageFrame):
+        """Hand a message from the server to the pipeline, in both directions.
+
+        Args:
+            frame: The message, as the serializer deserialized it.
+        """
+        await self.broadcast_frame(InputTransportMessageFrame, message=frame.message)
 
 
 class WebsocketClientOutputTransport(BaseOutputTransport):
@@ -359,7 +367,8 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         """
         await super().setup(setup)
 
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
+        bytes_per_second = self.sample_rate * self._params.audio_out_channels * 2
+        self._send_interval = self.audio_chunk_size / bytes_per_second
 
         await self._session.setup(setup.task_manager)
 

@@ -8,10 +8,16 @@
 
 import pytest
 
+from pipecat.classifiers.base_classifier import BaseClassifier, YesNoQuestion, YesNoResult
 from pipecat.classifiers.tone import model as reader_model
 from pipecat.classifiers.tone.model import PipecatToneReaderModel
 from pipecat.expressive.perception import PerceptionSignal
-from pipecat.expressive.processors.tone_reader import PipecatToneReader
+from pipecat.expressive.processors.perception_reader import (
+    PerceptionQuestion,
+    PerceptionReader,
+    PerceptionSource,
+)
+from pipecat.expressive.processors.tone_reader import PipecatToneReader, PipecatToneSource
 from pipecat.frames.frames import (
     ErrorFrame,
     InterimTranscriptionFrame,
@@ -210,3 +216,56 @@ async def test_a_folder_of_your_own_loads_in_place_of_a_download(monkeypatch, tm
 
     assert loaded == [(tmp_path, "fp32")]
     assert [f for f in down if isinstance(f, PerceptionMetadataFrame)]
+
+
+class FakeYesNoClassifier(BaseClassifier):
+    """Answers every question with the same chance."""
+
+    async def _ask(self, state, questions, inputs=()):
+        return {name: YesNoResult(probability=0.3) for name in questions}, None
+
+
+def _beside_tone(monkeypatch, name: str) -> PerceptionReader:
+    """A reader that asks Pipecat Tone and another classifier, whose signal is ``name``."""
+    monkeypatch.setattr(PipecatToneReaderModel, "download", lambda **kwargs: FakeReaderModel())
+    question = PerceptionQuestion(question=YesNoQuestion(instructions="Is the user unsure?"))
+    other = PerceptionSource(classifier=FakeYesNoClassifier(), questions={name: question})
+    return PerceptionReader(sources=[PipecatToneSource(), other])
+
+
+@pytest.mark.asyncio
+async def test_tone_reads_a_turn_beside_another_classifier(monkeypatch):
+    down, _ = await run_test(
+        _beside_tone(monkeypatch, "hesitation"),
+        frames_to_send=[_transcription("Oh great, a forty minute wait.")],
+    )
+
+    metadata = [f for f in down if isinstance(f, PerceptionMetadataFrame)]
+    assert [t.name for t in metadata[0].perception.signals] == ["emotion", "sarcasm", "hesitation"]
+    assert [f.perception for f in down if isinstance(f, TranscriptionFrame)] == [
+        [
+            PerceptionSignal("emotion", labels=[("angry", 0.71), ("neutral", 0.2)]),
+            PerceptionSignal("sarcasm", value=0.99),
+            PerceptionSignal("hesitation", value=0.3),
+        ]
+    ]
+
+
+def test_a_source_beside_tone_cant_report_a_signal_of_tones_name(monkeypatch):
+    with pytest.raises(ValueError, match="sarcasm"):
+        _beside_tone(monkeypatch, "sarcasm")
+
+
+@pytest.mark.asyncio
+async def test_tones_names_are_its_questions_once_the_model_loads(monkeypatch):
+    reader = _reader(monkeypatch, FakeReaderModel())
+
+    await run_test(reader, frames_to_send=[])
+
+    tone = reader.sources[0]
+    assert tone.names == list(tone.questions)
+
+
+def test_the_readers_timeout_is_its_sources():
+    assert PipecatToneReader().sources[0].timeout == 0.5
+    assert PipecatToneReader(timeout=0.2).sources[0].timeout == 0.2

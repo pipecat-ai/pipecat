@@ -51,8 +51,8 @@ class FrameSerializer(BaseObject):
             audio_out_sample_rate: Sample rate of the audio sent on the wire, which audio is
                 converted to before it is encoded. None when the wire format carries the
                 rate with the audio.
-            resampler_clear_after_secs: Has no effect: the serializer's resamplers clear
-                their history after their default inactivity.
+            resampler_clear_after_secs: Has no effect: the serializer resets the
+                resampler of its outgoing audio on an interruption.
 
                 .. deprecated:: 1.16.0
                     No replacement. Will be removed in 2.0.0.

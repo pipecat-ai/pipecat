@@ -43,6 +43,40 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
         result = await strip_markdown("`code`", "*")
         self.assertEqual(result, "code")
 
+    async def test_inline_code_delimiter_lengths(self):
+        cases = {
+            "Use ``__init__`` here.": "Use __init__ here.",
+            "Use ``a ` b`` here.": "Use a ` b here.",
+            "Use `a `` b` here.": "Use a `` b here.",
+            "``one ` two`` and `three`": "one ` two and three",
+            "**bold ``a ` b``** end": "bold a ` b end",
+            "``first\nsecond``": "first\nsecond",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), expected)
+
+    async def test_double_backtick_code_keeps_link_markup(self):
+        for strip_urls in (True, False):
+            transform = StripMarkdown(strip_urls=strip_urls)
+            for text, expected in (
+                ("``[label](url)``", "[label](url)"),
+                ("``![alt](image.png)``", "![alt](image.png)"),
+            ):
+                with self.subTest(strip_urls=strip_urls, text=text):
+                    self.assertEqual(await transform(text, "*"), expected)
+
+    async def test_unmatched_code_delimiters(self):
+        for text in ("Use ``unclosed` here.", "Use `unclosed`` here.", "Use ``unclosed here."):
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), text)
+
+    async def test_fenced_code_with_backticks_removed(self):
+        for fence in ("```", "~~~"):
+            with self.subTest(fence=fence):
+                text = f"Before {fence}python\nvalue = `code`\n{fence} after ``shown``."
+                self.assertEqual(await strip_markdown(text, "*"), "Before  after shown.")
+
     async def test_inline_code_content_kept(self):
         cases = {
             "call `__init__` please": "call __init__ please",
@@ -62,6 +96,32 @@ class TestStripMarkdown(unittest.IsolatedAsyncioTestCase):
         text = "**Hello** and _world_"
         result = await strip_markdown(text, "*")
         self.assertEqual(alnum_only(result), alnum_only(text))
+
+    async def test_link_markup_in_inline_code_kept(self):
+        cases = {
+            "Use `[label](https://example.com)` here.": ("Use [label](https://example.com) here."),
+            "Use `![alt](image.png)` here.": "Use ![alt](image.png) here.",
+            "`[Python](https://example.com/Python_(language))`": (
+                "[Python](https://example.com/Python_(language))"
+            ),
+        }
+        for strip_urls in (True, False):
+            transform = StripMarkdown(strip_urls=strip_urls)
+            for text, expected in cases.items():
+                with self.subTest(strip_urls=strip_urls, text=text):
+                    self.assertEqual(await transform(text, "*"), expected)
+
+    async def test_inline_code_and_normal_links(self):
+        cases = {
+            "[Guide](https://example.com) shows `[label](url)` and `![alt](image.png)`.": (
+                "Guide shows [label](url) and ![alt](image.png)."
+            ),
+            "Read [`__init__`](https://example.com).": "Read __init__.",
+            "[Link](`url`) followed by `[label](target)`.": ("Link followed by [label](target)."),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(await strip_markdown(text, "*"), expected)
 
     async def test_no_change_to_plain_text(self):
         text = "Hello world"
@@ -160,6 +220,19 @@ class TestExpandPhoneNumbers(unittest.IsolatedAsyncioTestCase):
         text = "Card 4111111111111111 is invalid"
         result = await expand_phone_numbers(text, "*")
         self.assertEqual(result, text)
+
+    async def test_no_match_in_decimal_fraction(self):
+        # The digits after a decimal point are not a phone number.
+        for text in ("Pi is approximately 3.1415926535.", "Latitude 40.7127753000"):
+            self.assertEqual(await expand_phone_numbers(text, "*"), text, text)
+
+    async def test_no_match_in_currency_amount(self):
+        for text in ("The budget is $2500000000.", "It cost ₹2500000000 to build"):
+            self.assertEqual(await expand_phone_numbers(text, "*"), text, text)
+
+    async def test_dotted_number_with_country_code(self):
+        result = await expand_phone_numbers("Call 1.800.555.1234 or 800.555.1234", "*")
+        self.assertEqual(result, "Call 1 8 0 0 5 5 5 1 2 3 4 or 8 0 0 5 5 5 1 2 3 4")
 
 
 class TestNormalizeAcronyms(unittest.IsolatedAsyncioTestCase):
@@ -278,6 +351,32 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
         result = await expand_percentages(text, "*")
         self.assertNotEqual(alnum_only(result), alnum_only(text))
 
+    async def test_range(self):
+        # The dash of a range is read as "to", not left between a digit and a word.
+        self.assertEqual(await expand_percentages("a 5-10% rise", "*"), "a 5 to ten percent rise")
+        self.assertEqual(await expand_percentages("a 5–10% rise", "*"), "a 5 to ten percent rise")
+        self.assertEqual(
+            await expand_percentages("2.5 - 3% fees", "*"), "2.5 to three percent fees"
+        )
+        self.assertEqual(await expand_percentages("5%-10%", "*"), "five percent to ten percent")
+
+    async def test_range_lookalikes_unchanged(self):
+        # A dash that is not a range between two standalone numbers is left alone.
+        self.assertEqual(await expand_percentages("Q3-5%", "*"), "Q3-five percent")
+        self.assertEqual(await expand_percentages("+/-5%", "*"), "+/-five percent")
+        self.assertEqual(await expand_percentages("1-2-3%", "*"), "1-2-three percent")
+        self.assertEqual(await expand_percentages("2025-2026", "*"), "2025-2026")
+        self.assertEqual(await expand_percentages("5-10 km", "*"), "5-10 km")
+        self.assertEqual(await expand_percentages("5% -2%", "*"), "five percent minus two percent")
+
+    async def test_negative(self):
+        # A leading minus sign is spoken, not dropped in front of the words.
+        self.assertEqual(
+            await expand_percentages("down -5% today", "*"), "down minus five percent today"
+        )
+        self.assertEqual(await expand_percentages("(−2.5%)", "*"), "(minus two point five percent)")
+        self.assertEqual(await expand_percentages("-5%", "*"), "minus five percent")
+
     async def test_thousands_separator(self):
         # The separator is part of the number, not a prefix left in front of it.
         self.assertEqual(
@@ -296,6 +395,43 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
 
 
 class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
+    async def test_degrees(self):
+        # The degree sign was left for the TTS engine, which may skip it.
+        self.assertEqual(
+            await expand_units("It is 25°C today", "*"), "It is 25 degrees Celsius today"
+        )
+        self.assertEqual(await expand_units("at 98.6°F", "*"), "at 98.6 degrees Fahrenheit")
+        self.assertEqual(await expand_units("72 °F", "*"), "72 degrees Fahrenheit")
+        self.assertEqual(await expand_units("1°C warmer", "*"), "1 degree Celsius warmer")
+        self.assertEqual(await expand_units("a 90° turn", "*"), "a 90 degrees turn")
+        self.assertEqual(await expand_units("1.0°C", "*"), "1.0 degrees Celsius")
+        self.assertEqual(await expand_units("-1°C", "*"), "-1 degree Celsius")
+        self.assertEqual(await expand_units("-5°C", "*"), "-5 degrees Celsius")
+        self.assertEqual(await expand_units("72 ° F", "*"), "72 degrees Fahrenheit")
+        # A degree sign directly followed by another word is left alone.
+        self.assertEqual(await expand_units("40°N", "*"), "40°N")
+        # Degrees-minutes coordinates are left alone.
+        self.assertEqual(await expand_units("40°30′N", "*"), "40°30′N")
+
+    async def test_rate_written_with_a_slash(self):
+        # A unit over time expands as a whole, not just the part before the slash.
+        self.assertEqual(
+            await expand_units("Limit is 100 km/h", "*"), "Limit is 100 kilometers per hour"
+        )
+        self.assertEqual(await expand_units("at 50km/h", "*"), "at 50 kilometers per hour")
+        self.assertEqual(await expand_units("1 km/h", "*"), "1 kilometer per hour")
+        self.assertEqual(
+            await expand_units("wind at 9.8 m/s", "*"), "wind at 9.8 meters per second"
+        )
+        self.assertEqual(await expand_units("5m/s", "*"), "5 meters per second")
+        self.assertEqual(await expand_units("100 KM/H", "*"), "100 kilometers per hour")
+        self.assertEqual(await expand_units("80 km/hr", "*"), "80 kilometers per hour")
+        self.assertEqual(await expand_units("80 km/hour", "*"), "80 kilometers per hour")
+        self.assertEqual(await expand_units("30 ft/s", "*"), "30 feet per second")
+        self.assertEqual(await expand_units("5m/sec", "*"), "5 meters per second")
+        self.assertEqual(await expand_units("2 L/min", "*"), "2 liters per minute")
+        self.assertEqual(await expand_units("100 MB/s", "*"), "100 megabytes per second")
+
     async def test_km(self):
         result = await expand_units("5km away", "*")
         self.assertIn("kilometers", result)
@@ -543,6 +679,60 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_currency("$3.567", "*"), "three dollars and fifty-six cents")
         self.assertEqual(await expand_currency("£1.999", "*"), "one pound and ninety-nine pence")
 
+    async def test_scaled_amount_drops_trailing_zeros(self):
+        # "$2.50 million" is two and a half million, so the zero is not read out.
+        self.assertEqual(
+            await expand_currency("We raised $2.50 million", "*"),
+            "We raised two point five million dollars",
+        )
+        self.assertEqual(
+            await expand_currency("$1.50 billion", "*"), "one point five billion dollars"
+        )
+        self.assertEqual(await expand_currency("$1.0 million", "*"), "one million dollars")
+        # A zero inside the fraction is content and stays read.
+        self.assertEqual(
+            await expand_currency("$2.05 million", "*"), "two point zero five million dollars"
+        )
+
+    async def test_abbreviated_scale_after_amount(self):
+        # "$2.5m" used to read "two dollars and fifty centsm", and "$5m" was left
+        # for expand_units to turn into "$5 meters" in the full formatter.
+        self.assertEqual(
+            await expand_currency("They raised $2.5m", "*"),
+            "They raised two point five million dollars",
+        )
+        self.assertEqual(
+            await expand_currency("a $1.5bn deal", "*"), "a one point five billion dollars deal"
+        )
+        self.assertEqual(await expand_currency("$5m", "*"), "five million dollars")
+        self.assertEqual(await expand_currency("$500k", "*"), "five hundred thousand dollars")
+        self.assertEqual(await expand_currency("$3B", "*"), "three billion dollars")
+        self.assertEqual(await expand_currency("£3.5mn", "*"), "three point five million pounds")
+        self.assertEqual(await expand_currency("$1T", "*"), "one trillion dollars")
+        self.assertEqual(
+            await VoiceFormatter()("raised $5m last year", "*"),
+            "raised five million dollars last year",
+        )
+
+    async def test_ten_digit_amount_is_not_read_as_a_phone_number(self):
+        # The phone transform runs before the currency one, so it must leave the amount whole.
+        self.assertEqual(
+            await VoiceFormatter()("The budget is $2500000000.", "*"),
+            "The budget is two billion, five hundred million dollars.",
+        )
+
+    async def test_amount_followed_by_other_letters_is_left_alone(self):
+        # An unrecognised suffix is not a scale, and the amount is not read as cents.
+        self.assertEqual(await expand_currency("$1.5x", "*"), "$1.5x")
+        self.assertEqual(await expand_currency("$5mo", "*"), "$5mo")
+
+    async def test_currency_code_stays_apart_from_the_amount(self):
+        # "US$5" used to expand to "USfive dollars".
+        self.assertEqual(await expand_currency("US$5", "*"), "US five dollars")
+        self.assertEqual(await expand_currency("CAD$10", "*"), "CAD ten dollars")
+        # A symbol with no code before it is unchanged.
+        self.assertEqual(await expand_currency(" pay $5", "*"), " pay five dollars")
+
     async def test_scale_word_after_amount(self):
         # "$2.5 billion" is two and a half billion dollars, not two dollars and
         # fifty cents followed by a stray "billion".
@@ -558,6 +748,28 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
             await expand_currency("€3.25 Trillion", "*"), "three point two five trillion euros"
         )
         self.assertEqual(await expand_currency("¥40 thousand", "*"), "forty thousand yen")
+
+    async def test_leading_minus_is_read_as_minus(self):
+        # "-$5" used to expand to "-five dollars", leaving a bare hyphen that
+        # TTS often skips or reads as "dash". A Unicode minus is the same.
+        # A range such as "$10-$20" must keep the hyphen (it is not a negative).
+        self.assertEqual(await expand_currency("-$5", "*"), "minus five dollars")
+        self.assertEqual(
+            await expand_currency("Your balance is -$2.50", "*"),
+            "Your balance is minus two dollars and fifty cents",
+        )
+        self.assertEqual(await expand_currency("−€3", "*"), "minus three euros")
+        self.assertEqual(await expand_currency("(-$5)", "*"), "(minus five dollars)")
+        self.assertEqual(await expand_currency("$10-$20", "*"), "ten dollars-twenty dollars")
+        # A spaced hyphen is a dash separator, not a minus sign.
+        self.assertEqual(
+            await expand_currency("Latte - $4.50", "*"), "Latte - four dollars and fifty cents"
+        )
+        self.assertEqual(await expand_currency("$10 - $20", "*"), "ten dollars - twenty dollars")
+        self.assertEqual(
+            await VoiceFormatter()("charged -$5 last month", "*"),
+            "charged minus five dollars last month",
+        )
 
 
 class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
@@ -597,6 +809,26 @@ class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2nd", await normalize_dates("2023-05-02", "*"))
         self.assertIn("3rd", await normalize_dates("2023-05-03", "*"))
 
+    async def test_year_is_read_as_a_year(self):
+        # A year is spoken the way a date is said aloud, not as a cardinal
+        # quantity ("one thousand, nine hundred and ninety-nine").
+        self.assertEqual(
+            await normalize_dates("Born on 1999-03-05", "*"),
+            "Born on March 5th, nineteen ninety-nine",
+        )
+        self.assertEqual(
+            await normalize_dates("Due 07/04/1905", "*"),
+            "Due July 4th, nineteen oh-five",
+        )
+        self.assertEqual(
+            await normalize_dates("Meeting on 2023-05-10", "*"),
+            "Meeting on May 10th, twenty twenty-three",
+        )
+        self.assertEqual(
+            await normalize_dates("Launch on 2005-01-02", "*"),
+            "Launch on January 2nd, two thousand and five",
+        )
+
     async def test_month_is_english_under_non_english_locale(self):
         # The month must stay English even when LC_TIME is a non-English locale,
         # to match the hardcoded-English year and ordinal suffix.
@@ -614,6 +846,26 @@ class TestNormalizeDates(unittest.IsolatedAsyncioTestCase):
 
 
 class TestExpandNumbers(unittest.IsolatedAsyncioTestCase):
+    async def test_leading_minus_is_read_as_minus(self):
+        transform = expand_numbers(digit_cutoff=2025)
+        self.assertEqual(await transform("-5", "*"), "minus five")
+        self.assertEqual(await transform("(-5)", "*"), "(minus five)")
+        self.assertEqual(
+            await transform("It is -5 outside and -2.5 inside", "*"),
+            "It is minus five outside and minus two point five inside",
+        )
+        self.assertEqual(await transform("−3", "*"), "minus three")
+        self.assertEqual(await transform("-2026", "*"), "minus 2 0 2 6")
+
+    async def test_hyphen_between_numbers_is_kept(self):
+        transform = expand_numbers(digit_cutoff=None)
+        for text in ("5-10", "555-1234", "2024-01-05", "COVID-19", "10 - 5"):
+            with self.subTest(text=text):
+                self.assertNotIn("minus", await transform(text, "*"))
+        self.assertEqual(await transform("5-10", "*"), "five-ten")
+        self.assertEqual(await transform("10 - 5", "*"), "ten - five")
+        self.assertEqual(await transform("COVID-19", "*"), "COVID-nineteen")
+
     async def test_below_cutoff_expands_to_words(self):
         result = await expand_numbers(digit_cutoff=2025)("Room 42", "*")
         self.assertIn("forty-two", result)

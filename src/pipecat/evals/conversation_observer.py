@@ -7,7 +7,9 @@
 """Observer that records a bot's conversation as a conversation file holds it.
 
 It lets a call the harness didn't drive, such as a production one, be judged
-with ``pipecat eval judge`` against a simulation's ``success`` and metrics.
+with ``pipecat eval judge`` against a rubric
+(:class:`~pipecat.evals.simulation.EvalRubric`) or a simulation's ``success``
+and metrics.
 """
 
 from dataclasses import dataclass

@@ -6,7 +6,6 @@
 
 """Tests for JambonzFrameSerializer wire format."""
 
-import asyncio
 import json
 import math
 import struct
@@ -357,10 +356,10 @@ class TestJambonzSerializeWireFormat(unittest.IsolatedAsyncioTestCase):
 class TestJambonzOutputBetweenUtterances(unittest.IsolatedAsyncioTestCase):
     """The end of one bot utterance must not play at the start of the next.
 
-    The output resampler holds back the last few milliseconds of each utterance.
-    Unless its state is cleared over the gap before the next utterance, that
-    tail is played at the start of it, and after an interruption the cut-off
-    speech comes back at the start of the next reply.
+    The output resampler holds back the last few milliseconds of what it's
+    given. The output transport ends each utterance with silence, which pushes
+    the utterance's own tail out, and an interruption resets the resampler, so
+    the cut-off speech never comes back at the start of the next reply.
     """
 
     CHUNK = 480  # 20 ms at the pipeline rate
@@ -379,12 +378,12 @@ class TestJambonzOutputBetweenUtterances(unittest.IsolatedAsyncioTestCase):
         tone = OutputAudioRawFrame(audio=self.tone(), sample_rate=PIPELINE_RATE, num_channels=1)
         for _ in range(PUMP):
             await serializer.serialize(tone)
-
-        await asyncio.sleep(0.3)  # the pause before the bot's next utterance
-
         silence = OutputAudioRawFrame(
             audio=b"\x00\x00" * self.CHUNK, sample_rate=PIPELINE_RATE, num_channels=1
         )
+        # The silence the output transport ends an utterance with.
+        await serializer.serialize(silence)
+
         written = b""
         for _ in range(PUMP):
             written += await serializer.serialize(silence) or b""

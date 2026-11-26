@@ -38,7 +38,6 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesAppendFrame,
     LLMServiceMetadataFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
@@ -63,6 +62,7 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_realtime_llm
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given, is_given
 
 from . import events
@@ -211,6 +211,7 @@ _EXPECTED_ERROR_CODES = {
 }
 
 
+@traced_realtime_llm
 class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
     """Azure Voice Live LLM service for real-time audio and text communication.
 
@@ -671,8 +672,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
             await self._handle_bot_stopped_speaking()
         elif isinstance(frame, SpeechControlParamsFrame):
             self._handle_speech_control_params(frame)
-        elif isinstance(frame, LLMMessagesAppendFrame):
-            await self._handle_messages_append(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             # Continuous session: no fresh context frame per turn, so sync the
             # registered tool handlers to the new tool set here (the base service
@@ -741,10 +740,6 @@ class AzureVoiceLiveLLMService(LLMService[AzureVoiceLiveLLMAdapter]):
                         )
                         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
                         await self._create_response()
-
-    async def _handle_messages_append(self, frame):
-        """Handle a request to append messages to the conversation."""
-        logger.warning(f"{self}: LLMMessagesAppendFrame is not yet supported by Voice Live")
 
     #
     # WebSocket communication

@@ -339,9 +339,15 @@ def generate_service_config(service_value: str) -> str | None:
         return _format_direct(class_name, direct_codes)
 
 
-def generate_all_configs() -> dict[str, str]:
-    """Generate configurations for all services."""
+def generate_all_configs() -> tuple[dict[str, str], list[str]]:
+    """Generate configurations for all services.
+
+    Returns:
+        The configs keyed by service value, and the values of services whose config
+        couldn't be generated (e.g. because the service module failed to import).
+    """
     configs = {}
+    failed = []
 
     all_services = [
         ("STT", ServiceRegistry.STT_SERVICES),
@@ -368,9 +374,10 @@ def generate_all_configs() -> dict[str, str]:
                 configs[service_value] = config
                 print(f"  ✓ {service_value}", file=sys.stderr)
             else:
-                print(f"  ✗ {service_value} (skipped or failed)", file=sys.stderr)
+                failed.append(service_value)
+                print(f"  ✗ {service_value} (failed)", file=sys.stderr)
 
-    return configs
+    return configs, failed
 
 
 def format_config_dict(configs: dict[str, str]) -> str:
@@ -424,7 +431,15 @@ def main():
     print("=" * 80, file=sys.stderr)
 
     # Generate configs
-    configs = generate_all_configs()
+    configs, failed = generate_all_configs()
+    if failed:
+        # Writing the file now would silently drop these services from the CLI.
+        sys.exit(
+            f"\n❌ Could not generate configs for: {', '.join(failed)}\n"
+            "   See the warnings above. A service module that fails to import usually\n"
+            "   means its extra isn't installed: run\n"
+            "   `uv sync --group dev --all-extras --no-extra gstreamer --no-extra local`."
+        )
 
     print(f"\n\n# Generated {len(configs)} service configurations", file=sys.stderr)
 

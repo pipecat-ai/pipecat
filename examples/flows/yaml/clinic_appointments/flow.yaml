@@ -1,0 +1,68 @@
+# The clinic's appointment line as data. Loaded by bot.py and joined to the
+# tools in handlers.py.
+#
+# Booking and cancelling both start by verifying the caller. Those steps are
+# a subflow, written once in verification.yaml and run by two nodes below,
+# each saying where the subflow's `return` leads.
+
+initial_node: greet
+
+flows:
+  verification: !include verification.yaml
+
+nodes:
+  greet:
+    role_message: >
+      You answer the phone for {{ clinic_name }}. Be brief and friendly. This
+      is a voice conversation, so avoid special characters and emojis.
+    task_messages:
+      - role: developer
+        content: >
+          Greet the caller and ask whether they want to book an appointment or
+          cancel one.
+    functions:
+      - name: wants_to_book
+        transition_only: true
+        description: The caller wants to book an appointment.
+        transition_to: verify_to_book
+      - name: wants_to_cancel
+        transition_only: true
+        description: The caller wants to cancel an appointment.
+        transition_to: verify_to_cancel
+
+  # A node with a `flow` runs that subflow: entering it enters the subflow.
+  verify_to_book:
+    flow: verification
+    return_to: book
+
+  verify_to_cancel:
+    flow: verification
+    return_to: cancel
+
+  book:
+    task_messages:
+      - role: developer
+        content: >
+          Thank {{ patient_name }} for verifying. Ask which day they would
+          like to come in, then book it.
+    functions:
+      - name: book_appointment
+        transition_to: end
+
+  cancel:
+    task_messages:
+      - role: developer
+        content: >
+          Thank {{ patient_name }} for verifying. Tell them their appointment
+          on {{ appointment_day }} is the one on file, and cancel it once they
+          confirm.
+    functions:
+      - name: cancel_appointment
+        transition_to: end
+
+  end:
+    task_messages:
+      - role: developer
+        content: Confirm what was done, thank the caller and say goodbye.
+    post_actions:
+      - type: end_conversation

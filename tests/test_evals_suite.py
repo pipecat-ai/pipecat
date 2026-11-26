@@ -653,6 +653,13 @@ class TestManifestSimulations(unittest.TestCase):
         # Attempt-major: every scenario's first attempt precedes any second one.
         self.assertEqual([r.attempt for r in manifest.runs], [1, 1, 1, 2, 3])
 
+    def test_a_rubric_entry_has_no_run(self):
+        (self.base / "scenarios" / "mixed.yaml").write_text(
+            SCRIPT.format(name="mixed") + "  - name: production\n    success: it got done\n"
+        )
+        manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [mixed]\n")
+        self.assertEqual([r.scenario for r in manifest.runs], ["mixed/mixed"])
+
     def test_repeat_overrides_a_simulations_runs(self):
         manifest = self._manifest("suite:\n  - bot: bot.py\n    scenarios: [book]\n", repeat=2)
         self.assertEqual([r.attempt for r in manifest.runs], [1, 2])
@@ -812,6 +819,9 @@ class TestScenarioRecords(unittest.TestCase):
                 )
             ],
             duration_ms=60,
+            bot_metrics=[
+                {"at": 1.2, "data": {"ttfb": [{"processor": "STT#0", "value": 0.31}]}},
+            ],
         )
 
     def test_result_roundtrips_through_the_worker_json(self):
@@ -853,6 +863,24 @@ class TestScenarioRecords(unittest.TestCase):
             )
             self.assertNotIn("events_seen", record)
 
+    def test_results_jsonl_record_keeps_the_bot_metrics_of_a_passed_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="voice/x.py",
+                scenario="greet",
+                scenario_path=base / "greet.yaml",
+                status="done",
+                result=self._result(),
+            )
+            _append_result(base / "results.jsonl", run, "voice_x.py__greet", base, None)
+            record = json.loads((base / "results.jsonl").read_text())
+            self.assertTrue(record["passed"])
+            self.assertEqual(
+                record["bot_metrics"],
+                [{"at": 1.2, "data": {"ttfb": [{"processor": "STT#0", "value": 0.31}]}}],
+            )
+
 
 class TestSimulationRecords(unittest.TestCase):
     def test_result_roundtrips_through_the_worker_json(self):
@@ -888,9 +916,37 @@ class TestSimulationRecords(unittest.TestCase):
             confidence=0.8,
             probabilities={"yes": 0.8, "no": 0.2},
             success="the bot booked a table",
+            bot_metrics=[{"at": 0.5, "data": {"tokens": [{"prompt_tokens": 12}]}}],
         )
         rebuilt = _simulation_result_from_dict(json.loads(json.dumps(dataclasses.asdict(result))))
         self.assertEqual(rebuilt, result)
+
+    def test_a_failed_runs_kind_is_saved_and_read_back(self):
+        result = EvalSimulationResult(
+            simulation_name="book",
+            succeeded=False,
+            reason="server rejected WebSocket connection: HTTP 403",
+            error="server rejected WebSocket connection: HTTP 403",
+            failure_kind="connect_failed",
+        )
+        saved = json.loads(json.dumps(dataclasses.asdict(result)))
+        self.assertEqual(_simulation_result_from_dict(saved).failure_kind, "connect_failed")
+        # A saved result without the field reads back without a kind.
+        del saved["failure_kind"]
+        self.assertIsNone(_simulation_result_from_dict(saved).failure_kind)
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run = EvalRun(
+                bot="flows/x.py",
+                scenario="book",
+                scenario_path=base / "book.yaml",
+                kind=EvalKind.SIMULATION,
+                status="done",
+                result=result,
+            )
+            _append_result(base / "results.jsonl", run, "flows_x.py__book", base, None)
+            record = json.loads((base / "results.jsonl").read_text())
+        self.assertEqual(record["failure_kind"], "connect_failed")
 
     def test_results_jsonl_record_for_a_simulation_run(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -911,6 +967,7 @@ class TestSimulationRecords(unittest.TestCase):
                     turns=3,
                     ended_by="bot",
                     events_seen=[{"type": "llm_started"}],
+                    bot_metrics=[{"at": 0.5, "data": {"tokens": [{"prompt_tokens": 12}]}}],
                     success="the bot booked a table",
                     metrics=[
                         EvalSimulationMetricScore(
@@ -931,6 +988,9 @@ class TestSimulationRecords(unittest.TestCase):
             self.assertEqual(record["reason"], "no table")
             self.assertEqual(record["success"], "the bot booked a table")
             self.assertEqual(record["metrics"][0]["criterion"], "stays polite")
+            self.assertEqual(
+                record["bot_metrics"], [{"at": 0.5, "data": {"tokens": [{"prompt_tokens": 12}]}}]
+            )
             self.assertEqual(record["events_seen"], [{"type": "llm_started"}])
 
 

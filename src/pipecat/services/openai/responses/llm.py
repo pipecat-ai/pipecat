@@ -177,7 +177,7 @@ class OpenAIResponsesLLMSettings(LLMSettings):
 
 
 def _is_o_series(model: str) -> bool:
-    """Whether the model is an o-series reasoning model (o1, o3, o4-mini, ...)."""
+    """Whether the model is an o-series reasoning model (o3, o3-pro, ...)."""
     return bool(re.match(r"o\d", model.lower()))
 
 
@@ -206,12 +206,8 @@ _THINKING_DEFAULTS: dict[str, str] = {
     "gpt-6-sol": "none",
     "gpt-6.1-sol": "low",
     "gpt-6.1-terra": "none",
-    "o1": "low",
-    "o1-pro": "low",
     "o3": "low",
-    "o3-mini": "low",
     "o3-pro": "low",
-    "o4-mini": "low",
 }
 
 

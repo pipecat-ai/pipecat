@@ -32,6 +32,7 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
+from pipecat.utils.context.word_timestamp_tracker import WordTime
 from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.text.phonemes import ipa_phones, normalize_ipa, stress_before_vowels
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
@@ -248,12 +249,27 @@ class CartesiaTTSSettings(TTSSettings):
             accent the voice supports for the requested language.
         generation_config: Generation configuration for Cartesia models. Includes volume,
             speed (numeric), and emotion (string) parameters.
+        normalization: How Cartesia reads numbers, dates and phone numbers in the
+            transcript. ``"auto"`` (Cartesia's default) follows the request's language,
+            and a language or locale code such as ``"en-GB"`` reads them in that
+            convention whatever language is spoken. ``"off"`` skips normalization and
+            is only for text that is already spelled out: digits and symbols left in
+            the text come out garbled or not at all. Word timestamps, and so the LLM
+            context, carry the original text in every mode.
         pronunciation_dict_id: The ID of the pronunciation dictionary to use for
             custom pronunciations.
+
+            Another way to guide pronunciation is to pass
+            :func:`~pipecat.utils.text.transforms.replace_text` find-and-replace rules
+            through the ``text_transforms`` parameter. Pipecat applies them before the
+            text reaches the provider, so the same rules can work across TTS services
+            and depend less on what each provider supports. They're worth trying if this
+            setting isn't giving you the results you want.
     """
 
     accent: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     generation_config: GenerationConfig | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    normalization: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     pronunciation_dict_id: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
@@ -374,6 +390,7 @@ class CartesiaTTSService(WebsocketTTSService):
             accent=None,
             generation_config=None,
             pronunciation_dict_id=None,
+            normalization=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -416,7 +433,9 @@ class CartesiaTTSService(WebsocketTTSService):
         #    to use an LLMTextProcessor and/or a text_transformer to identify
         #    and insert these tags for the purpose of the TTS service alone.
         self._text_aggregator = SkipTagsAggregator(
-            [("<spell>", "</spell>")], aggregation_type=self._text_aggregation_mode
+            [("<spell>", "</spell>")],
+            aggregation_type=self._text_aggregation_mode,
+            language=self._text_aggregator.language,
         )
 
         self._api_key = api_key
@@ -500,17 +519,17 @@ class CartesiaTTSService(WebsocketTTSService):
         """Convenience method to create a speed tag."""
         return f'<speed ratio="{speed}" />'
 
-    def _is_chinese_or_japanese_language(self, language: str) -> bool:
-        """Check if the given language is Chinese or Japanese.
+    def _is_character_timestamp_language(self, language: str) -> bool:
+        """Check if Cartesia timestamps the given language one character at a time.
 
         Args:
             language: The language code to check.
 
         Returns:
-            True if the language is Chinese or Japanese.
+            True for Chinese, Japanese and Thai.
         """
         base_lang = language.split("-")[0].lower()
-        return base_lang in {"zh", "ja"}
+        return base_lang in {"zh", "ja", "th"}
 
     _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
 
@@ -535,32 +554,39 @@ class CartesiaTTSService(WebsocketTTSService):
         return text.strip()
 
     def _normalize_word_timestamps(
-        self, words: list[str], starts: list[float]
-    ) -> list[tuple[str, float]]:
+        self, words: list[str], starts: list[float], ends: list[float] | None = None
+    ) -> list[WordTime]:
         """Normalize raw word timestamps from Cartesia before further processing.
 
         Strips Cartesia SSML tags (spell, emotion, break, volume, speed) from each word
         and drops entries that become empty after stripping. Each entry keeps its own
-        start time, so one entry in is at most one token out, whatever the language.
+        start and end times, so one entry in is at most one token out, whatever the
+        language.
 
         Args:
             words: List of words/characters from Cartesia.
             starts: List of start timestamps for each word/character.
+            ends: List of end timestamps for each word/character, if reported.
 
         Returns:
-            List of (word, start_time) tuples.
+            List of (word, start_time, end_time) tuples, or (word, start_time)
+            tuples without ``ends``.
         """
-        result = []
-        for word, start in zip(words, starts):
+        result: list[WordTime] = []
+        for i, (word, start) in enumerate(zip(words, starts)):
             cleaned = self._strip_cartesia_tags(word)
-            if cleaned:
+            if not cleaned:
+                continue
+            if ends and i < len(ends):
+                result.append((cleaned, start, ends[i]))
+            else:
                 result.append((cleaned, start))
         return result
 
     def _word_timestamps_include_inter_frame_spaces(self) -> bool:
         """Whether timestamp text should be treated as carrying its own spacing."""
         current_language = assert_given(self._settings.language)
-        return bool(current_language and self._is_chinese_or_japanese_language(current_language))
+        return bool(current_language and self._is_character_timestamp_language(current_language))
 
     def _build_msg(
         self,
@@ -605,6 +631,9 @@ class CartesiaTTSService(WebsocketTTSService):
 
         if self._settings.pronunciation_dict_id:
             msg["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
+
+        if assert_given(self._settings.normalization):
+            msg["normalization"] = self._settings.normalization
 
         return json.dumps(msg)
 
@@ -754,17 +783,20 @@ class CartesiaTTSService(WebsocketTTSService):
             elif msg["type"] == "timestamps":
                 # Process the timestamps based on language before adding them
                 processed_timestamps = self._normalize_word_timestamps(
-                    msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
+                    msg["word_timestamps"]["words"],
+                    msg["word_timestamps"]["start"],
+                    msg["word_timestamps"].get("end"),
                 )
-                # Cartesia reports Chinese and Japanese one character at a time, with
-                # each punctuation mark as its own token. Merging attaches the mark to
-                # the character before it ("す", "。" -> "す。").
-                cjk = self._word_timestamps_include_inter_frame_spaces()
+                # Cartesia reports Chinese, Japanese and Thai one character at a time,
+                # with each punctuation mark, and each Thai vowel or tone mark, as its
+                # own token. Merging attaches the mark to the character before it
+                # ("す", "。" -> "す。"; "ด", "ี" -> "ดี").
+                by_character = self._word_timestamps_include_inter_frame_spaces()
                 await self.add_word_timestamps(
                     processed_timestamps,
                     ctx_id,
-                    includes_inter_frame_spaces=True if cjk else None,
-                    pre_merge_tokens=cjk,
+                    includes_inter_frame_spaces=True if by_character else None,
+                    pre_merge_tokens=by_character,
                 )
             elif msg["type"] == "chunk":
                 frame = TTSAudioRawFrame(
@@ -919,6 +951,7 @@ class CartesiaHttpTTSService(TTSService):
             accent=None,
             generation_config=None,
             pronunciation_dict_id=None,
+            normalization=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -1066,6 +1099,9 @@ class CartesiaHttpTTSService(TTSService):
 
             if self._settings.pronunciation_dict_id:
                 payload["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
+
+            if assert_given(self._settings.normalization):
+                payload["normalization"] = self._settings.normalization
 
             headers = {
                 "Cartesia-Version": self._cartesia_version,

@@ -5,13 +5,19 @@
 #
 
 import json
+import os
 import unittest
 from unittest.mock import patch
 
 from google.auth.exceptions import DefaultCredentialsError
+from google.genai import types
 
 import pipecat.services.google.utils
-from pipecat.services.google.utils import _vertex_credentials, update_google_client_http_options
+from pipecat.services.google.utils import (
+    _vertex_credentials,
+    gemini_api_http_options,
+    update_google_client_http_options,
+)
 
 MOCKED_VERSION = "0.0.0-test"
 
@@ -53,6 +59,42 @@ class TestGoogleUtils(unittest.TestCase):
         updated_options = update_google_client_http_options(http_options)
         self.assertEqual(updated_options.headers["Authorization"], "Bearer token")
         self.assertEqual(updated_options.headers["x-goog-api-client"], f"pipecat/{MOCKED_VERSION}")
+
+
+class TestGeminiApiHttpOptions(unittest.TestCase):
+    def setUp(self):
+        env = patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("GOOGLE_GENAI_USE_VERTEXAI", None)
+        os.environ.pop("GOOGLE_GENAI_USE_ENTERPRISE", None)
+
+    def test_none_asks_v1beta(self):
+        self.assertEqual(gemini_api_http_options(None), {"api_version": "v1beta"})
+
+    def test_a_dict_without_a_version_asks_v1beta_and_keeps_the_rest(self):
+        options = gemini_api_http_options({"headers": {"x": "1"}})
+        self.assertEqual(options, {"headers": {"x": "1"}, "api_version": "v1beta"})
+
+    def test_a_dict_with_a_version_keeps_it(self):
+        self.assertEqual(gemini_api_http_options({"api_version": "v1"}), {"api_version": "v1"})
+
+    def test_http_options_without_a_version_ask_v1beta(self):
+        options = gemini_api_http_options(types.HttpOptions(timeout=1000))
+        self.assertEqual((options.api_version, options.timeout), ("v1beta", 1000))
+
+    def test_http_options_with_a_version_keep_it(self):
+        options = gemini_api_http_options(types.HttpOptions(api_version="v1alpha"))
+        self.assertEqual(options.api_version, "v1alpha")
+
+    def test_vertex_env_keeps_the_options_as_given(self):
+        os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
+        self.assertEqual(gemini_api_http_options({"timeout": 5}), {"timeout": 5})
+
+    def test_enterprise_env_takes_precedence(self):
+        os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
+        os.environ["GOOGLE_GENAI_USE_ENTERPRISE"] = "false"
+        self.assertEqual(gemini_api_http_options(None), {"api_version": "v1beta"})
 
 
 class TestVertexCredentials(unittest.TestCase):

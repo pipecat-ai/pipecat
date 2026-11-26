@@ -187,44 +187,83 @@ class _CountingTTS:
         yield TTSAudioRawFrame(audio=self.pcm, sample_rate=self.sample_rate, num_channels=1)
 
 
-async def _run_tts_pcm(tts: CachingTTSService, text: str) -> bytes:
-    """Drive ``run_tts`` and return the concatenated audio it yields."""
+async def _run_tts_audio(tts: CachingTTSService, text: str) -> tuple[bytes, set[int]]:
+    """Drive ``run_tts`` and return the audio it yields and the rates it's at."""
     from pipecat.frames.frames import TTSAudioRawFrame
 
-    pcm = b""
+    pcm, rates = b"", set()
     async for frame in tts.run_tts(text, "ctx"):
         if isinstance(frame, TTSAudioRawFrame):
             pcm += frame.audio
-    return pcm
+            rates.add(frame.sample_rate)
+    return pcm, rates
+
+
+def _tone(rate: int, samples: int) -> bytes:
+    import numpy as np
+
+    t = np.arange(samples) / rate
+    return (np.sin(2 * np.pi * 220 * t) * 8000).astype(np.int16).tobytes()
 
 
 class TestCachingTTSCache(unittest.IsolatedAsyncioTestCase):
-    async def test_cache_round_trip_and_sr_mismatch(self):
+    async def test_cache_round_trip_at_the_cache_rate(self):
         import tempfile
 
-        pcm = b"\x01\x02" * 1600  # 100ms of 16kHz mono
+        from pipecat.evals.tts import CACHE_SAMPLE_RATE, _read_wav, _write_wav
+
+        pcm = _tone(CACHE_SAMPLE_RATE, 2400)
 
         with tempfile.TemporaryDirectory() as tmp:
-            inner = _CountingTTS(pcm, 16000)
+            inner = _CountingTTS(pcm, CACHE_SAMPLE_RATE)
             tts = CachingTTSService(inner, cache_key="k", cache_dir=tmp)
             tts._sample_rate = 16000  # set by start(); skip the FrameProcessor lifecycle
 
-            out = await _run_tts_pcm(tts, "hello")
-            self.assertEqual(out, pcm)
-            self.assertEqual(inner.calls, 1)
+            self.assertEqual(await _run_tts_audio(tts, "hello"), (pcm, {CACHE_SAMPLE_RATE}))
+            self.assertEqual(_read_wav(tts._cache_file("hello")), (pcm, CACHE_SAMPLE_RATE))
 
             # Second call hits the WAV cache; the inner service is not called again.
-            out2 = await _run_tts_pcm(tts, "hello")
-            self.assertEqual(out2, pcm)
+            self.assertEqual(await _run_tts_audio(tts, "hello"), (pcm, {CACHE_SAMPLE_RATE}))
             self.assertEqual(inner.calls, 1)
 
-            # A different requested sample rate misses the cached file's rate and
-            # regenerates (the cache slot is shared across rates by design).
-            inner24 = _CountingTTS(pcm, 24000)
-            tts24 = CachingTTSService(inner24, cache_key="k", cache_dir=tmp)
-            tts24._sample_rate = 24000
-            await _run_tts_pcm(tts24, "hello")
-            self.assertEqual(inner24.calls, 1)
+            # Another pipeline rate reuses the cached utterance; it's resampled as it plays.
+            inner8 = _CountingTTS(pcm, CACHE_SAMPLE_RATE)
+            tts8 = CachingTTSService(inner8, cache_key="k", cache_dir=tmp)
+            tts8._sample_rate = 8000
+            self.assertEqual(await _run_tts_audio(tts8, "hello"), (pcm, {CACHE_SAMPLE_RATE}))
+            self.assertEqual(inner8.calls, 0)
+
+            # A file at another rate is regenerated at the cache's rate.
+            _write_wav(tts._cache_file("hello"), _tone(16000, 1600), 16000)
+            self.assertEqual(await _run_tts_audio(tts, "hello"), (pcm, {CACHE_SAMPLE_RATE}))
+            self.assertEqual(inner.calls, 2)
+            self.assertEqual(_read_wav(tts._cache_file("hello")), (pcm, CACHE_SAMPLE_RATE))
+
+    async def test_audio_at_another_inner_rate_is_cached_at_the_cache_rate(self):
+        import tempfile
+
+        from pipecat.audio.utils import create_file_resampler
+        from pipecat.evals.tts import CACHE_SAMPLE_RATE, _read_wav
+
+        resampler = create_file_resampler()
+        tone = _tone(22050, 2205)
+        cached = await resampler.resample(tone, 22050, CACHE_SAMPLE_RATE)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            inner = _CountingTTS(tone, 22050)
+            tts = CachingTTSService(inner, cache_key="k", cache_dir=tmp)
+            tts._sample_rate = 16000  # set by start(); skip the FrameProcessor lifecycle
+
+            self.assertEqual(
+                await tts.synthesize("hello"), await resampler.resample(tone, 22050, 16000)
+            )
+            self.assertEqual(_read_wav(tts._cache_file("hello")), (cached, CACHE_SAMPLE_RATE))
+            # synthesize() returns the cached utterance at this service's rate too.
+            self.assertEqual(
+                await tts.synthesize("hello"),
+                await resampler.resample(cached, CACHE_SAMPLE_RATE, 16000),
+            )
+            self.assertEqual(inner.calls, 1)
 
 
 def _fake_classifier(config):

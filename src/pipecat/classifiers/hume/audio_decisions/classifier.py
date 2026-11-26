@@ -47,8 +47,9 @@ HUME_MAX_CONTEXT = 1000
 class HumeAudioClassifier(BaseClassifier):
     """Answers questions about a clip of audio by asking Hume's Audio Decisions API.
 
-    Hume hears the clip, 5 seconds to 5 minutes of it, and reads the state as
-    the clip's ``context``, such as who is speaking and what they said. Every
+    Hume hears the clip, 1 second to 5 minutes of it, and answers most
+    questions best with 5 seconds or more. It reads the state as the clip's
+    ``context``, such as who is speaking and what they said. Every
     call needs exactly one clip in its ``inputs``: any other number is
     refused with a :class:`~pipecat.classifiers.base_classifier.ClassifierError`. A
     state longer than Hume reads keeps its last 1000 characters. Its
@@ -106,13 +107,18 @@ class HumeAudioClassifier(BaseClassifier):
 
     @property
     def min_audio_secs(self) -> float:
-        """Hume hears at least 5 seconds of audio."""
-        return 5.0
+        """Hume hears at least 1 second of audio."""
+        return 1.0
 
     @property
     def max_audio_secs(self) -> float:
         """Hume hears at most 5 minutes of audio."""
         return 300.0
+
+    @property
+    def preferred_audio_secs(self) -> float:
+        """Hume answers most questions best with at least 5 seconds of audio."""
+        return 5.0
 
     @property
     def audio_sample_rate(self) -> int:

@@ -16,8 +16,10 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     InterruptionFrame,
+    SpeechOutputAudioRawFrame,
     StartFrame,
     TextType,
+    TTSAudioRawFrame,
     TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -87,6 +89,20 @@ async def test_an_interruption_drops_the_emotion_of_words_not_yet_heard():
     await asyncio.sleep(0.3)
 
     client.update_emotion.assert_not_awaited()
+    await service._cancel_emotion_task()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frame_type", [TTSAudioRawFrame, SpeechOutputAudioRawFrame])
+async def test_the_bot_voice_goes_to_the_replica_instead_of_downstream(frame_type):
+    service, client = await _make_service()
+    client.queue_tts_frame = AsyncMock(return_value=True)
+    frame = frame_type(audio=b"\x00\x01" * 160, sample_rate=16000, num_channels=1)
+
+    await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+    client.queue_tts_frame.assert_awaited_once_with(frame)
+    service.push_frame.assert_not_awaited()
     await service._cancel_emotion_task()
 
 

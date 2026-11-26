@@ -183,9 +183,9 @@ suite:
       data: {kwargs: {api_key: $FIREWORKS_API_KEY}, model: accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b, service: pipecat.services.fireworks.llm.FireworksLLMService}
     scenarios: *all
   - bot: bot.py
-    name: inception/mercury-2
+    name: inception/mercury-3
     runner_body:
-      data: {kwargs: {api_key: $INCEPTION_API_KEY}, model: mercury-2, service: pipecat.services.inception.llm.InceptionLLMService}
+      data: {kwargs: {api_key: $INCEPTION_API_KEY}, model: mercury-3, service: pipecat.services.inception.llm.InceptionLLMService}
     scenarios: *all
   - bot: bot.py
     name: mistral/mistral-small-latest
