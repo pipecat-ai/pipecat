@@ -229,10 +229,10 @@ suite:
       data: {developer_role: false, kwargs: {api_key: $NOVITA_API_KEY}, model: qwen/qwen3.8-flash, service: pipecat.services.novita.llm.NovitaLLMService, tools: false}
     scenarios: *no_tools
   - bot: bot.py
-    name: nvidia/nvidia/nemotron-3-super-120b-a12b
+    name: nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b
     concurrency: 2
     runner_body:
-      data: {kwargs: {api_key: $NVIDIA_API_KEY}, model: nvidia/nemotron-3-super-120b-a12b, service: pipecat.services.nvidia.llm.NvidiaLLMService, system_suffix: /no_think}
+      data: {kwargs: {api_key: $NVIDIA_API_KEY}, model: nvidia/nemotron-3.5-super-vl-120b-a12b, service: pipecat.services.nvidia.llm.NvidiaLLMService, system_suffix: /no_think}
     scenarios: *all
   - bot: bot.py
     name: nvidia/nvidia/nemotron-3.5-lightning-30b-a3b
