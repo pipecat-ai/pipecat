@@ -11,10 +11,13 @@ import re
 from num2words import num2words
 
 from pipecat.frames.frames import TextType
+from pipecat.utils.text.transforms._minus import minus_before, say_minus
 from pipecat.utils.text.transforms.text_transform import TextTransform
 
 # Matches integers and decimals, with optional thousand separators.
 _NUMBER_RE = re.compile(r"\b(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\b")
+
+_NEGATIVE_NUMBER_RE = minus_before(r"\d")
 
 
 def expand_numbers(
@@ -66,6 +69,7 @@ def expand_numbers(
         return num2words(whole, lang="en")
 
     async def _transform(text: str, text_type: str | TextType) -> str:
+        text = say_minus(_NEGATIVE_NUMBER_RE, text)
         return _NUMBER_RE.sub(_num_to_words, text)
 
     return _transform
