@@ -228,15 +228,6 @@ SERVICE_CONFIGS = {
         "        ),\n"
         "    )\n"
     ),
-    "inception_llm": (
-        "InceptionLLMService(\n"
-        '        api_key=os.getenv("INCEPTION_API_KEY"),\n'
-        "        settings=InceptionLLMService.Settings(\n"
-        '            model=os.getenv("INCEPTION_MODEL"),\n'
-        '            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can\'t be spoken. Respond to what the user said in a creative, helpful, and brief way.",\n'
-        "        ),\n"
-        "    )\n"
-    ),
     "mistral_llm": (
         "MistralLLMService(\n"
         '        api_key=os.getenv("MISTRAL_API_KEY"),\n'
@@ -652,15 +643,6 @@ SERVICE_CONFIGS = {
         '        api_key=os.getenv("XAI_API_KEY"),\n'
         "        settings=XAITTSService.Settings(\n"
         '            voice=os.getenv("XAI_VOICE_ID"),\n'
-        "        ),\n"
-        "    )\n"
-    ),
-    "xtts_tts": (
-        "XTTSService(\n"
-        '        base_url=os.getenv("XTTS_BASE_URL"),\n'
-        "        aiohttp_session=session,\n"
-        "        settings=XTTSService.Settings(\n"
-        '            voice=os.getenv("XTTS_VOICE_ID"),\n'
         "        ),\n"
         "    )\n"
     ),

@@ -109,7 +109,6 @@ IMPORTS = {
     "google_vertex_llm": ["from pipecat.services.google.vertex.llm import GoogleVertexLLMService"],
     "xai_llm": ["from pipecat.services.xai.llm import GrokLLMService"],
     "groq_llm": ["from pipecat.services.groq.llm import GroqLLMService"],
-    "inception_llm": ["from pipecat.services.inception.llm import InceptionLLMService"],
     "mistral_llm": ["from pipecat.services.mistral.llm import MistralLLMService"],
     "novita_llm": ["from pipecat.services.novita.llm import NovitaLLMService"],
     "nvidia_llm": ["from pipecat.services.nvidia.llm import NvidiaLLMService"],
@@ -171,7 +170,6 @@ IMPORTS = {
     "soniox_tts": ["from pipecat.services.soniox.tts import SonioxTTSService"],
     "speechify_tts": ["from pipecat.services.speechify.tts import SpeechifyHttpTTSService"],
     "xai_tts": ["from pipecat.services.xai.tts import XAITTSService"],
-    "xtts_tts": ["from pipecat.services.xtts.tts import XTTSService"],
     "zoom_ai_tts": ["from pipecat.services.zoom_ai.tts import ZoomAIHttpTTSService"],
     # Realtime Services
     "aws_nova_realtime": ["from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService"],

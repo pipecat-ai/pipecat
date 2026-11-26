@@ -652,15 +652,6 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
-            value="inception_llm",
-            label="Inception",
-            package="pipecat-ai[inception]",
-            class_name=["InceptionLLMService"],
-            env_prefix="INCEPTION",
-            include_params=["api_key"],
-            settings_params=["model", "system_instruction"],
-        ),
-        ServiceDefinition(
             value="mistral_llm",
             label="Mistral",
             package="pipecat-ai[mistral]",
@@ -1117,15 +1108,6 @@ class ServiceRegistry:
             class_name=["XAITTSService"],
             env_prefix="XAI",
             include_params=["api_key"],
-            settings_params=["voice"],
-        ),
-        ServiceDefinition(
-            value="xtts_tts",
-            label="XTTS (Coqui)",
-            package="pipecat-ai[xtts]",
-            class_name=["XTTSService"],
-            env_prefix="XTTS",
-            include_params=["base_url"],
             settings_params=["voice"],
         ),
         ServiceDefinition(
