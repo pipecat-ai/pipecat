@@ -396,8 +396,13 @@ class LLMContextSummarizationUtil:
 
         A tool message is considered pending (unresolved) when its content is
         the synchronous ``"IN_PROGRESS"`` sentinel or the async
-        ``{"type": "async_tool", "status": "started"}`` marker — both indicate
-        that the actual result has not yet been written back to the context.
+        ``{"type": "async_tool", "status": "running"}`` placeholder — both
+        indicate that the actual result has not yet been written back to the
+        context.
+
+        The placeholder the aggregator writes for an async call that has started
+        carries ``status="running"`` (see ``async_tool_messages``); ``"started"``
+        is the payload's ``kind`` and is not part of the on-the-wire JSON.
 
         Args:
             content: The ``content`` field of a tool-role context message.
@@ -412,7 +417,7 @@ class LLMContextSummarizationUtil:
             if (
                 isinstance(parsed, dict)
                 and parsed.get("type") == "async_tool"
-                and parsed.get("status") == "started"
+                and parsed.get("status") == "running"
             ):
                 return True
         except (json.JSONDecodeError, ValueError):

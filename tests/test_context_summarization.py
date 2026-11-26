@@ -11,6 +11,10 @@ import unittest
 from unittest.mock import AsyncMock
 
 from pipecat.frames.frames import LLMContextSummaryRequestFrame
+from pipecat.processors.aggregators.async_tool_messages import (
+    build_final_result_message,
+    build_started_message,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.context.llm_context_summarization import (
@@ -1248,6 +1252,59 @@ class TestLLMSpecificMessageHandling(unittest.TestCase):
             messages, 0, len(messages)
         )
         self.assertEqual(result, -1)
+
+
+class TestAsyncToolInProgressDetection(unittest.TestCase):
+    """An async tool call that is still running is not summarized.
+
+    The started placeholder the aggregator writes is ``"status": "running"``,
+    and only the final ``developer`` message settles the call.
+    """
+
+    def _context(self, placeholder):
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message({"role": "user", "content": "Research the topic"})  # idx 1
+        context.add_message(  # idx 2
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "research", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        context.add_message(placeholder)  # idx 3
+        context.add_message({"role": "assistant", "content": "I'm looking into it."})  # idx 4
+        context.add_message({"role": "user", "content": "What's the weather?"})  # idx 5
+        context.add_message({"role": "assistant", "content": "It's sunny."})  # idx 6
+        return context
+
+    def test_running_async_call_is_not_summarized(self):
+        """The started placeholder keeps the call, and its request, out of the summary."""
+        context = self._context(build_started_message("call_1"))
+
+        # Keep 1: summary_end=6. The call at idx 2 is still running, so the
+        # boundary moves back to idx 1 instead of stopping at idx 5.
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
+
+        self.assertEqual(result.last_summarized_index, 1)
+
+    def test_finished_async_call_is_summarized(self):
+        """Once the result has arrived the call is settled and can be summarized."""
+        context = self._context(build_started_message("call_1"))
+        context.add_message(build_final_result_message("call_1", "the result"))  # idx 7
+        context.add_message({"role": "user", "content": "Any news?"})  # idx 8 (kept)
+
+        # Keep 1: summary_end=8, so the final message at idx 7 is inside the
+        # scanned range and settles the call.
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
+
+        self.assertEqual(result.last_summarized_index, 7)
 
 
 if __name__ == "__main__":
