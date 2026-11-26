@@ -29,7 +29,9 @@ class StripMarkdown:
     the URL is not read out, unless ``strip_urls`` is off.
 
     An asterisk that is content stays: one between digits (``2*3``), one escaped
-    as ``\*``, or one standing alone between spaces (``Press * then #``).
+    as ``\*``, or one standing alone between spaces (``Press * then #``). Any
+    backslash-escaped character (``\_``, ``\#``, ``\[``) is likewise kept as text,
+    without its backslash.
 
     Outside of fenced code, struck-through text and link URLs, this transformer
     is alphanumeric-preserving: the normalized alnum sequence of the output is
@@ -78,6 +80,9 @@ class StripMarkdown:
         # Match whole runs of one or two backticks, with an equally long closer.
         # A different-length run inside the span is literal code content.
         text = re.sub(r"(?<!`)(`{1,2})(?!`)(.+?)(?<!`)\1(?!`)", _hold, text, flags=re.DOTALL)
+        # Backslash escapes (\_, \#, \[): the character is text, not markup, so hold
+        # it aside like code and drop the backslash
+        text = re.sub(r"(\\)([!-/:-@\[-`{-~])", _hold, text)
         # Images and links, keeping the alt text or label. The label may hold one
         # level of brackets and the URL one of parentheses (``wiki/Python_(language)``);
         # a URL with an unbalanced parenthesis ends at the first ``)``.
@@ -94,8 +99,8 @@ class StripMarkdown:
         text = re.sub(r"^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$\n?", "", text, flags=re.MULTILINE)
         # List bullets (-, +, *) at any indent, since nested items are indented
         text = re.sub(r"^([ \t]*)[-+*][ \t]+(?=\S)", r"\1", text, flags=re.MULTILINE)
-        # Content asterisks: escaped (\*) or between digits (2*3, 2**3)
-        text = re.sub(r"\\\*|(?<=\d)\*+(?=\d)", lambda m: _STAR * m.group(0).count("*"), text)
+        # Content asterisks between digits (2*3, 2**3)
+        text = re.sub(r"(?<=\d)\*+(?=\d)", lambda m: _STAR * len(m[0]), text)
         # Bold+italic ***text*** or ___text___
         text = re.sub(r"\*{3}(.+?)\*{3}", r"\1", text)
         text = re.sub(r"_{3}(.+?)_{3}", r"\1", text)
