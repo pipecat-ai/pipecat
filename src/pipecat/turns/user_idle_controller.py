@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     Frame,
     FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
     LLMMarkerResponseFrame,
@@ -113,8 +114,11 @@ class UserIdleController(BaseObject):
         self._user_turn_in_progress: bool = False
         # The function calls seen starting and not yet finished, by tool call id.
         self._function_calls_in_progress: set[str] = set()
+        # The pending calls explicitly marked asynchronous by FunctionCallInProgressFrame.
+        self._async_function_calls: set[str] = set()
         self._background_work: set[str] = set()
         self._timer_task: asyncio.Task | None = None
+        self._waiting_timer_deadline: float | None = None
         # When the conversation last went quiet, while it is.
         self._quiet_since: float | None = None
 
@@ -185,7 +189,11 @@ class UserIdleController(BaseObject):
                 if self._background_work:
                     await self._cancel_timer()
             elif self._quiet and self._background_work:
-                await self._start_waiting_timer()
+                if self._function_calls_in_progress <= self._async_function_calls:
+                    await self._start_waiting_timer()
+                else:
+                    self._waiting_timer_deadline = time.monotonic() + self._user_waiting_timeout
+                    await self._cancel_timer(preserve_waiting_deadline=True)
             return
 
         if isinstance(frame, BotStoppedSpeakingFrame):
@@ -223,9 +231,18 @@ class UserIdleController(BaseObject):
             self._function_calls_in_progress.update(
                 function_call.tool_call_id for function_call in frame.function_calls
             )
-            # A new call ends user idle, but does not end an existing wait.
-            if not self._background_work:
-                await self._cancel_timer()
+            # Wait until each new call is classified before timing a wait.
+            await self._cancel_timer(preserve_waiting_deadline=bool(self._background_work))
+        elif isinstance(frame, FunctionCallInProgressFrame):
+            if frame.tool_call_id not in self._function_calls_in_progress:
+                return
+            if frame.cancel_on_interruption:
+                self._async_function_calls.discard(frame.tool_call_id)
+            else:
+                self._async_function_calls.add(frame.tool_call_id)
+                # The background-work system frame can be handled before
+                # this control frame, even when it was sent after it.
+                await self._resume_waiting_timer()
         elif isinstance(frame, FunctionCallResultFrame):
             # An async tool can report progress with intermediate results
             # while it keeps running; only its final result settles the call.
@@ -237,14 +254,13 @@ class UserIdleController(BaseObject):
         elif isinstance(frame, BackgroundWorkStartedFrame):
             first = not self._background_work
             self._background_work.add(frame.work_id)
-            # Background work starting in a quiet conversation: the user is
-            # waiting from now on, so an idle timer running at this point is
-            # replaced.
             if first and self._quiet:
                 await self._cancel_timer()
-                await self._start_waiting_timer()
+            await self._resume_waiting_timer()
         elif isinstance(frame, BackgroundWorkFinishedFrame):
             self._background_work.discard(frame.work_id)
+            if not self._background_work:
+                self._waiting_timer_deadline = None
             if not self._background_work and self._quiet:
                 # Nothing left to wait on: the user is idle from here.
                 if not self._function_calls_in_progress:
@@ -288,9 +304,8 @@ class UserIdleController(BaseObject):
 
         The call's start cancels an idle timer. A reply that speaks first and
         calls the function after, and then says nothing on its result, leaves
-        the conversation quiet with the background work still in flight, so
-        the last call settling starts the waiting timer over; the bot speaking
-        on the result restarts it as usual.
+        the conversation quiet with background work still in flight. Resume
+        the waiting timer if no pending call needs to hold it.
 
         A call the controller did not see start settles nothing: a built-in
         tool whose calls are not announced still reports a result, and a bus
@@ -299,8 +314,18 @@ class UserIdleController(BaseObject):
         if tool_call_id not in self._function_calls_in_progress:
             return
         self._function_calls_in_progress.remove(tool_call_id)
-        if not self._function_calls_in_progress and self._background_work and self._quiet:
-            await self._start_waiting_timer()
+        self._async_function_calls.discard(tool_call_id)
+        await self._resume_waiting_timer()
+
+    async def _resume_waiting_timer(self):
+        """If quiet, resume waiting when every pending call is known to be async."""
+        if (
+            self._timer_task is None
+            and self._background_work
+            and self._function_calls_in_progress <= self._async_function_calls
+            and self._quiet
+        ):
+            await self._start_waiting_timer(preserve_deadline=True)
 
     @property
     def _quiet(self) -> bool:
@@ -310,17 +335,22 @@ class UserIdleController(BaseObject):
     async def _start_timer(self):
         """Start the timer for the kind of silence this is.
 
-        The waiting timer when background work is in progress; the idle timer
-        otherwise, unless a function call is pending, whose result will run
-        the bot.
+        The waiting timer runs when background work is in progress and every
+        pending call is known to be asynchronous. Otherwise, pending calls hold
+        the timer until their result runs the bot; without background work or
+        pending calls, the idle timer runs.
         A timer of the other kind that is still running is cancelled either
         way, since it was timing a silence that is over.
         """
-        await self._cancel_timer()
         if self._background_work:
-            await self._start_waiting_timer()
-        elif not self._function_calls_in_progress:
-            await self._start_idle_timer()
+            if self._function_calls_in_progress <= self._async_function_calls:
+                await self._start_waiting_timer()
+            else:
+                await self._cancel_timer(preserve_waiting_deadline=True)
+        else:
+            await self._cancel_timer()
+            if not self._function_calls_in_progress:
+                await self._start_idle_timer()
 
     async def _start_idle_timer(self):
         """Start (or restart) the idle timer."""
@@ -331,23 +361,35 @@ class UserIdleController(BaseObject):
             self._timer_expired(self._user_idle_timeout, "on_user_turn_idle")
         )
 
-    async def _start_waiting_timer(self):
-        """Start (or restart) the waiting timer."""
+    async def _start_waiting_timer(self, *, preserve_deadline: bool = False):
+        """Start the waiting timer, optionally resuming its existing deadline."""
         if self._user_waiting_timeout <= 0:
             return
-        await self._cancel_timer()
+        deadline = self._waiting_timer_deadline if preserve_deadline else None
+        await self._cancel_timer(preserve_waiting_deadline=preserve_deadline)
+        if deadline is None:
+            deadline = time.monotonic() + self._user_waiting_timeout
+        self._waiting_timer_deadline = deadline
         self._timer_task = self.create_task(
-            self._timer_expired(self._user_waiting_timeout, "on_user_waiting")
+            self._timer_expired(max(0, deadline - time.monotonic()), "on_user_waiting")
         )
 
-    async def _cancel_timer(self):
+    async def _cancel_timer(self, *, preserve_waiting_deadline: bool = False):
         """Cancel whichever timer is running."""
-        if self._timer_task:
-            await self.cancel_task(self._timer_task)
-            self._timer_task = None
+        task = self._timer_task
+        if task:
+            await self.cancel_task(task)
+            if self._timer_task is task:
+                self._timer_task = None
+        if not preserve_waiting_deadline:
+            self._waiting_timer_deadline = None
 
     async def _timer_expired(self, timeout: float, event: str):
         """Sleep for the timeout duration then fire the event."""
         await asyncio.sleep(timeout)
+        if self._timer_task is not asyncio.current_task():
+            return
         self._timer_task = None
+        if event == "on_user_waiting":
+            self._waiting_timer_deadline = None
         await self._call_event_handler(event)
