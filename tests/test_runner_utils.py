@@ -24,6 +24,7 @@ from pipecat.runner.utils import (
     maybe_capture_participant_camera,
     maybe_capture_participant_screen,
     parse_telephony_websocket,
+    smallwebrtc_sdp_munging,
 )
 
 try:
@@ -593,3 +594,18 @@ class TestMaybeCaptureParticipantVideo(unittest.IsolatedAsyncioTestCase):
             await maybe_capture_participant_camera(OtherTransport(), {"id": "User-1234"})
         with self.assertWarns(DeprecationWarning):
             await maybe_capture_participant_screen(OtherTransport(), {"id": "User-1234"})
+
+
+class TestSmallWebRTCSdpMunging(unittest.TestCase):
+    def test_keeps_only_candidates_for_the_exact_host(self):
+        sdp = (
+            "v=0\r\n"
+            "a=candidate:1 1 udp 2130706431 192.168.1.1 50000 typ host\r\n"
+            "a=candidate:2 1 udp 2130706431 192.168.1.10 50001 typ host\r\n"
+            "a=candidate:3 1 udp 2130706431 192.168.131.0 50002 typ host\r\n"
+        )
+        munged = smallwebrtc_sdp_munging(sdp, "192.168.1.1")
+        self.assertEqual(
+            munged,
+            "v=0\r\na=candidate:1 1 udp 2130706431 192.168.1.1 50000 typ host\r\n",
+        )
