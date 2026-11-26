@@ -1,0 +1,1 @@
+- `GladiaSTTService` now converts Burmese (`Language.MY`, `Language.MY_MR`) to `my`, the language code Gladia accepts; `mymr` was rejected with a 400 at session init.
