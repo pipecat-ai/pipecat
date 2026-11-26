@@ -71,7 +71,7 @@ class RTVIMessageSpec:
             field that turns the message on, for a message the server only sends
             when it is set.
         min_client_version: The lowest client protocol version the server sends
-            the message to.
+            the message to once the client has sent ``client-ready``.
         deprecated: What replaces a deprecated message.
         details: More about the message, for a reader who needs it beyond the
             description, as Markdown.
@@ -488,22 +488,26 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
     ),
     _server(
         RTVI.UserAudioLevelMessage,
-        "How loud the user's audio is, from 0 (quiet) to 1 (loud), sent regularly while "
-        "the user's audio comes in.",
+        "How loud the user's audio is, from 0 (quiet) to 1 (loud), as the server's pipeline "
+        "receives it, sent regularly while the user's audio comes in.",
         {"value": 0.3},
         enabled_by="user_audio_level_enabled",
         details=(
-            "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting."
+            "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting. "
+            "The server measures the level, so it isn't the level a client measures on the "
+            "device, such as the one its transport reports for the microphone."
         ),
     ),
     _server(
         RTVI.BotAudioLevelMessage,
-        "How loud the bot's audio is, from 0 (quiet) to 1 (loud), sent regularly while "
-        "the bot speaks.",
+        "How loud the bot's audio is, from 0 (quiet) to 1 (loud), as the server's pipeline "
+        "produces it, sent regularly while the bot speaks.",
         {"value": 0.5},
         enabled_by="bot_audio_level_enabled",
         details=(
-            "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting."
+            "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting. "
+            "The server measures the level, so it isn't the level a client measures on the "
+            "device, such as the one its transport reports for the audio it plays."
         ),
     ),
     # -- Server to client: what the user said --
@@ -663,6 +667,24 @@ MESSAGES: tuple[RTVIMessageSpec, ...] = (
         {"function_name": "get_weather", "tool_call_id": "call_123", "args": {"city": "Lisbon"}},
         deprecated="Use llm-function-call-in-progress instead.",
     ),
+    # -- Server to client: conversation flows --
+    _server(
+        RTVI.FlowNodeEnteredMessage,
+        "The bot's conversation flow entered a node, so a client can follow the "
+        "conversation through the flow.",
+        {
+            "node": "verify.check_birthday",
+            "previous_node": "greet",
+            "function": "wants_to_book",
+            "metadata": {"step": 2},
+            "parent": "verify",
+        },
+        details=(
+            "Sent each time a Pipecat Flows conversation enters a node, including its first "
+            "node and a node it enters again, before the bot responds in that node."
+        ),
+        min_client_version="2.4.0",
+    ),
     # -- Server to client: UI worker --
     _server(
         RTVI.UICommandMessage,
@@ -783,6 +805,11 @@ GROUPS: tuple[RTVIMessageGroup, ...] = (
         ("metrics",),
     ),
     RTVIMessageGroup(
+        "Conversation Flows",
+        "Where the bot is in a conversation flow.",
+        ("flow-node-entered",),
+    ),
+    RTVIMessageGroup(
         "User Interface",
         "The bot observing and driving the client's UI.",
         ("ui-snapshot", "ui-event", "ui-cancel-job-group", "ui-command", "ui-job-group"),
@@ -821,6 +848,14 @@ BEHAVIORS: tuple[RTVIBehaviorSpec, ...] = (
         "server's own for a client of the same major version, and the client's own for a "
         "1.x client.",
         ("client-ready", "bot-ready"),
+    ),
+    RTVIBehaviorSpec(
+        "current-version-before-client-ready",
+        "Until client-ready, the server sends messages as it does to a client of its own "
+        "protocol version, so what the bot does before the client says its version, such "
+        "as a greeting, reaches the client. From client-ready on, the client's version "
+        "decides which messages it gets.",
+        ("client-ready",),
     ),
     RTVIBehaviorSpec(
         "client-ready-version-check",
@@ -997,7 +1032,10 @@ def _notes(spec: RTVIMessageSpec) -> list[str]:
         else:
             notes.append(f"Off by default; turned on by the server's `{spec.enabled_by}` setting.")
     if spec.min_client_version:
-        notes.append(f"Sent only to clients of protocol {spec.min_client_version} or later.")
+        notes.append(
+            f"Sent to clients of protocol {spec.min_client_version} or later, and to any "
+            "client before its client-ready."
+        )
     if spec.deprecated:
         notes.append(f"Deprecated. {spec.deprecated}")
     return notes

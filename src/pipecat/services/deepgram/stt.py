@@ -205,6 +205,10 @@ class BaseDeepgramSTTSettings(STTSettings):
         profanity_filter: Filter profanity from transcripts.
         punctuate: Add punctuation to transcripts.
         redact: Redact sensitive information (str or list of redaction types).
+        redact_usage: Store ``keyterm``, ``keywords``, ``replace``, ``search``
+            and ``extra`` as ``[REDACTED]`` in Deepgram's usage records, plus
+            ``custom_topic`` and ``custom_intent`` on pre-recorded requests.
+            Transcription and the response are unaffected.
         replace: Word replacement rules (str or list).
         search: Search terms to highlight (str or list of str).
         smart_format: Apply smart formatting to transcripts.
@@ -228,6 +232,7 @@ class BaseDeepgramSTTSettings(STTSettings):
     profanity_filter: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     punctuate: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     redact: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact_usage: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     replace: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     search: Any | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     smart_format: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -271,7 +276,8 @@ class BaseDeepgramSTTSettings(STTSettings):
 class DeepgramSTTSettings(BaseDeepgramSTTSettings):
     """Settings for DeepgramSTTService.
 
-    ``language_hint`` requires deepgram-sdk 7.15.0 or later.
+    ``language_hint`` requires deepgram-sdk 7.15.0 or later, and
+    ``redact_usage`` 7.19.0 or later.
 
     Parameters:
         endpointing: Endpointing sensitivity in ms, or ``False`` to disable.
@@ -399,6 +405,7 @@ class DeepgramSTTService(STTService):
             profanity_filter=None,
             punctuate=True,
             redact=None,
+            redact_usage=None,
             replace=None,
             search=None,
             smart_format=False,
@@ -814,11 +821,12 @@ class DeepgramSTTService(STTService):
                     await self._push_transcription_runs(runs, language=language, result=message)
                     await self._handle_transcription(transcript, is_final, language)
                 elif from_finalize:
-                    # Deepgram already sent the transcript via a regular is_final
-                    # before the finalize response arrived (empty). Report STT TTFB
-                    # immediately instead of falling to the timeout.
-                    await self.stop_ttfb_metrics()
-                    await self._cancel_ttfb_timeout()
+                    # Deepgram's own endpointing already sent the transcript in
+                    # a regular is_final, before it was asked to finalize, so
+                    # the confirmation has no text to mark as finalized. Push it
+                    # on its own: that finalizes those transcripts for the
+                    # pipeline and reports the STT TTFB.
+                    await self._push_transcription_finalized()
             elif len(transcript) > 0:
                 # For interim transcriptions, just push the frame without tracing
                 await self.push_frame(
@@ -948,6 +956,7 @@ class DeepgramSegmentedSTTService(SegmentedSTTService):
             profanity_filter=None,
             punctuate=True,
             redact=None,
+            redact_usage=None,
             replace=None,
             search=None,
             smart_format=False,

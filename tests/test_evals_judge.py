@@ -186,6 +186,18 @@ class TestJudgeEvaluate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(verdict.verdict, "no")
         self.assertEqual(set(classifier.asked[0]["questions"]["verdict"].options), {"yes", "no"})
 
+    async def test_one_reply_can_be_judged_yes_or_no_while_the_judge_allows_continue(self):
+        judge, classifier = _judge([{"verdict": _choice("yes")}, {"verdict": _choice("continue")}])
+        judge.add_user_message("Run the tests.")
+        judge.add_assistant_message("Still on it, the tests are running now.")
+        verdict = await judge.evaluate("says it is still working", allow_continue=False)
+        self.assertEqual(verdict.verdict, "yes")
+        self.assertEqual(set(classifier.asked[0]["questions"]["verdict"].options), {"yes", "no"})
+        # The same reply asked the same question with continue allowed is a new question.
+        verdict = await judge.evaluate("says it is still working")
+        self.assertEqual(verdict.verdict, "continue")
+        self.assertEqual(len(classifier.asked), 2)
+
     async def test_a_verdict_is_cached_by_criterion_and_conversation(self):
         judge, classifier = _judge([{"verdict": _choice("yes")}])
         judge.add_assistant_message("It rains.")

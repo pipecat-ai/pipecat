@@ -6,6 +6,7 @@
 
 """RTVI observer for converting pipeline frames to outgoing RTVI messages."""
 
+import copy
 import inspect
 import time
 from collections.abc import Awaitable, Callable, Mapping
@@ -78,6 +79,7 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import (
     RTVIConfigureObserverFrame,
+    RTVIFlowNodeEnteredFrame,
     RTVISendTextFrame,
     RTVIServerMessageFrame,
     RTVIServerResponseFrame,
@@ -305,7 +307,11 @@ class RTVIObserver(BaseObserver):
         """
         super().__init__(**kwargs)
         self._rtvi = rtvi
-        self._params = params or RTVIObserverParams()
+        # A copy: an RTVIConfigureObserverFrame changes this observer's
+        # settings, not those of every session the caller's params serve.
+        # Not a dataclasses.replace(), which would warn about deprecated
+        # fields a second time.
+        self._params = copy.copy(params) if params else RTVIObserverParams()
 
         self._ignored_sources: set[FrameProcessor] = set(self._params.ignored_sources)
 
@@ -359,9 +365,10 @@ class RTVIObserver(BaseObserver):
 
     def _client_is_at_least(self, version: list[int]) -> bool:
         """Return True when the connected client's protocol is ``version`` or later."""
-        if not self._rtvi:
-            # No client has negotiated a version, so assume the current protocol, as
-            # _is_legacy_client does.
+        if not self._rtvi or not self._rtvi.client_ready:
+            # No client has negotiated a version yet, so assume the current
+            # protocol: a bot may speak before client-ready, as when it greets
+            # on connect.
             return True
         return self._rtvi.client_version >= version
 
@@ -777,6 +784,9 @@ class RTVIObserver(BaseObserver):
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVI.ServerMessage(data=frame.data)
             await self.send_rtvi_message(message)
+        elif isinstance(frame, RTVIFlowNodeEnteredFrame):
+            if self._client_is_at_least([2, 4, 0]):
+                await self.send_rtvi_message(RTVI.FlowNodeEnteredMessage(data=frame.data))
         elif isinstance(frame, RTVIUICommandFrame):
             message = RTVI.UICommandMessage(
                 data=RTVI.UICommandData(command=frame.command, payload=frame.payload)

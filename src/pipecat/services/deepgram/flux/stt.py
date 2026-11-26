@@ -266,7 +266,6 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
         self._api_key = api_key
         self._url = url
-        self._websocket_url = None
         self._receive_task = None
 
     # ------------------------------------------------------------------
@@ -305,7 +304,6 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
         # `DeepgramFluxSTTBase._connect` is abstract and doesn't chain on, so
         # call the websocket side directly.
         await WebsocketService._connect(self)
-        self._websocket_url = f"{self._url}?{self._build_query_string()}"
         await self._connect_websocket()
         if not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
@@ -338,11 +336,8 @@ class DeepgramFluxSTTService(DeepgramFluxSTTBase, WebsocketService):
 
             self._connection_established_event.clear()
             self._user_is_speaking = False
-            # `_connect` sets `_websocket_url` before calling us; the assert
-            # narrows for pyright.
-            assert self._websocket_url is not None
             websocket = await self._websocket_connect(
-                self._websocket_url,
+                f"{self._url}?{self._build_query_string()}",
                 additional_headers={"Authorization": f"Token {self._api_key}"},
             )
             self._websocket = websocket

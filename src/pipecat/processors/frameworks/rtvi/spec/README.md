@@ -32,12 +32,25 @@ The document is written from the server's point of view. Its `receiveClientMessa
 - `payload`: the schema of the whole message, as [JSON Schema](https://json-schema.org/): `label`, `type`, `id` when the message carries one, and `data`. Each field of `data` has a description.
 - `examples`: an example message.
 - `x-rtvi-enabled-by`: for a message the server only sends when a setting turns it on, the setting's name. The settings are the fields of Pipecat's `RTVIObserverParams`.
-- `x-rtvi-min-client-version`: the lowest client protocol version the server sends the message to. A client tells the server its version in `client-ready`.
+- `x-rtvi-min-client-version`: the lowest client protocol version the server sends the message to. A client tells the server its version in `client-ready`. From protocol 2.4.0, the server sends messages as it does to a client of its own version until then (the `current-version-before-client-ready` behavior), so before `client-ready` a client can receive messages and output types newer than its version.
 - `x-rtvi-deprecated`: for a deprecated message, what replaces it.
 
 The schema of a client message says what the server accepts, and the schema of a server message what the server sends. The server leaves out each field that has no value, so in a server message a field that can have none is optional and never `null`, and every other field is always there. A deprecated field is marked `deprecated`.
 
 The document's `x-rtvi-behaviors` lists the rules the server follows across messages, beyond the shape of each one: which message answers a request and with which `id`, which version `bot-ready` reports, which messages the settings turn off, and how the server holds the bot's text until the bot speaks it and drops it when the user interrupts. Each behavior has an `id`, a `description`, and the types of the `messages` it involves.
+
+## Writing a client
+
+A client hands each server message to the app as a callback or an event named after the message's type, such as `onBotStartedSpeaking` for `bot-started-speaking`.
+
+The audio level messages are the exception. `user-audio-level` and `bot-audio-level` carry levels the server measures in its pipeline, while a client's transport often measures levels of its own on the device, outside RTVI. A client names each after where it's measured, so an app can tell the two apart:
+
+| Level | Measured by | Callback |
+| --- | --- | --- |
+| The user's audio | the server (`user-audio-level`) | `onServerUserAudioLevel` |
+| The bot's audio | the server (`bot-audio-level`) | `onServerBotAudioLevel` |
+| The user's microphone audio | the client's transport, on the device | `onClientUserAudioLevel` |
+| The bot's audio as the device plays it | the client's transport, on the device | `onClientBotAudioLevel` |
 
 ## Changing the protocol
 

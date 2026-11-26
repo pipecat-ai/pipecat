@@ -564,8 +564,11 @@ class AggregatedFrameSequencer:
             active.includes_inter_frame_spaces if active else False
         )
 
-        frame_text = active.tracker.get_word_for_frame() if (active and active.tracker) else word
-        raw_text = active.tracker.get_llm_consumed() if (active and active.tracker) else None
+        strip = not slot_ifs
+        frame_text = (
+            active.tracker.get_word_for_frame(strip) if (active and active.tracker) else word
+        )
+        raw_text = active.tracker.get_llm_consumed(strip) if (active and active.tracker) else None
         suppress = active.tracker.suppress_in_context() if (active and active.tracker) else False
         emit_context_id = active.context_id if active else context_id
 
@@ -685,8 +688,17 @@ class AggregatedFrameSequencer:
         for slot in self._slots:
             if slot.spoken and not slot.complete and slot.context_id == context_id:
                 if slot.tracker:
-                    remaining_text = slot.tracker.get_remaining_user_facing_text()
-                    raw_remaining = slot.tracker.get_unattributed_llm_text()
+                    # Words that carry their own spacing get no space put before
+                    # them, so the rest of the text brings the one it starts with.
+                    strip = not slot.includes_inter_frame_spaces
+                    remaining_text = slot.tracker.get_remaining_user_facing_text(
+                        strip=strip
+                    ).rstrip()
+                    raw_remaining = slot.tracker.get_unattributed_llm_text(strip=strip)
+                    if raw_remaining is not None:
+                        raw_remaining = raw_remaining.rstrip()
+                    if not remaining_text.strip():
+                        remaining_text = ""
                     # The words left, not the markup the service was sent for its
                     # tags, are what the LLM's text has to hold, read without its
                     # own tags.

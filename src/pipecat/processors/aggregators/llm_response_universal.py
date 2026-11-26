@@ -56,6 +56,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMarkerFrame,
+    LLMMarkerResponseFrame,
     LLMMessagesAppendFrame,
     LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
@@ -72,6 +73,7 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMetadataFrame,
     TextFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     TranslationFrame,
     TTSStartedFrame,
@@ -84,7 +86,9 @@ from pipecat.frames.frames import (
     UserSpeakingFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    UserTurnIdleFrame,
     UserTurnResponseCancelFrame,
+    UserWaitingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -116,7 +120,7 @@ from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
     UserTurnStoppedParams,
 )
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import (
     ExternalUserTurnStrategies,
@@ -160,10 +164,14 @@ class LLMUserAggregatorParams:
         user_mute_strategies: List of user mute strategies.
         user_turn_stop_timeout: Seconds without user activity before an open user
             turn is ended, unless a stop strategy has a decision scheduled.
-        user_idle_timeout: Timeout in seconds for detecting user idle state.
-            The aggregator will emit an `on_user_turn_idle` event when the user
-            has been idle (not speaking) for this duration. Set to 0 to disable
-            idle detection.
+        user_idle_timeout: Seconds of quiet, while no background work is in
+            progress (see `user_waiting_timeout`), before the aggregator emits
+            an `on_user_turn_idle` event: it is the user's turn, and they have
+            said nothing. Set to 0 to disable idle detection.
+        user_waiting_timeout: Seconds of quiet, while background work is in
+            progress (e.g. an asynchronous function call, or a task delegated
+            to an `LLMWithBackend` backend), before the aggregator emits an
+            `on_user_waiting` event. Set to 0 to disable waiting detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
         empty_user_turn: How to respond to a user turn that ends with no
             transcript. By default, the bot answers such a turn when it
@@ -200,6 +208,7 @@ class LLMUserAggregatorParams:
     user_mute_strategies: list[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: float = 0
+    user_waiting_timeout: float = 0
     vad_analyzer: VADAnalyzer | None = None
     empty_user_turn: EmptyUserTurnConfig | None = field(default_factory=EmptyUserTurnConfig)
     filter_incomplete_user_turns: bool = False
@@ -653,7 +662,11 @@ class LLMUserAggregator(LLMContextAggregator):
     - on_user_turn_stopped: Called when the user turn ends
     - on_user_turn_stop_timeout: Called when the stop timeout ends a user turn its
       stop strategies didn't end.
-    - on_user_turn_idle: Called when the user has been idle for the configured timeout
+    - on_user_turn_idle: Called when the user has been idle, with no background
+      work in progress, for the configured timeout. A ``UserTurnIdleFrame`` is
+      broadcast with it.
+    - on_user_waiting: Called when the user has waited quietly on background
+      work for the configured timeout. A ``UserWaitingFrame`` is broadcast with it.
     - on_user_turn_message_added: Called when a user message is written to context.
       In realtime mode (``realtime_service_mode=True``) the write is
       triggered by the assistant response start rather than the
@@ -735,6 +748,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._register_event_handler("on_user_turn_stopped")
         self._register_event_handler("on_user_turn_stop_timeout")
         self._register_event_handler("on_user_turn_idle")
+        self._register_event_handler("on_user_waiting")
         self._register_event_handler("on_user_turn_inference_triggered")
         self._register_event_handler("on_user_turn_message_added")
         self._register_event_handler("on_user_mute_started")
@@ -855,9 +869,11 @@ class LLMUserAggregator(LLMContextAggregator):
         )
 
         self._user_idle_controller = UserIdleController(
-            user_idle_timeout=self._params.user_idle_timeout
+            user_idle_timeout=self._params.user_idle_timeout,
+            user_waiting_timeout=self._params.user_waiting_timeout,
         )
         self._user_idle_controller.add_event_handler("on_user_turn_idle", self._on_user_turn_idle)
+        self._user_idle_controller.add_event_handler("on_user_waiting", self._on_user_waiting)
 
         # VAD controller
         self._vad_controller: VADController | None = None
@@ -937,14 +953,15 @@ class LLMUserAggregator(LLMContextAggregator):
             frame,
             (
                 InterimTranscriptionFrame,
+                TranscriptionFinalizedFrame,
                 TranslationFrame,
                 EagerTranscriptionFrame,
             ),
         ):
-            # Interim transcriptions, translations and eager end-of-turn
-            # transcripts are consumed here and not pushed downstream, same as
-            # final TranscriptionFrame. The turn strategies still see them: the
-            # controller is fed every frame below.
+            # Interim transcriptions, finalization confirmations, translations
+            # and eager end-of-turn transcripts are consumed here and not pushed
+            # downstream, same as final TranscriptionFrame. The turn strategies
+            # still see them: the controller is fed every frame below.
             pass
         elif isinstance(frame, UserBackchannelFrame):
             message = UserBackchannelMessage(
@@ -1391,6 +1408,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 InputAudioRawFrame,
                 InterimTranscriptionFrame,
                 TranscriptionFrame,
+                TranscriptionFinalizedFrame,
                 EagerTranscriptionFrame,
                 UserBackchannelFrame,
             ),
@@ -1694,8 +1712,13 @@ class LLMUserAggregator(LLMContextAggregator):
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")
 
-    async def _on_user_turn_idle(self, controller):
+    async def _on_user_turn_idle(self, controller: UserIdleController):
+        await self.broadcast_frame(UserTurnIdleFrame, quiet_secs=controller.quiet_secs)
         await self._call_event_handler("on_user_turn_idle")
+
+    async def _on_user_waiting(self, controller: UserIdleController):
+        await self.broadcast_frame(UserWaitingFrame, quiet_secs=controller.quiet_secs)
+        await self._call_event_handler("on_user_waiting")
 
     async def _maybe_emit_user_turn_stopped(
         self,
@@ -2037,6 +2060,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_text(frame)
         elif isinstance(frame, LLMMarkerFrame):
             await self._handle_marker_frame(frame)
+        elif isinstance(frame, LLMMarkerResponseFrame):
+            await self._handle_marker_response_frame(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMThoughtStartFrame):
             await self._handle_thought_start(frame)
         elif isinstance(frame, LLMThoughtTextFrame):
@@ -2697,6 +2723,13 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._aggregation.append(
             TextPartForConcatenation(frame.marker, includes_inter_part_spaces=False)
         )
+
+    async def _handle_marker_response_frame(self, frame: LLMMarkerResponseFrame):
+        # A reply dropped as silent records nothing. What the aggregation holds
+        # by now is a turn-completion marker pushed before the silent mark
+        # after it was read.
+        if frame.kind == "silent":
+            self._aggregation = []
 
     async def _handle_thought_start(self, frame: LLMThoughtStartFrame):
         await self._reset_thought_aggregation()

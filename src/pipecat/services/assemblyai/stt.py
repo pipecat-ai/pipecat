@@ -438,7 +438,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         # 1. Initialize default_settings with hardcoded defaults
         default_settings = self.Settings(
-            model="universal-3-6-pro",
+            model="assemblyai-stt-3-7-realtime-agent",
             language=Language.EN,
             formatted_finals=True,
             word_finalization_max_wait_time=None,
@@ -512,7 +512,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 f"AssemblyAI turn detection mode (vad_force_turn_endpoint=False) requires "
                 f"a U3 Pro model for SpeechStarted support. Either set "
                 f"vad_force_turn_endpoint=True for {default_settings.model}, "
-                f"or use model='universal-3-6-pro'."
+                f"or use model='assemblyai-stt-3-7-realtime-agent'."
             )
 
         if not is_u3_pro and default_settings.prompt is not None:

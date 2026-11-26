@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -212,6 +213,11 @@ class ClassifierUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._transcript_finalized = False
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+        elif isinstance(frame, TranscriptionFinalizedFrame):
+            # The words already collected are all of them; the confirmation
+            # came without text of its own.
+            self._transcript_finalized = True
+            await self._maybe_classify()
 
     async def _handle_speech_started(self):
         # The controller clears the stop decisions on speech, so the turn is

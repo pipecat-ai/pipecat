@@ -34,7 +34,7 @@ jobs:
     steps:
       - name: Generate app token
         id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.DOCS_BOT_APP_ID }}
           private-key: ${{ secrets.DOCS_BOT_PRIVATE_KEY }}
@@ -97,7 +97,7 @@ jobs:
           fi
 
       - name: Update documentation
-        uses: anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c # v1.0.268
+        uses: anthropics/claude-code-action@5a856893345e332afa621934082d8c660c26d689 # v1.0.282
         env:
           DOCS_TOKEN: ${{ steps.app-token.outputs.token }}
         with:
@@ -265,7 +265,7 @@ jobs:
         id: review
         if: steps.draft.outputs.changed == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c # v1.0.268
+        uses: anthropics/claude-code-action@5a856893345e332afa621934082d8c660c26d689 # v1.0.282
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}

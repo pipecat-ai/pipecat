@@ -405,9 +405,9 @@ class LLMMarkerFrame(DataFrame):
     writes the marker to the context so the LLM can self-condition on
     prior markers on subsequent turns.
 
-    The primary use today is the ``filter_incomplete_user_turns``
-    protocol, where ``UserTurnCompletionLLMServiceMixin`` emits the
-    turn-completion markers ● / ◐ / ○ on every response. The frame is
+    The primary use today is turn completion, where
+    ``LLMTurnCompletionLLMExtension`` emits the turn-completion markers
+    ● / ◐ / ○ on every response. The frame is
     intentionally generic so other components — STT services with
     built-in turn signals, end-of-turn classifiers, custom annotations,
     etc. — can use the same mechanism to inject sideband signals into
@@ -435,17 +435,22 @@ class LLMMarkerResponseFrame(DataFrame):
 
     Pushed when the response ends, after the :class:`LLMMarkerFrame` and the
     spoken text: the marker it found, what it meant, and the raw text the LLM
-    produced before anything was held back. A diagnostic, for consumers that
-    check how well the LLM follows the marker protocol; it plays no part in the
-    conversation.
+    produced before anything was held back. A reply dropped as a silent mark
+    is reported as soon as the mark is read, broadcast both ways: the user
+    aggregator starts its idle or waiting timer over on it, and the assistant
+    aggregator records nothing for the reply. A diagnostic otherwise, for
+    consumers that check how well the LLM follows the marker protocol; it
+    plays no part in the conversation.
 
     Parameters:
-        raw: The response text as the LLM produced it, markers included.
+        raw: The response text as the LLM produced it, markers included; for
+            a silent reply, its opening up to the mark.
         marker: The marker found, or ``None`` when the response carried none.
         kind: What the marker meant, in the emitter's own vocabulary, for
             consumers that should not depend on the marker text (which is
-            configurable). The turn-completion mixin uses ``"complete"``,
-            ``"short"`` and ``"long"``.
+            configurable). The turn-completion extension uses ``"complete"``,
+            ``"short"`` and ``"long"``; the wait-reassurance extension uses
+            ``"silent"`` for a reply it dropped as its silent mark.
         markers: Every marker the emitter recognizes, so a consumer can find
             them in ``raw`` without knowing the emitter's configuration.
     """
@@ -729,6 +734,33 @@ class EagerTranscriptionFrame(TextFrame):
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, speaker: {self.speaker}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+
+
+@dataclass
+class TranscriptionFinalizedFrame(DataFrame):
+    """Confirmation that the transcription of an utterance is complete.
+
+    An STT service asked to finalize may have delivered the last of the text
+    already, before it could tell that nothing more was coming. Its
+    confirmation then has no text to carry, and this frame is how it reaches
+    the pipeline. It means what ``finalized=True`` means on a
+    :class:`TranscriptionFrame`, for the transcripts pushed before it.
+
+    An utterance is finalized by one or the other, never both: by its last
+    :class:`TranscriptionFrame` when the confirmation arrives with text, and by
+    this frame when it arrives without.
+
+    Parameters:
+        user_id: Identifier of the participant whose audio was transcribed, as
+            on the transcripts this confirms.
+        timestamp: When the confirmation arrived.
+    """
+
+    user_id: str = ""
+    timestamp: str = ""
+
+    def __str__(self):
+        return f"{self.name}(user: {self.user_id}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -1872,6 +1904,35 @@ class ExternalFunctionCallCancelFrame(SystemFrame):
 
 
 @dataclass
+class BackgroundWorkStartedFrame(SystemFrame):
+    """Background work has started: work the bot runs without blocking the conversation.
+
+    Broadcast by the component that starts the work, e.g. ``LLMService`` for
+    an asynchronous function call (``cancel_on_interruption=False``) and
+    ``BackendConnector`` for a task delegated to an ``LLMWithBackend``
+    backend, with a :class:`BackgroundWorkFinishedFrame` carrying the same
+    ``work_id`` once the work is over. Anything else that dispatches such
+    work, like a job sent to another worker, should broadcast the same pair.
+
+    Parameters:
+        work_id: Identifies the work; the finished frame carries the same one.
+    """
+
+    work_id: str
+
+
+@dataclass
+class BackgroundWorkFinishedFrame(SystemFrame):
+    """Background work is over, whether by result, error or cancellation.
+
+    Parameters:
+        work_id: The work that finished, as its started frame named it.
+    """
+
+    work_id: str
+
+
+@dataclass
 class FunctionCallCancelFrame(SystemFrame):
     """Frame signaling that a function call has been cancelled.
 
@@ -2572,7 +2633,10 @@ class PipelineFlushFrame(ControlFrame):
     flush_id: int = field(default_factory=obj_id, compare=False)
 
     def __str__(self):
-        return f"{self.name}(flush_id: {self.flush_id}, returning: {self.returning})"
+        return (
+            f"{self.name}(flush_id: {self.flush_id}, origin: {self.origin}, "
+            f"returning: {self.returning})"
+        )
 
 
 @dataclass
@@ -2934,16 +2998,68 @@ class STTUpdateSettingsFrame(ServiceUpdateSettingsFrame[STTSettings]):
 
 
 @dataclass
+class UserTurnIdleFrame(SystemFrame):
+    """The user has been idle for the idle timeout: it is their turn, and they have said nothing.
+
+    Broadcast by the user aggregator (or a ``UserTurnProcessor``) when its
+    :class:`~pipecat.turns.user_idle_controller.UserIdleController` reports
+    the user idle, together with its ``on_user_turn_idle`` event, so a
+    processor can act on the silence too. The user is idle while no background
+    work is in progress; with background work in progress they are waiting,
+    which a :class:`UserWaitingFrame` reports.
+
+    Parameters:
+        quiet_secs: How long nothing has been said, in seconds.
+    """
+
+    quiet_secs: float
+
+
+@dataclass
+class UserWaitingFrame(SystemFrame):
+    """The user has waited quietly on background work for the waiting timeout.
+
+    Broadcast by the user aggregator (or a ``UserTurnProcessor``) when its
+    :class:`~pipecat.turns.user_idle_controller.UserIdleController` reports
+    the user waiting, together with its ``on_user_waiting`` event. Background
+    work is what a :class:`BackgroundWorkStartedFrame` announced and no
+    :class:`BackgroundWorkFinishedFrame` has ended.
+
+    Parameters:
+        quiet_secs: How long nothing has been said, in seconds.
+    """
+
+    quiet_secs: float
+
+
+@dataclass
 class UserIdleTimeoutUpdateFrame(SystemFrame):
     """Frame for updating the user idle timeout at runtime.
 
     Setting timeout to 0 disables idle detection. Setting a positive value
     enables it. Updates apply immediately: a running idle timer restarts with
-    the new duration, and if the bot is waiting for the user to speak the
-    timer is armed right away.
+    the new duration, and if the bot is waiting for the user to speak, with
+    no background work in progress, the timer is armed right away.
 
     Parameters:
         timeout: The new idle timeout in seconds. 0 disables idle detection.
+    """
+
+    timeout: float
+
+
+@dataclass
+class UserWaitingTimeoutUpdateFrame(SystemFrame):
+    """Frame for updating the user waiting timeout at runtime.
+
+    Setting timeout to 0 disables waiting detection. Setting a positive value
+    enables it. Updates apply immediately: a running waiting timer restarts
+    with the new duration, and if the user is waiting on background work the
+    timer is armed right away.
+
+    Parameters:
+        timeout: The new waiting timeout in seconds. 0 disables waiting
+            detection.
     """
 
     timeout: float

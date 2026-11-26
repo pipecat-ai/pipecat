@@ -1,0 +1,22 @@
+# Verifying a caller, as a subflow. Nodes of flow.yaml run it; it is not a
+# flow to run on its own.
+#
+# A target here names a node of this file, or is `return`, which leaves the
+# subflow for the `return_to` of the node that ran it.
+
+initial_node: ask_birth_date
+
+nodes:
+  ask_birth_date:
+    task_messages:
+      - role: developer
+        content: >
+          Ask the caller for their date of birth so you can find their record,
+          then verify it. If it does not match, apologize and ask again.
+    functions:
+      - name: verify_birth_date
+        transition_to:
+          field: verified
+          cases:
+            true: return
+            false: ask_birth_date

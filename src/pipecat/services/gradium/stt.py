@@ -501,7 +501,9 @@ class GradiumSTTService(WebsocketSTTService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, VADUserStoppedSpeakingFrame) and not self._enable_turn_detection:
-            await self._send_flush()
+            # The "flushed" acknowledgment confirms the transcript is complete.
+            if await self._send_flush():
+                self.request_finalize()
 
     async def _send_flush(self):
         """Send a flush request to process any buffered audio immediately.
@@ -705,6 +707,9 @@ class GradiumSTTService(WebsocketSTTService):
                     self._flush_cooldown = (
                         assert_given(self._settings.post_flush_cooldown_frames) or 0
                     )
+                # An acknowledgment of an earlier flush says nothing about the
+                # audio sent since. The server returns the id as a number.
+                if str(msg.get("flush_id")) == str(self._flush_counter):
                     self.confirm_finalize()
                 await self._handle_flushed()
             elif type_ == "end_of_stream":

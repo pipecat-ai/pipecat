@@ -489,7 +489,7 @@ class SIPConnection(BaseObject):
         auth_user: str | None = None,
         transport: str = "udp",
         registrar: str | None = None,
-        reg_interval: int = 600,
+        reg_interval: int = 240,
         audio_codecs: tuple | None = None,
         dtmf_mode: str = "rtpevent",
         extra_params: tuple | None = None,
@@ -519,7 +519,13 @@ class SIPConnection(BaseObject):
             transport: SIP transport: "udp", "tcp", or "tls".
             registrar: Outbound proxy to register through, when that is
                 not the domain itself.
-            reg_interval: Seconds between registration refreshes. 0
+            reg_interval: Seconds between registration refreshes. The
+                stack refreshes at about 90% of the interval, and over
+                TCP or TLS that refresh is the only traffic on the
+                connection inbound calls arrive on. The default, 240,
+                refreshes every 216 s, inside the idle timeouts of the
+                common cloud NAT gateways (AWS 350 s, Azure 240 s), so
+                the connection is not dropped between calls. 0
                 disables registration entirely (trunk mode): the
                 connection dials directly and never registers. Without
                 a registration binding, dial-in requires the peer or

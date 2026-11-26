@@ -1433,6 +1433,17 @@
       "location": "pipecat/pipeline/worker.py"
     },
     {
+      "subject": "PipelineWorker.flush_pipeline.positional_timeout",
+      "module": "pipecat.pipeline.worker",
+      "kind": "parameter",
+      "deprecated_in": "1.17.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "timeout=",
+      "message": "Use ``timeout=`` instead. Will be removed in 2.0.0.",
+      "location": "pipecat/pipeline/worker.py"
+    },
+    {
       "subject": "PipelineWorker.tool_resources",
       "module": "pipecat.pipeline.worker",
       "kind": "parameter",
@@ -3633,61 +3644,6 @@
       "location": "pipecat/services/groq/tts.py"
     },
     {
-      "subject": "HumeTTSService",
-      "module": "pipecat.services.hume.tts",
-      "kind": "class",
-      "deprecated_in": "1.16.0",
-      "removed_in": "2.0.0",
-      "relation": "none",
-      "replacement": null,
-      "message": "`HumeTTSService` is deprecated since 1.16.0 and will be removed in 2.0.0. No replacement. Hume shuts down its TTS API on November 13, 2026.",
-      "location": "pipecat/services/hume/tts.py"
-    },
-    {
-      "subject": "HumeTTSService.InputParams",
-      "module": "pipecat.services.hume.tts",
-      "kind": "class",
-      "deprecated_in": "0.0.105",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "HumeTTSService.Settings",
-      "message": "`HumeTTSService.InputParams` is deprecated since 0.0.105 and will be removed in 2.0.0. Use `HumeTTSService.Settings` instead.",
-      "location": "pipecat/services/hume/tts.py"
-    },
-    {
-      "subject": "HumeTTSService.params",
-      "module": "pipecat.services.hume.tts",
-      "kind": "parameter",
-      "deprecated_in": "0.0.105",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "settings=HumeTTSService.Settings(...)",
-      "message": "Use ``settings=HumeTTSService.Settings(...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/hume/tts.py"
-    },
-    {
-      "subject": "HumeTTSService.update_setting",
-      "module": "pipecat.services.hume.tts",
-      "kind": "method",
-      "deprecated_in": "0.0.104",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "TTSUpdateSettingsFrame",
-      "message": "`HumeTTSService.update_setting` is deprecated since 0.0.104 and will be removed in 2.0.0. Use `TTSUpdateSettingsFrame` instead.",
-      "location": "pipecat/services/hume/tts.py"
-    },
-    {
-      "subject": "HumeTTSService.voice_id",
-      "module": "pipecat.services.hume.tts",
-      "kind": "parameter",
-      "deprecated_in": "0.0.105",
-      "removed_in": "2.0.0",
-      "relation": "use_existing",
-      "replacement": "settings=HumeTTSService.Settings(voice=...)",
-      "message": "Use ``settings=HumeTTSService.Settings(voice=...)`` instead. Will be removed in 2.0.0.",
-      "location": "pipecat/services/hume/tts.py"
-    },
-    {
       "subject": "InceptionLLMService",
       "module": "pipecat.services.inception.llm",
       "kind": "class",
@@ -5677,6 +5633,17 @@
       "replacement": "ExternalUserTurnStopStrategy",
       "message": "`ExternalUserTurnCompletionStopStrategy` is deprecated since 1.15.0 and will be removed in 2.0.0. Use `ExternalUserTurnStopStrategy` instead.",
       "location": "pipecat/turns/user_stop/external_user_turn_completion_stop_strategy.py"
+    },
+    {
+      "subject": "pipecat.turns.user_turn_completion_mixin",
+      "module": "pipecat.turns.user_turn_completion_mixin",
+      "kind": "module",
+      "deprecated_in": "1.17.0",
+      "removed_in": "2.0.0",
+      "relation": "move",
+      "replacement": "pipecat.turns.user_turn_completion",
+      "message": "Moved to :mod:`pipecat.turns.user_turn_completion`. Will be removed in 2.0.0.",
+      "location": "pipecat/turns/user_turn_completion_mixin.py"
     },
     {
       "subject": "TaskManager.setup",

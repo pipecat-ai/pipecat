@@ -433,7 +433,9 @@ class CartesiaTTSService(WebsocketTTSService):
         #    to use an LLMTextProcessor and/or a text_transformer to identify
         #    and insert these tags for the purpose of the TTS service alone.
         self._text_aggregator = SkipTagsAggregator(
-            [("<spell>", "</spell>")], aggregation_type=self._text_aggregation_mode
+            [("<spell>", "</spell>")],
+            aggregation_type=self._text_aggregation_mode,
+            language=self._text_aggregator.language,
         )
 
         self._api_key = api_key
@@ -517,17 +519,17 @@ class CartesiaTTSService(WebsocketTTSService):
         """Convenience method to create a speed tag."""
         return f'<speed ratio="{speed}" />'
 
-    def _is_chinese_or_japanese_language(self, language: str) -> bool:
-        """Check if the given language is Chinese or Japanese.
+    def _is_character_timestamp_language(self, language: str) -> bool:
+        """Check if Cartesia timestamps the given language one character at a time.
 
         Args:
             language: The language code to check.
 
         Returns:
-            True if the language is Chinese or Japanese.
+            True for Chinese, Japanese and Thai.
         """
         base_lang = language.split("-")[0].lower()
-        return base_lang in {"zh", "ja"}
+        return base_lang in {"zh", "ja", "th"}
 
     _CARTESIA_TAG_RE = re.compile(r"</?(?:spell|emotion|break|volume|speed)\b[^>]*>", re.IGNORECASE)
 
@@ -584,7 +586,7 @@ class CartesiaTTSService(WebsocketTTSService):
     def _word_timestamps_include_inter_frame_spaces(self) -> bool:
         """Whether timestamp text should be treated as carrying its own spacing."""
         current_language = assert_given(self._settings.language)
-        return bool(current_language and self._is_chinese_or_japanese_language(current_language))
+        return bool(current_language and self._is_character_timestamp_language(current_language))
 
     def _build_msg(
         self,
@@ -785,15 +787,16 @@ class CartesiaTTSService(WebsocketTTSService):
                     msg["word_timestamps"]["start"],
                     msg["word_timestamps"].get("end"),
                 )
-                # Cartesia reports Chinese and Japanese one character at a time, with
-                # each punctuation mark as its own token. Merging attaches the mark to
-                # the character before it ("す", "。" -> "す。").
-                cjk = self._word_timestamps_include_inter_frame_spaces()
+                # Cartesia reports Chinese, Japanese and Thai one character at a time,
+                # with each punctuation mark, and each Thai vowel or tone mark, as its
+                # own token. Merging attaches the mark to the character before it
+                # ("す", "。" -> "す。"; "ด", "ี" -> "ดี").
+                by_character = self._word_timestamps_include_inter_frame_spaces()
                 await self.add_word_timestamps(
                     processed_timestamps,
                     ctx_id,
-                    includes_inter_frame_spaces=True if cjk else None,
-                    pre_merge_tokens=cjk,
+                    includes_inter_frame_spaces=True if by_character else None,
+                    pre_merge_tokens=by_character,
                 )
             elif msg["type"] == "chunk":
                 frame = TTSAudioRawFrame(

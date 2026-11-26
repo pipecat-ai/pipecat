@@ -34,11 +34,12 @@ from pipecat.expressive.expression import ExpressionCapabilities
 from pipecat.expressive.instructions import (
     expression_instructions,
     expression_policy_warning,
-    perception_turn_completion_instructions,
 )
 from pipecat.expressive.perception import PerceptionCapabilities
 from pipecat.expressive.policy import ExpressionPolicy
 from pipecat.frames.frames import (
+    BackgroundWorkFinishedFrame,
+    BackgroundWorkStartedFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -61,11 +62,11 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     PerceptionMetadataFrame,
+    ServiceMetadataFrame,
     StartFrame,
     TTSMetadataFrame,
     UserTurnResponseCancelFrame,
 )
-from pipecat.processors.aggregators.async_tool_messages import ASYNC_TOOL_INSTRUCTIONS
 from pipecat.processors.aggregators.llm_context import (
     NOT_GIVEN,
     LLMContext,
@@ -74,16 +75,13 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
+from pipecat.services.async_tool_llm_extension import AsyncToolLLMExtension
+from pipecat.services.base_llm_extension import BaseLLMExtension, LLMExtensionTool
 from pipecat.services.settings import LLMSettings
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.turns.speculation_gate import SpeculationGate
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
-from pipecat.utils.async_tool_cancellation import (
-    ASYNC_TOOL_CANCELLATION_INSTRUCTIONS,
-    CANCEL_TOOL_PREFIX,
-    build_cancel_tool_schema,
-    cancel_tool_name,
-)
+from pipecat.turns.user_stop.llm_turn_completion.llm_extension import LLMTurnCompletionLLMExtension
+from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 from pipecat.utils.context.llm_context_summarization import (
     DEFAULT_SUMMARIZATION_TIMEOUT,
     LLMContextSummarizationUtil,
@@ -302,14 +300,23 @@ class FunctionCallRunnerItem:
 # `TAdapter = BaseLLMAdapter` instead of `Unknown` at type-check time —
 # matching the pre-generic behavior of `get_llm_adapter()`.
 TAdapter = TypeVar("TAdapter", bound=BaseLLMAdapter, default=BaseLLMAdapter)
+TExtension = TypeVar("TExtension", bound=BaseLLMExtension)
 
 
-class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]):
+class LLMService(AIService, Generic[TAdapter]):
     """Base class for all LLM services.
 
     Handles function calling registration and execution with support for both
     parallel and sequential execution modes. Provides event handlers for
     completion timeouts and function call lifecycle events.
+
+    LLM extensions (:class:`~pipecat.services.base_llm_extension.BaseLLMExtension`)
+    are pluggable features or behaviors of the service. An application
+    attaches its own with ``extensions=``, a component that has the service
+    in hand with :meth:`add_extension`, and a settings update with
+    ``extensions`` in its delta. Each can add to the system instruction,
+    watch the frames the service processes, filter what the service pushes,
+    and push frames of its own.
 
     The service supports the following event handlers:
 
@@ -452,10 +459,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # See `_OutputGate`.
         self._output_gate: _OutputGate | None = None
         self._warn_turn_completion_settings_are_strategy_owned()
-        # The per-tool cancel tools currently advertised, by name.
-        self._cancel_tool_names: set[str] = set()
-        # Cancel-tool names that collide with a user's own tool, warned about once.
-        self._warned_cancel_collisions: set[str] = set()
+        # The extensions' built-in tools currently advertised, by name.
+        self._extension_tool_names: set[str] = set()
+        # Those of them whose calls are announced when they start.
+        self._announced_extension_tool_names: set[str] = set()
         # The user's base system instruction, without composed addons. Captured
         # here and refreshed when the user changes ``system_instruction`` at
         # runtime; ``_compose_system_instruction`` always rebuilds the effective
@@ -508,6 +515,26 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._sequential_runner_task: asyncio.Task | None = None
         self._skip_tts: bool | None = None
         self._summary_task: asyncio.Task | None = None
+        # Filled in here rather than in every service's default settings.
+        if not is_given(self._settings.extensions):
+            self._settings.extensions = []
+        # The settings hold the extensions; this is them in order, from the
+        # one "closest" to the service to the one "farthest" from it.
+        self._extensions: list[BaseLLMExtension] = []
+        # The latest metadata frame of each kind the service has processed,
+        # handed to an extension attached later: a system frame such as a
+        # PerceptionMetadataFrame can pass before the settings update that
+        # attaches the extension that reads it.
+        self._metadata_frames: dict[type[Frame], ServiceMetadataFrame] = {}
+        # The settings' initial entries take the path a delta's do: a callable
+        # builds an extension, and each attaches in turn.
+        initial = assert_given(self._settings.extensions)
+        self._settings.extensions = []
+        self._sort_extensions()
+        # Every service has one: it contributes nothing until an async tool is registered.
+        self._attach_extension(AsyncToolLLMExtension())
+        for entry in initial:
+            self._attach_extension(entry() if callable(entry) else entry)
         # Whether the one-time realtime-service "no turn frames" warning has
         # fired (see _warn_if_realtime_service_emits_no_turn_frames).
         self._warned_realtime_service_no_turn_frames: bool = False
@@ -830,6 +857,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await self._cancel_summary_task()
         await self._cancel_all_function_call_tasks()
         await self._run_tool_cleanups()
+        for extension in self._extensions:
+            await self._unwire_extension(extension)
 
     def _warn_turn_completion_settings_are_strategy_owned(self):
         """Warn that the turn-completion settings belong to the user turn strategy.
@@ -863,6 +892,124 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         await super().setup(setup)
         self._expressive = setup.enable_expressive_conversation
         self._expression_policy = setup.expression_policy
+        for extension in self._extensions:
+            await self._wire_extension(extension)
+        # The extensions' tools are advertised, and the instruction composed
+        # with them, from the start: a service that connects at setup sends
+        # the model everything known at construction.
+        self._sync_extension_tools()
+        self._compose_system_instruction()
+
+    def add_extension(self, extension: BaseLLMExtension):
+        """Attach an LLM extension to the service, before the service is set up.
+
+        For a component that has the service in hand after construction, such
+        as a worker that owns it; an application attaches its extensions in
+        the service's settings (``settings=...Settings(extensions=[...])``). A
+        running service takes an extension over an ``LLMUpdateSettingsFrame``
+        with it in the delta.
+
+        Args:
+            extension: The extension to attach.
+
+        Raises:
+            RuntimeError: If the service is already set up.
+        """
+        if self._setup:
+            raise RuntimeError(
+                f"{self} is set up; a running service takes an extension over an "
+                "LLMUpdateSettingsFrame"
+            )
+        self._attach_extension(extension)
+
+    def get_extension(self, extension_type: type[TExtension]) -> TExtension | None:
+        """Get the attached extension of a class.
+
+        Args:
+            extension_type: The extension's class, exactly: a subclass is an
+                extension of its own.
+
+        Returns:
+            The extension, or None if none of that class is attached.
+        """
+        return next((e for e in self._extensions if type(e) is extension_type), None)
+
+    def _attach_extension(self, extension: BaseLLMExtension):
+        """Add an extension to the settings, in its place by order, and its instruction to the composition.
+
+        Raises:
+            ValueError: If an extension of the same class is attached already.
+        """
+        extensions = assert_given(self._settings.extensions)
+        if extension in extensions:
+            return
+        if self.get_extension(type(extension)):
+            raise ValueError(
+                f"{self} already has a {type(extension).__name__}, and holds one extension of "
+                "each class. If you need a parameterized extension twice, make a subclass for it."
+            )
+        extensions.append(extension)
+        self._sort_extensions()
+        self._compose_system_instruction()
+
+    async def _detach_extension(self, extension: BaseLLMExtension):
+        """Remove an extension from the settings, and from the running service."""
+        assert_given(self._settings.extensions).remove(extension)
+        self._sort_extensions()
+        if self._setup:
+            await self._unwire_extension(extension)
+        self._compose_system_instruction()
+
+    def _sort_extensions(self):
+        extensions = cast(list[BaseLLMExtension], assert_given(self._settings.extensions))
+        self._extensions = sorted(extensions, key=lambda extension: extension.order)
+
+    async def _wire_extension(self, extension: BaseLLMExtension):
+        """Set an extension up and take its frames, as the user turn controller does its strategies.
+
+        Raises:
+            ValueError: If another service already holds the extension.
+        """
+        assert self._setup is not None
+        if (other := extension.attached_service) is not None and other is not self:
+            raise ValueError(
+                f"{extension} belongs to {other} already, and an extension belongs to one "
+                "service. A settings update that reaches several services should carry a callable "
+                "that builds an extension for each."
+            )
+        await extension.setup(self._setup)
+        extension.add_event_handler("on_push_frame", self._on_extension_push_frame)
+        extension.add_event_handler("on_broadcast_frame", self._on_extension_broadcast_frame)
+        for metadata in self._metadata_frames.values():
+            await extension.process_frame(metadata, FrameDirection.DOWNSTREAM)
+
+    async def _unwire_extension(self, extension: BaseLLMExtension):
+        extension.remove_event_handler("on_push_frame", self._on_extension_push_frame)
+        extension.remove_event_handler("on_broadcast_frame", self._on_extension_broadcast_frame)
+        await extension.cleanup()
+
+    def _extensions_outside(self, extension: BaseLLMExtension) -> list[BaseLLMExtension]:
+        """The extensions "farther" from the service than the given one, "closest" first."""
+        return self._extensions[self._extensions.index(extension) + 1 :]
+
+    async def _on_extension_push_frame(
+        self,
+        extension: BaseLLMExtension,
+        frame: Frame,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+    ):
+        await self._push_through_extensions(frame, direction, self._extensions_outside(extension))
+
+    async def _on_extension_broadcast_frame(
+        self, extension: BaseLLMExtension, frame_cls: type[Frame], **kwargs
+    ):
+        downstream_frame = frame_cls(**kwargs)
+        upstream_frame = frame_cls(**kwargs)
+        downstream_frame.broadcast_sibling_id = upstream_frame.id
+        upstream_frame.broadcast_sibling_id = downstream_frame.id
+        outside = self._extensions_outside(extension)
+        await self._push_through_extensions(downstream_frame, FrameDirection.DOWNSTREAM, outside)
+        await self._push_through_extensions(upstream_frame, FrameDirection.UPSTREAM, outside)
 
     def _handle_tts_metadata(self, frame: TTSMetadataFrame):
         """Teach the expression the TTS service performs, replacing any before it."""
@@ -901,17 +1048,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         self._appended_system_instructions.append(instruction)
         self._compose_system_instruction()
 
-    def _has_async_tools(self) -> bool:
-        """Whether any registered tool runs asynchronously.
-
-        Returns:
-            True when a tool is registered with ``cancel_on_interruption=False``,
-            which is what makes the async-tool guidance worth composing in. The
-            built-in cancellation tool is registered as a synchronous one, so it
-            never counts on its own.
-        """
-        return any(not item.cancel_on_interruption for item in self._functions.values())
-
     def _compose_system_instruction(self):
         """Rebuild ``system_instruction`` from the base prompt and all active addons.
 
@@ -919,12 +1055,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         captured at construction and refreshed on runtime ``system_instruction``
         updates) with any appended instructions (e.g. the ``UIWorker`` prompt
         guide), how to read perception and the expression tags the TTS service
-        performs (with expressive conversation on), turn completion instructions
-        (when enabled) with a note that a reading doesn't decide them when
-        perception is taught too, and async tool cancellation instructions (when
-        enabled). Safe to call repeatedly — it always rebuilds from the base, so
-        it never compounds, and it logs the result only when it differs from the
-        previous composition.
+        performs (with expressive conversation on), and what each LLM
+        extension contributes, in extension order. Safe to call repeatedly — it always
+        rebuilds from the base, so it never compounds, and it logs the result
+        only when it differs from the previous composition.
         """
         base = self._base_system_instruction
         parts = [base] if base else []
@@ -936,15 +1070,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         )
         if expression:
             parts.append(expression)
-        if self._filter_incomplete_user_turns:
-            config = self._user_turn_completion_config
-            parts.append(config.completion_instructions)
-            if self._perception and self._perception.signals:
-                parts.append(perception_turn_completion_instructions(*config.markers))
-        if self._cancel_tool_names:
-            parts.append(ASYNC_TOOL_CANCELLATION_INSTRUCTIONS)
-        if self._has_async_tools():
-            parts.append(ASYNC_TOOL_INSTRUCTIONS)
+        parts.extend(
+            instruction
+            for extension in self._extensions
+            if (instruction := extension.system_instruction)
+        )
         composed = "\n\n".join(p for p in parts if p) or None
         self._settings.system_instruction = composed
         if composed != self._composed_system_instruction:
@@ -952,7 +1082,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             logger.debug(f"{self}: System instruction composed: {composed}")
 
     async def _update_settings(self, delta: LLMSettings) -> dict[str, Any]:
-        """Apply a settings delta, handling turn-completion fields.
+        """Apply a settings delta, attaching the extensions it adds.
 
         Args:
             delta: An LLM settings delta.
@@ -962,28 +1092,56 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         changed = await super()._update_settings(delta)
 
-        if "filter_incomplete_user_turns" in changed:
-            self._filter_incomplete_user_turns = (
-                self._settings.filter_incomplete_user_turns or False
-            )
-            logger.info(
-                f"{self}: Incomplete turn filtering "
-                f"{'enabled' if self._filter_incomplete_user_turns else 'disabled'}"
-            )
-
         if "system_instruction" in changed:
-            # The user replaced the base prompt; re-snapshot it so composition
-            # rebuilds the effective instruction from the new value.
+            # The user replaced the base prompt; re-snapshot it before anything
+            # composes, so composition rebuilds the effective instruction from
+            # the new value.
             base_si = self._settings.system_instruction
             self._base_system_instruction = base_si if isinstance(base_si, str) else None
 
-        if "user_turn_completion_config" in changed and self._filter_incomplete_user_turns:
-            self.set_user_turn_completion_config(
-                assert_given(self._settings.user_turn_completion_config)
+        if "extensions" in changed:
+            # The extensions the delta built are attached one by one, as the
+            # constructor's and add_extension()'s are.
+            held = cast(list[BaseLLMExtension], changed["extensions"])
+            store = cast(list[BaseLLMExtension], assert_given(self._settings.extensions))
+            built = [e for e in store if e not in held]
+            self._settings.extensions = list(held)
+            for extension in built:
+                self._attach_extension(extension)
+                if self._setup:
+                    await self._wire_extension(extension)
+
+        if "filter_incomplete_user_turns" in changed:
+            warn_deprecated(
+                "`LLMSettings.filter_incomplete_user_turns` is deprecated since 1.7.0 and will "
+                "be removed in 2.0.0. Use `user_turn_strategies=FilterIncompleteUserTurnStrategies()` "
+                "instead.",
+                stacklevel=2,
             )
+            extension = self.get_extension(LLMTurnCompletionLLMExtension)
+            if self._settings.filter_incomplete_user_turns and not extension:
+                config = self._settings.user_turn_completion_config
+                extension = LLMTurnCompletionLLMExtension(config if is_given(config) else None)
+                self._attach_extension(extension)
+                if self._setup:
+                    await self._wire_extension(extension)
+            elif not self._settings.filter_incomplete_user_turns and extension:
+                await self._detach_extension(extension)
+
+        if "user_turn_completion_config" in changed:
+            warn_deprecated(
+                "`LLMSettings.user_turn_completion_config` is deprecated since 1.7.0 and will "
+                "be removed in 2.0.0. Use `FilterIncompleteUserTurnStrategies(config=...)` "
+                "instead.",
+                stacklevel=2,
+            )
+            if extension := self.get_extension(LLMTurnCompletionLLMExtension):
+                config = assert_given(self._settings.user_turn_completion_config)
+                extension.config = config or UserTurnCompletionConfig()
 
         # Any of these fields changes the composed instruction; rebuild it.
         if changed.keys() & {
+            "extensions",
             "filter_incomplete_user_turns",
             "system_instruction",
             "user_turn_completion_config",
@@ -1000,6 +1158,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             direction: The direction of frame processing.
         """
         await super().process_frame(frame, direction)
+
+        if isinstance(frame, ServiceMetadataFrame):
+            self._metadata_frames[type(frame)] = frame
+        # The extensions are layers around the service, and an incoming frame
+        # goes through them from the outside in: the one "farthest" from the
+        # service processes it first. Each one has then seen the frame before
+        # it filters anything produced in reaction to it.
+        for extension in reversed(self._extensions):
+            await extension.process_frame(frame, direction)
 
         if self._output_gate is not None:
             await self._output_gate.process_frame(self, frame)
@@ -1054,7 +1221,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             self._sync_registered_tool_handlers(frame.context.tools)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Pushes a frame.
+        """Pushes a frame, through the service's extensions.
+
+        Each extension filters the frame in turn, from the one "closest" to
+        the service to the one "farthest" from it; what one returns goes on
+        through the extensions "farther" from the service than it. Frames go
+        out in the order the extensions produce them: each frame an extension
+        returns goes through the rest of the chain and out before the next
+        one.
 
         Args:
             frame: The frame to push.
@@ -1063,11 +1237,32 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         if self._output_gate is not None and not self._output_gate.allow_push(frame):
             return
 
+        await self._push_through_extensions(frame, direction, self._extensions)
+
+    async def _push_through_extensions(
+        self, frame: Frame, direction: FrameDirection, extensions: list[BaseLLMExtension]
+    ):
+        """Run a frame through the given extensions and push what comes out.
+
+        The extensions filter it in the order given: the one "closest" to the
+        service first.
+        """
+        if not extensions:
+            await self._push_past_extensions(frame, direction)
+            return
+        first, rest = extensions[0], extensions[1:]
+        for filtered in await first.filter_push_frame(frame, direction):
+            await self._push_through_extensions(filtered, direction, rest)
+
+    async def _push_past_extensions(self, frame: Frame, direction: FrameDirection):
+        """Push a frame out of the service: the last step of every push.
+
+        No extension filters the frame from here. It has already gone through
+        any and all extensions that need to filter it.
+        """
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
             if self._skip_tts is not None:
                 frame.skip_tts = self._skip_tts
-
-        await self._track_pushed_frame(frame)
 
         # The speculation gate decides synchronously, so its verdict can't be
         # torn by another task pushing at the same time. Everything it hands
@@ -1078,24 +1273,18 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await super().push_frame(gated_frame, gated_direction)
 
     async def _push_llm_text(self, text: str):
-        """Push LLM text, using turn completion detection if enabled.
-
-        This helper method simplifies text pushing in LLM implementations by
-        handling the conditional logic for turn completion internally.
+        """Push text the LLM produced, recording the time to its first token.
 
         Args:
             text: The text content from the LLM to push.
         """
-        # Measured before turn-completion filtering, which can hold text back or
-        # drop it entirely — neither says anything about how fast the model
-        # answered.
+        # Measured before the extensions filter the text, which can hold it
+        # back or drop it entirely — neither says anything about how fast the
+        # model answered.
         if self.reports_ttfat:
             await self.stop_ttfat_metrics()
 
-        if self._filter_incomplete_user_turns:
-            await self._push_turn_text(text)
-        else:
-            await self.push_frame(LLMTextFrame(text))
+        await self.push_frame(LLMTextFrame(text))
 
     async def _handle_interruptions(self, _: InterruptionFrame):
         for function_name, entry in self._functions.items():
@@ -1281,7 +1470,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 the call to stop. Defaults to ``None`` (fall back to the
                 ``@tool_options`` decorator value, then to False).
         """
-        if function_name in self._cancel_tool_names:
+        if function_name in self._extension_tool_names:
             raise ValueError(
                 f"'{function_name}' is a reserved built-in tool name and cannot be "
                 "registered by user code."
@@ -1419,7 +1608,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 value (then the False default).
         """
         wrapper = DirectFunctionWrapper(handler)
-        if wrapper.name in self._cancel_tool_names:
+        if wrapper.name in self._extension_tool_names:
             raise ValueError(
                 f"'{wrapper.name}' is a reserved built-in tool name and cannot be "
                 "registered by user code."
@@ -1480,7 +1669,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         resolved = self._resolve_tool_option(
             function_name, explicit, handler, "_pipecat_cancellable_by_llm", default=False
         )
-        if not resolved:
+        if not resolved and not (
+            self._enable_async_tool_cancellation and not cancel_on_interruption
+        ):
             return False
         if cancel_on_interruption:
             # A synchronous call holds the LLM until it returns, so it is never
@@ -1747,12 +1938,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         # so re-advertising it (a later tool-set change) registers it afresh.
         self._explicitly_unregistered_function_names &= advertised
 
-        # What the registry holds decides both whether the async-tool guidance
-        # belongs in the system instruction and whether the cancellation tools do,
-        # and it is settled only here: tools advertised on a context frame register
-        # during this sync, a manual registration never goes through that path at
-        # all, and a context can advertise nothing.
-        self._sync_cancel_tools()
+        # What the registry holds decides what the extensions add, tools and
+        # instructions both, and it is settled only here: tools advertised on a
+        # context frame register during this sync, a manual registration never
+        # goes through that path at all, and a context can advertise nothing.
+        self._sync_extension_tools()
         self._compose_system_instruction()
 
     def _unregister_unadvertised_tool_handlers(self, advertised: set[str | None]) -> None:
@@ -1882,11 +2072,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             await self.broadcast_frame(UserTurnResponseCancelFrame)
             return
 
-        # Exclude the built-in cancel tool — it's an internal mechanism and
-        # should not be surfaced to user-facing event handlers or frames.
-        user_visible_calls = [
-            fc for fc in function_calls if fc.function_name not in self._cancel_tool_names
-        ]
+        # Exclude the built-in tools that are internal mechanism — they should
+        # not be surfaced to user-facing event handlers or frames. An
+        # extension's tool is one unless it asks for its calls to be announced.
+        internal = self._extension_tool_names - self._announced_extension_tool_names
+        user_visible_calls = [fc for fc in function_calls if fc.function_name not in internal]
         if user_visible_calls:
             await self._call_event_handler("on_function_calls_started", user_visible_calls)
             await self.broadcast_frame(FunctionCallsStartedFrame, function_calls=user_visible_calls)
@@ -2017,6 +2207,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             cancel_on_interruption=item.cancel_on_interruption,
             group_id=runner_item.group_id,
         )
+        # An async call is background work: the pipeline is told when it
+        # starts and when it settles.
+        async_call = not item.cancel_on_interruption
+        if async_call:
+            await self.broadcast_frame(BackgroundWorkStartedFrame, work_id=runner_item.tool_call_id)
 
         timeout_task: asyncio.Task | None = None
         # Set when the handler raises, so the result settling the call on its
@@ -2070,6 +2265,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 properties=properties,
                 error=call_error,
             )
+            if is_final and async_call:
+                await self.broadcast_frame(
+                    BackgroundWorkFinishedFrame, work_id=runner_item.tool_call_id
+                )
 
         # Start a timeout task for deferred function calls
         async def timeout_handler():
@@ -2202,132 +2401,37 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
                 f"currently advertised tool set."
             )
 
-    def _is_cancellable(self, item: FunctionCallRegistryItem) -> bool:
-        """Whether the LLM may cancel calls of a registered tool.
+    def _sync_extension_tools(self) -> None:
+        """Match the built-in tools to what the extensions add, given the registered tools.
 
-        The one place that decides it, so what gets advertised and what a cancel
-        tool will actually stop can't drift apart.
-
-        Args:
-            item: The registered tool to judge.
-
-        Returns:
-            True if the tool opted in, or if the deprecated
-            ``enable_async_tool_cancellation`` covers it by being async.
+        Reconciled from a single reading of the registry: a tool an extension
+        no longer returns is withdrawn, one it newly returns is registered and
+        advertised, and a name a user's own tool already has is left to it.
         """
-        return item.cancellable_by_llm or (
-            self._enable_async_tool_cancellation and not item.cancel_on_interruption
-        )
+        wanted: dict[str, LLMExtensionTool] = {}
+        for extension in self._extensions:
+            for tool in extension.builtin_tools(self._functions):
+                wanted[tool.schema.name] = tool
 
-    def _cancellable_tool_names(self) -> set[str]:
-        """Names of the registered tools the LLM may cancel.
-
-        Returns:
-            The tools that opted in with ``cancellable_by_llm=True``. The
-            deprecated ``enable_async_tool_cancellation`` widens this to every
-            async tool.
-        """
-        return {
-            name for name, item in self._functions.items() if name and self._is_cancellable(item)
-        }
-
-    def _sync_cancel_tools(self) -> None:
-        """Match the advertised cancel tools to the tools currently registered.
-
-        One cancel tool per cancellable tool, named for it, reconciled from a
-        single reading of the registry so the advertised set can never drift from
-        what is actually cancellable. A tool that never opted in has no cancel
-        tool at all, so there is nothing for the LLM to call against it.
-        """
-        wanted = {cancel_tool_name(name): name for name in self._cancellable_tool_names()}
-
-        for stale in self._cancel_tool_names - set(wanted):
+        for stale in self._extension_tool_names - set(wanted):
             self._adapter.builtin_tools.pop(stale, None)
             self._functions.pop(stale, None)
-            self._cancel_tool_names.discard(stale)
+            self._extension_tool_names.discard(stale)
+            self._announced_extension_tool_names.discard(stale)
 
-        for name, target in wanted.items():
-            if name in self._cancel_tool_names:
+        for name, tool in wanted.items():
+            if name in self._extension_tool_names or name in self._functions:
                 continue
-            if name in self._functions:
-                # Once per name: this runs on every context frame, and the
-                # collision persists for as long as both tools are registered.
-                if name not in self._warned_cancel_collisions:
-                    self._warned_cancel_collisions.add(name)
-                    logger.warning(
-                        f"{self}: '{target}' is cancellable but its cancel tool can't be "
-                        f"advertised — '{name}' is already registered as a tool of its own. "
-                        f"Rename one of them, or the LLM has no way to stop {target}."
-                    )
-                continue
-            self._adapter.builtin_tools[name] = build_cancel_tool_schema(target)
+            assert tool.schema.handler is not None, f"{name} carries no handler"
+            self._adapter.builtin_tools[name] = tool.schema
             self._functions[name] = FunctionCallRegistryItem(
                 function_name=name,
-                handler=self._cancel_tool_handler,
-                cancel_on_interruption=True,
+                handler=tool.schema.handler,
+                cancel_on_interruption=tool.cancel_on_interruption,
             )
-            self._cancel_tool_names.add(name)
-
-    async def _cancel_tool_handler(self, params: FunctionCallParams):
-        """Handle a ``cancel_<tool>`` invocation from the LLM.
-
-        Which work to stop comes from the tool the model called, so the common
-        case takes no arguments at all. ``tool_call_id`` only has to be given to
-        choose between several running calls of the same tool.
-
-        Args:
-            params: Function call parameters, optionally carrying ``tool_call_id``.
-        """
-        target = (params.function_name or "")[len(CANCEL_TOOL_PREFIX) :]
-        tool_call_id: str | None = params.arguments.get("tool_call_id")
-
-        async def refuse(reason: str, **extra: Any) -> None:
-            logger.debug(f"{self}: declining to cancel {target} — {reason}")
-            await params.result_callback(
-                {"cancelled": None, "reason": reason, **extra},
-                properties=FunctionCallResultProperties(run_llm=True),
-            )
-
-        candidates = [
-            item
-            for item in self._function_call_tasks.values()
-            if item.function_name == target and self._is_cancellable(item.registry_item)
-        ]
-        if not candidates:
-            await refuse(f"no {target} call is running")
-            return
-        if tool_call_id:
-            match = next((i for i in candidates if i.tool_call_id == tool_call_id), None)
-            if match is None:
-                await refuse(f"no running {target} call has that tool_call_id")
-                return
-        elif len(candidates) > 1:
-            # Several calls of the one tool: the model has to say which, so the
-            # refusal carries the ids to say it with.
-            # Spell the choices out in the reason itself: a model reading a
-            # refusal acts on what it says far more readily than on a field
-            # beside it.
-            choices = "; ".join(
-                f"{i.tool_call_id} (called with {json.dumps(i.arguments, default=str)})"
-                for i in candidates
-            )
-            await refuse(
-                f"{len(candidates)} {target} calls are running: {choices}. Call "
-                f"{params.function_name} again with tool_call_id set to the one to stop.",
-                running=[
-                    {"tool_call_id": i.tool_call_id, "arguments": i.arguments} for i in candidates
-                ],
-            )
-            return
-        else:
-            match = candidates[0]
-
-        logger.debug(f"{self}: cancelling [{match.function_name}:{match.tool_call_id}]")
-        await self._cancel_function_calls_by_tool_call_id(match.tool_call_id)
-        await params.result_callback(
-            {"cancelled": match.tool_call_id, "function_name": match.function_name},
-            properties=FunctionCallResultProperties(run_llm=True),
-        )
+            self._extension_tool_names.add(name)
+            if tool.announce_call_start:
+                self._announced_extension_tool_names.add(name)
 
     async def _cancel_function_call_tasks(
         self,
@@ -2412,6 +2516,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
             tool_call_id=runner_item.tool_call_id,
             run_llm=run_llm,
         )
+        if not runner_item.registry_item.cancel_on_interruption:
+            await self.broadcast_frame(
+                BackgroundWorkFinishedFrame, work_id=runner_item.tool_call_id
+            )
         return FunctionCallFromLLM(
             function_name=runner_item.function_name,
             tool_call_id=runner_item.tool_call_id,
@@ -2463,14 +2571,30 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService, Generic[TAdapter]
         """
         return await self._cancel_function_call_tasks(lambda item: True, reason=reason)
 
-    async def _cancel_function_calls_by_tool_call_id(self, tool_call_id: str):
-        """Cancel in-progress function call tasks by their tool_call_id.
+    def running_function_calls(self) -> list[FunctionCallRunnerItem]:
+        """The function calls in flight.
+
+        For a tool handler that acts on calls in progress, such as an
+        extension's cancel tool.
+
+        Returns:
+            Each call's runner item: its name, ``tool_call_id``, arguments and
+            registry item.
+        """
+        return list(self._function_call_tasks.values())
+
+    async def cancel_function_call(self, tool_call_id: str, *, reason: str = "cancelled"):
+        """Cancel the function call in flight with the given ``tool_call_id``.
+
+        Its handler is thrown ``asyncio.CancelledError``, the call is settled
+        downstream as cancelled, and ``on_function_calls_cancelled`` fires.
 
         Args:
-            tool_call_id: tool_call_id to cancel.
+            tool_call_id: The call to cancel.
+            reason: What triggered the cancellation, for the logs.
         """
         await self._cancel_function_call_tasks(
-            lambda item: item.tool_call_id == tool_call_id, reason="User request"
+            lambda item: item.tool_call_id == tool_call_id, reason=reason
         )
 
     async def _cancel_function_call(self, function_name: str | None):

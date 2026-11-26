@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -166,6 +167,20 @@ class TestClassifierUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await self._start("complete", stt_latency=1.0)
         await self._say()
         await self.strategy.process_frame(_said("book a table.", finalized=True))
+        await asyncio.sleep(SETTLE)
+
+        self.assertEqual(len(self.stopped), 1)
+
+    async def test_a_finalization_after_the_words_does_not_wait_for_the_stt_latency(self):
+        """An STT can deliver the words first and confirm they were the last after."""
+        await self._start("complete", stt_latency=1.0)
+        await self.strategy.process_frame(VADUserStartedSpeakingFrame())
+        await self.strategy.process_frame(_said("book a table."))
+        await self.strategy.process_frame(VADUserStoppedSpeakingFrame())
+        await asyncio.sleep(SETTLE)
+        self.assertEqual(self.stopped, [])
+
+        await self.strategy.process_frame(TranscriptionFinalizedFrame())
         await asyncio.sleep(SETTLE)
 
         self.assertEqual(len(self.stopped), 1)

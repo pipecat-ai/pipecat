@@ -41,7 +41,7 @@ from pipecat.transports.websocket.client import (
     WebsocketClientInputTransport,
     WebsocketClientOutputTransport,
 )
-from pipecat.transports.websocket.rtvi_client import RTVIClientTransport
+from pipecat.transports.websocket.rtvi_client import RTVIClientInputTransport, RTVIClientTransport
 
 # One audio frame per tick, on both edges. 40ms matches the bot's output chunking
 # (``audio_out_10ms_chunks`` defaults to 4), so the receive side re-emits the bot's
@@ -285,7 +285,7 @@ class EvalClientOutputTransport(WebsocketClientOutputTransport):
             self._send_task = None
 
 
-class EvalClientInputTransport(WebsocketClientInputTransport):
+class EvalClientInputTransport(RTVIClientInputTransport):
     """Feeds the bot's audio to the harness's VAD and STT as a continuous stream.
 
     The bot sends audio only while its TTS produces it, with gaps at its

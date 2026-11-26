@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -55,7 +56,7 @@ from pipecat.turns.user_stop import (
     UserTurnStoppedParams,
     deferred,
 )
-from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
+from pipecat.turns.user_turn_completion import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import (
     ExternalUserTurnStrategies,
@@ -1038,6 +1039,47 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         await vad_task
 
         await asyncio.wait_for(released.wait(), timeout=1.0)
+
+        await strategy.cleanup()
+
+    async def test_finalized_frame_releases_the_text_before_it(self):
+        """A finalization confirmed after its text releases the turn.
+
+        A service's own endpointing can deliver the transcript before it is
+        asked to finalize; the confirmation then has no text to carry and
+        arrives as a TranscriptionFinalizedFrame. It releases the turn like a
+        finalized transcript instead of waiting out the safety-net timer.
+        """
+        stt_p99 = 5.0  # timer far out, so an immediate release is unambiguous
+
+        strategy, released = self._make_turn_analyzer_strategy(inference_secs=0.0)
+        await strategy.setup(frame_processor_setup(self.task_manager))
+        await strategy.process_frame(STTMetadataFrame(service_name="stt", ttfs_p99_latency=stt_p99))
+        await strategy.process_frame(VADUserStartedSpeakingFrame(start_secs=0.2))
+        await strategy.process_frame(
+            TranscriptionFrame(user_id="", text="hello", timestamp="now", finalized=False)
+        )
+        await strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+        self.assertFalse(released.is_set())
+
+        await strategy.process_frame(TranscriptionFinalizedFrame())
+
+        await asyncio.wait_for(released.wait(), timeout=1.0)
+
+        await strategy.cleanup()
+
+    async def test_finalized_frame_without_text_releases_nothing(self):
+        """A confirmation with no transcript before it has no turn to release."""
+        strategy, released = self._make_turn_analyzer_strategy(inference_secs=0.0)
+        await strategy.setup(frame_processor_setup(self.task_manager))
+        await strategy.process_frame(STTMetadataFrame(service_name="stt", ttfs_p99_latency=5.0))
+        await strategy.process_frame(VADUserStartedSpeakingFrame(start_secs=0.2))
+        await strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=0.2))
+
+        await strategy.process_frame(TranscriptionFinalizedFrame())
+        await asyncio.sleep(0.05)
+
+        self.assertFalse(released.is_set())
 
         await strategy.cleanup()
 
