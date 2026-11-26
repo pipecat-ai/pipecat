@@ -1,0 +1,1 @@
+- `XAITTSService` now has a `replace` setting that sends xAI's pronunciation map to the streaming WebSocket endpoint, matching `XAIHttpTTSService`.
