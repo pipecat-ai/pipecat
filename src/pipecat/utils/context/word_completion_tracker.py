@@ -114,7 +114,6 @@ class WordCompletionTracker:
         self._frame_word: str | None = None  # this frame's share of the word
         self._overflow_word: str | None = None  # the next frame's share
         self._llm_consumed: str | None = None  # LLM text the word stands for
-        self._keep_spacing = False  # the word carries its own spacing
 
         # Set by _force_complete. The map is never advanced there, so its own
         # is_complete would keep saying False; this flag is the answer instead.
@@ -124,9 +123,7 @@ class WordCompletionTracker:
             tts_text, self._user_facing_text, llm_text, llm_markup=llm_markup
         )
 
-    def add_word_and_check_complete(
-        self, word: str, *, includes_inter_frame_spaces: bool = False
-    ) -> bool:
+    def add_word_and_check_complete(self, word: str) -> bool:
         """Record one word the TTS provider reported speaking.
 
         Three things can happen, in this order:
@@ -147,11 +144,6 @@ class WordCompletionTracker:
                 that report spaces and punctuation as separate tokens (e.g.
                 Inworld) must merge them into the preceding word first, via
                 ``merge_punct_tokens``.
-            includes_inter_frame_spaces: Whether the word carries its own
-                spacing, so no space is put between it and the next word. The
-                ``get_*`` accessors then return its span of each text as written,
-                spaces included, since nothing else supplies the spaces the text
-                has (``"ค่ะ"`` then ``" คุณ"``). Otherwise they trim them.
 
         Returns:
             True once nothing is left for this frame to speak.
@@ -159,7 +151,6 @@ class WordCompletionTracker:
         self._frame_word = None
         self._overflow_word = None
         self._llm_consumed = None
-        self._keep_spacing = includes_inter_frame_spaces
 
         # Every raw character consumed, not is_complete: a frame ending in an
         # emoji contributes no alphanumeric content, so it reads as complete
@@ -196,9 +187,9 @@ class WordCompletionTracker:
             head = self._segment_map.last_leading_duplicate if self._llm_text is not None else 0
             tail = len(word) - len(overflow) if overflow else len(word)
             self._frame_word = word[head:tail]
-            if self._keep_spacing and not word[:1].isspace():
-                # Nothing else will put the space before this word in the
-                # transcript, so the word brings the one the text has.
+            if not word[:1].isspace():
+                # Kept for callers that put no space before the word themselves
+                # (``strip=False``), so the word brings the one the text has.
                 spacing = spoken[: len(spoken) - len(spoken.lstrip())]
                 self._frame_word = spacing + self._frame_word
         self._overflow_word = overflow
@@ -340,7 +331,7 @@ class WordCompletionTracker:
             self._llm_text is not None and not (self._llm_consumed or "").strip()
         )
 
-    def get_word_for_frame(self) -> str | None:
+    def get_word_for_frame(self, strip: bool = True) -> str | None:
         """Return this frame's share of the last word -- the text to emit for it.
 
         Usually the whole word. A word straddling the boundary gives up its tail
@@ -349,8 +340,14 @@ class WordCompletionTracker:
         provider never sent brings along the text it passed over, and after a
         force-complete this is the frame's unspoken remainder instead -- either
         way, nothing is missing from the turn.
+
+        Args:
+            strip: Whether to trim surrounding whitespace. Pass False for words
+                that carry their own spacing (``includes_inter_frame_spaces``):
+                nothing downstream puts a space before them, so the word brings
+                the one the text has (``"ค่ะ"`` then ``" คุณ"``).
         """
-        return self._word_span(self._frame_word)
+        return self._word_span(self._frame_word, strip)
 
     def get_overflow_word(self) -> str | None:
         """Return the part of the last word that belongs to the *next* frame.
@@ -361,7 +358,7 @@ class WordCompletionTracker:
         """
         return self._overflow_word.strip() if self._overflow_word else self._overflow_word
 
-    def get_llm_consumed(self) -> str | None:
+    def get_llm_consumed(self, strip: bool = True) -> str | None:
         """Return the LLM's own text that the last word stands for.
 
         This is what the conversation context records, so it keeps the tags and
@@ -371,14 +368,18 @@ class WordCompletionTracker:
         None when there is nothing to attribute: no ``llm_text`` was given, the
         word is mid-rewrite, or ``llm_text`` is already exhausted (a trailing
         emoji it never carried).
+
+        Args:
+            strip: Whether to trim surrounding whitespace. Pass False to keep the
+                leading space, as :meth:`get_word_for_frame` does.
         """
         if not (self._llm_consumed or "").strip():
             return None
-        return self._word_span(self._llm_consumed)
+        return self._word_span(self._llm_consumed, strip)
 
-    def _word_span(self, text: str | None) -> str | None:
-        """Return *text* trimmed, or as written when the word carries its own spacing."""
-        if not text or self._keep_spacing:
+    def _word_span(self, text: str | None, strip: bool) -> str | None:
+        """Return *text* trimmed, or as written when *strip* is False."""
+        if not text or not strip:
             return text
         return text.strip()
 

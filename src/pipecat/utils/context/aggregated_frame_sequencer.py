@@ -548,9 +548,7 @@ class AggregatedFrameSequencer:
                     )
                     return []
 
-            is_complete = active.tracker.add_word_and_check_complete(
-                word, includes_inter_frame_spaces=includes_inter_frame_spaces
-            )
+            is_complete = active.tracker.add_word_and_check_complete(word)
             raw_overflow_word = active.tracker.get_overflow_word()
         elif self._streaming and active is None:
             self._buffered_words.append(
@@ -566,8 +564,11 @@ class AggregatedFrameSequencer:
             active.includes_inter_frame_spaces if active else False
         )
 
-        frame_text = active.tracker.get_word_for_frame() if (active and active.tracker) else word
-        raw_text = active.tracker.get_llm_consumed() if (active and active.tracker) else None
+        strip = not slot_ifs
+        frame_text = (
+            active.tracker.get_word_for_frame(strip) if (active and active.tracker) else word
+        )
+        raw_text = active.tracker.get_llm_consumed(strip) if (active and active.tracker) else None
         suppress = active.tracker.suppress_in_context() if (active and active.tracker) else False
         emit_context_id = active.context_id if active else context_id
 
