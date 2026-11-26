@@ -1938,6 +1938,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # nothing in it brings no run, so the push stays owed until the next arrival.
         self._context_push_owed: bool = False
 
+        # Whether the user started speaking since the function calls in
+        # progress started.
+        self._user_spoke_during_function_calls: bool = False
+
         self._assistant_turn_start_timestamp = ""
         # Set when an interruption cuts the open turn short, until the turn closes.
         self._assistant_turn_interrupted = False
@@ -2105,6 +2109,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_assistant_image_frame(frame)
         elif isinstance(frame, UserStartedSpeakingFrame):
             self._user_speaking = True
+            if self._function_calls_in_progress:
+                self._user_spoke_during_function_calls = True
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
@@ -2302,6 +2308,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
         function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
         logger.debug(f"{self} FunctionCallsStartedFrame: {function_names}")
+        if not self._function_calls_in_progress:
+            self._user_spoke_during_function_calls = False
         for function_call in frame.function_calls:
             self._function_calls_in_progress[function_call.tool_call_id] = None
 
@@ -2410,8 +2418,19 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if run_llm:
             self._context_push_owed = True
 
+        # A synchronous result settles its tool message in place, so it need not
+        # wait for audio queued after its in-progress frame unless that speech
+        # goes into the context or the user spoke during the call.
+        run_while_bot_speaks = (
+            is_final
+            and in_progress_frame.cancel_on_interruption
+            and not self._function_calls_in_progress
+            and not self._user_spoke_during_function_calls
+            and not self._assistant_turn_start_timestamp
+        )
+
         if self._context_push_owed and not self._user_speaking:
-            await self._maybe_push_context()
+            await self._maybe_push_context(run_while_bot_speaks=run_while_bot_speaks)
 
         # Call the `on_context_updated` callback once the function call result
         # is added to the context. Also, run this in a separate task to make
@@ -2422,7 +2441,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             self._context_updated_tasks.add(task)
             task.add_done_callback(self._context_updated_task_finished)
 
-    async def _maybe_push_context(self) -> None:
+    async def _maybe_push_context(self, *, run_while_bot_speaks: bool = False) -> None:
         """Decide whether to push a context frame after a function call settles or a message is appended.
 
         Push an ``LLMContextFrame`` upstream (with care to avoid duplicate
@@ -2432,6 +2451,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         result out of the context the same way — they don't get function
         results from ``FunctionCallResultFrame`` directly — so the same push
         is load-bearing for both modes.
+
+        Args:
+            run_while_bot_speaks: Push even if the bot is speaking (see
+                ``_handle_function_call_result``).
         """
         if self.has_queued_frame(FunctionCallResultFrame) or self.has_queued_frame(
             LLMMessagesAppendFrame
@@ -2443,7 +2466,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             # a burst can end with an intermediate result, or an
             # LLMMessagesAppendFrame with run_llm=False, that doesn't.
             logger.debug(f"{self}: More results or appends queued — deferring context frame push.")
-        elif self._bot_speaking:
+        elif self._bot_speaking and not run_while_bot_speaks:
             # Defer the context frame push until the bot finishes speaking. If multiple
             # function call results arrive while the bot is speaking, they all accumulate
             # in the context and a single push is performed once speaking stops, preventing
