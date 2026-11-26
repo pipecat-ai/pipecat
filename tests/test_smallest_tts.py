@@ -113,6 +113,19 @@ def test_build_msg_maps_number_pronunciation_language():
     assert service._build_msg("hi")["number_pronunciation_language"] == "auto"
 
 
+def test_build_msg_omits_complete_backoff_by_default():
+    """The server's own backoff before the `complete` status applies unless set."""
+    service = _make_service()
+    assert "complete_backoff_ms" not in service._build_msg("hi")
+
+
+def test_build_msg_includes_complete_backoff_when_set():
+    service = SmallestTTSService(
+        api_key="test-key", settings=SmallestTTSService.Settings(complete_backoff_ms=500)
+    )
+    assert service._build_msg("hi")["complete_backoff_ms"] == 500
+
+
 @pytest.mark.asyncio
 async def test_flush_audio_closes_the_active_context():
     """flush_audio sends an empty, `continue: false` fragment for the context."""
