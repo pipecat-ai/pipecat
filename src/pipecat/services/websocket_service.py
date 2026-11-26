@@ -23,6 +23,43 @@ from pipecat.utils.deprecation import deprecated
 from pipecat.utils.network import QuickFailureTracker, exponential_backoff_time
 
 
+class WebsocketConnection(Protocol):
+    """The websocket connection API a websocket service uses.
+
+    A ``websockets`` client connection provides it. A service can store anything
+    else that does, such as a connection that reconnects on its own.
+    """
+
+    @property
+    def state(self) -> State:
+        """The connection's state."""
+        ...
+
+    async def send(self, message: str | bytes) -> None:
+        """Send a message."""
+        ...
+
+    async def recv(self) -> str | bytes:
+        """Receive the next message."""
+        ...
+
+    async def ping(self) -> Awaitable[float]:
+        """Send a protocol ping, returning a future for its pong."""
+        ...
+
+    async def close(self) -> None:
+        """Close the connection."""
+        ...
+
+    async def wait_closed(self) -> None:
+        """Wait until the connection is closed."""
+        ...
+
+    def __aiter__(self) -> AsyncIterator[str | bytes]:
+        """Iterate over received messages until the connection closes normally."""
+        ...
+
+
 class ReportErrorCallback(Protocol):
     """Reports an error a websocket service ran into.
 
@@ -197,22 +234,23 @@ class WebsocketService(ABC):
 
     # Class-level default so `_websocket` reads None before `__init__` runs:
     # some subclasses initialize their other bases first.
-    __websocket_connection: ClientConnection | None = None
+    __websocket_connection: WebsocketConnection | None = None
 
     @property
-    def _websocket(self) -> ClientConnection | None:
+    def _websocket(self) -> WebsocketConnection | None:
         """The connection the service is using, if any.
 
-        Replacing or clearing it aborts the connection it held unless that
-        connection is already closed, so the service never loses track of an
-        open connection. The abort is synchronous: a disconnect cancelled
-        before its close completes still ends the connection when it clears
-        the reference.
+        Replacing or clearing it aborts a ``websockets`` client connection it
+        held unless that connection is already closed, so the service never
+        loses track of an open connection. The abort is synchronous: a
+        disconnect cancelled before its close completes still ends the
+        connection when it clears the reference. Any other
+        :class:`WebsocketConnection` is left for its owner to close.
         """
         return self.__websocket_connection
 
     @_websocket.setter
-    def _websocket(self, websocket: ClientConnection | None):
+    def _websocket(self, websocket: WebsocketConnection | None):
         previous = self.__websocket_connection
         if (
             previous is not websocket

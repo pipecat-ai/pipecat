@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 
 from loguru import logger
 from pydantic import BaseModel
+from websockets.asyncio.client import ClientConnection
 from websockets.protocol import State
 
 from pipecat.frames.frames import (
@@ -27,7 +28,6 @@ from pipecat.frames.frames import (
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     STTMetadataFrame,
-    TranscriptionFrame,
     TTSTextFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -36,6 +36,7 @@ from pipecat.observers.bot_speech_observer import BotSpeechObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.settings import STTSettings
 from pipecat.services.soniox.errors import classify_error_code
+from pipecat.services.soniox.stream_reconnect import SonioxWebSocket
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -276,6 +277,10 @@ class SonioxSTTSettings(STTSettings):
             500 to 1000 is the documented range. 0 sends each word as it starts
             playing. Only used with ``enable_echo_cancellation``, and only for a
             TTS service that reports word timestamps.
+        enable_reconnect: Whether to reconnect a dropped connection to the same
+            Soniox stream, keeping the transcript and the audio sent around the
+            drop. Soniox bills the up to 20 s a dropped stream waits for the
+            reconnect. Defaults to False.
         speaker_format: Optional format string for diarized speaker runs. Use ``{speaker}`` for the
             speaker label, ``{text}`` for the transcript text, and ``{speaker_number}`` for the
             speaker's order of first appearance in the session (``1``, ``2``, ...), e.g.
@@ -304,6 +309,7 @@ class SonioxSTTSettings(STTSettings):
     enable_agent_text_input: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_echo_cancellation: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     agent_text_lead_ms: int | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_reconnect: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     #: Fields applied locally to transcripts — changing them needs no reconnect.
@@ -416,6 +422,7 @@ class SonioxSTTService(WebsocketSTTService):
             enable_agent_text_input=True,
             enable_echo_cancellation=False,
             agent_text_lead_ms=DEFAULT_AGENT_TEXT_LEAD_MS,
+            enable_reconnect=False,
             speaker_format=None,
         )
 
@@ -840,20 +847,31 @@ class SonioxSTTService(WebsocketSTTService):
 
         await self._disconnect_websocket()
 
+    async def _connect_to(self, url: str) -> ClientConnection:
+        """Open a connection to a Soniox URL, authenticated with the API key.
+
+        Args:
+            url: The URL to connect to.
+
+        Returns:
+            The connection.
+        """
+        return await self._websocket_connect(
+            url, additional_headers={"Authorization": f"Bearer {self._api_key}"}
+        )
+
     async def _connect_websocket(self):
         """Establish the websocket connection to Soniox."""
+        websocket = None
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
             logger.debug("Connecting to Soniox STT")
 
-            self._websocket = await self._websocket_connect(
-                self._url,
-                additional_headers={"Authorization": f"Bearer {self._api_key}"},
-            )
+            websocket = await self._connect_to(self._url)
 
-            if not self._websocket:
+            if not websocket:
                 await self.push_error(error_msg=f"Unable to connect to Soniox API at {self._url}")
                 raise Exception(f"Unable to connect to Soniox API at {self._url}")
 
@@ -886,9 +904,16 @@ class SonioxSTTService(WebsocketSTTService):
             # Left out unless enabled: older models reject the field.
             if self._agent_text_input_enabled():
                 config["enable_agent_text_input"] = True
+            if s.enable_reconnect:
+                config["enable_reconnect"] = True
 
             # Send the configuration message.
-            await self._websocket.send(json.dumps(config))
+            await websocket.send(json.dumps(config))
+            # Wrapped after the config, which Soniox leaves out of the client
+            # messages it counts.
+            self._websocket = (
+                SonioxWebSocket(websocket, self._connect_to) if s.enable_reconnect else websocket
+            )
             # The new session has no open segment, and words timed against the
             # old one's audio would be placed where the bot's voice is not,
             # where they can cancel the caller's own speech.
@@ -899,6 +924,9 @@ class SonioxSTTService(WebsocketSTTService):
             logger.debug("Connected to Soniox STT")
         except Exception as e:
             self._websocket = None
+            if websocket:
+                # Clearing `_websocket` aborts only a connection stored unwrapped.
+                websocket.transport.abort()
             await self.push_error(error_msg=f"Unable to connect to Soniox: {e}", exception=e)
 
     async def _disconnect_websocket(self):
