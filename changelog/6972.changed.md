@@ -1,0 +1,1 @@
+- `TurnDetection` for OpenAI Realtime now takes `idle_timeout_ms`, so the model prompts a user who has gone silent for that long.
