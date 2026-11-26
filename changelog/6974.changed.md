@@ -1,0 +1,1 @@
+- `RimeTTSService` and `RimeHttpTTSService` now send the `timeScaleFactor` setting for every model, so Mist v3 requests can use the speed control Rime documents for it.
