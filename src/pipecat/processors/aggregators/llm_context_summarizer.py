@@ -128,6 +128,7 @@ class LLMContextSummarizer(BaseObject):
 
         self._summarization_in_progress = False
         self._pending_summary_request_id: str | None = None
+        self._pending_summary_config = self._auto_config.summary_config
 
         # The summary message injected by the last applied summary, tracked by
         # identity so the message-count trigger can exclude it only while it is
@@ -332,6 +333,7 @@ class LLMContextSummarizer(BaseObject):
         # Mark summarization in progress
         self._summarization_in_progress = True
         self._pending_summary_request_id = request_id
+        self._pending_summary_config = summary_config
 
         logger.debug(f"{self}: Sending summarization request (request_id={request_id})")
 
@@ -450,7 +452,7 @@ class LLMContextSummarizer(BaseObject):
         if last_summarized_index >= len(self._context.messages):
             return False
 
-        min_keep = self._auto_config.summary_config.min_messages_after_summary
+        min_keep = self._pending_summary_config.min_messages_after_summary
         remaining = len(self._context.messages) - 1 - last_summarized_index
         if remaining < min_keep:
             return False
@@ -467,7 +469,7 @@ class LLMContextSummarizer(BaseObject):
             summary: The generated summary text.
             last_summarized_index: Index of the last message that was summarized.
         """
-        config = self._auto_config.summary_config
+        config = self._pending_summary_config
         messages = self._context.messages
 
         # Preserve the first message if it is a system message (initial system prompt).
