@@ -11,6 +11,7 @@ import re
 from num2words import num2words
 
 from pipecat.frames.frames import TextType
+from pipecat.utils.text.transforms._minus import minus_before, say_minus
 
 # Maps currency symbol to (singular, plural, cents_singular, cents_plural)
 _CURRENCY_MAP: dict[str, tuple[str, str, str | None, str | None]] = {
@@ -42,9 +43,7 @@ _CURRENCY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# A minus sign touching a currency amount, not a hyphen in a range like $10-$20
-# or a spaced dash separator like "Latte - $4.50".
-_NEGATIVE_CURRENCY_RE = re.compile(r"(?<![\w.,])[-−](?=[€£¥₹\$])")
+_NEGATIVE_CURRENCY_RE = minus_before(r"[€£¥₹\$]")
 
 
 def _amount_to_words(n: float, singular: str, plural: str) -> str:
@@ -114,5 +113,5 @@ async def expand_currency(text: str, text_type: str | TextType) -> str:
         result = await expand_currency("Your balance is $42.50", "*")
         # "Your balance is forty-two dollars and fifty cents"
     """
-    text = _NEGATIVE_CURRENCY_RE.sub("minus ", text)
+    text = say_minus(_NEGATIVE_CURRENCY_RE, text)
     return _CURRENCY_RE.sub(_keep_code_apart, text)
