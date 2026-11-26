@@ -77,19 +77,30 @@ BUILT_IN_ACTIONS = BUILT_IN_ACTIONS_WITHOUT_HANDLER | {"function"}
 RETURN = "return"
 """The transition target that, inside a subflow, leads to the ``return_to`` of the node running it."""
 
+_BOOLEAN_SPELLINGS = {
+    "true": "true",
+    "yes": "true",
+    "on": "true",
+    "false": "false",
+    "no": "false",
+    "off": "false",
+}
+
 
 def case_key(value: Any) -> str:
     """The canonical string a branch matches a case key or result value on.
 
     Booleans, and strings spelling one in any case, become ``true`` and
-    ``false``; everything else is its ``str()``. So ``true:``, ``"True":``,
-    and a result of Python ``True`` all meet at the same case.
+    ``false``; everything else is its ``str()``. The spellings are the ones
+    YAML reads as booleans, ``yes``/``no`` and ``on``/``off`` as well as
+    ``true``/``false``, since a YAML case key written as ``yes:`` arrives as
+    ``True``. So ``true:``, ``yes:``, ``"True":``, and a result of Python
+    ``True`` or ``"yes"`` all meet at the same case.
     """
     if isinstance(value, bool):
         return "true" if value else "false"
     text = str(value)
-    lowered = text.lower()
-    return lowered if lowered in ("true", "false") else text
+    return _BOOLEAN_SPELLINGS.get(text.lower(), text)
 
 
 class FlowConfig(BaseModel):
