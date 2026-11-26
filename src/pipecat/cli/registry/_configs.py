@@ -54,6 +54,7 @@ SERVICE_CONFIGS = {
         "        aiohttp_session=session\n"
         "    )\n"
     ),
+    "fish_stt": 'FishAudioSTTService(api_key=os.getenv("FISH_API_KEY"))',
     "gemini_stt": 'GeminiSTTService(api_key=os.getenv("GOOGLE_API_KEY"))',
     "gladia_stt": (
         "GladiaSTTService(\n"
