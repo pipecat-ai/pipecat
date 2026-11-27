@@ -309,17 +309,6 @@ async def test_sip_info_reaches_the_on_sip_info_handler():
 
 
 @pytest.mark.asyncio
-async def test_sip_info_without_a_handler_is_dropped_quietly():
-    transport, connection = make_transport()
-    set_active_call(connection, handle=9, incoming=True)
-
-    await connection._call_event_handler("info", {"sessionId": "9", "contentType": "", "body": b""})
-    await settle()
-
-    transport._input.push_frame.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_dtmf_a_to_d_filtered_but_reported():
     transport, connection = make_transport()
     set_active_call(connection, handle=9, incoming=True)

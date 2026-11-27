@@ -308,7 +308,9 @@ async def test_extra_config_lines_follow_the_transports_own(env):
     )
 
 
-@pytest.mark.parametrize("extra_config", ["sip_verify_server no", ("",), ("a b\nc d",), (5,)])
+@pytest.mark.parametrize(
+    "extra_config", ["sip_verify_server no", ("",), ("a b\nc d",), ("a\x00b",), (5,)]
+)
 def test_extra_config_rejects_malformed_values(extra_config):
     with pytest.raises(ValueError, match="extra_config"):
         make_connection(extra_config=extra_config)
@@ -902,6 +904,46 @@ async def test_hangup_headers_are_checked_when_set(env, headers):
     with pytest.raises(ValueError):
         connection.set_hangup_headers(headers)
     assert connection._hangup_headers is None
+
+
+@pytest.mark.asyncio
+async def test_hangup_headers_too_long_for_the_stack_are_refused_when_set(env):
+    connection = make_connection()
+    await connection.connect()
+    await _answered_outbound_call(env, connection)
+
+    # "X-Fits: <value>\r\n" is the value plus ten bytes; 2048 is one too many.
+    with pytest.raises(ValueError, match="less than 2048 bytes, got 2048"):
+        connection.set_hangup_headers({"X-Fits": "a" * 2038})
+    assert connection._hangup_headers is None
+
+    connection.set_hangup_headers({"X-Fits": "a" * 2037})
+    assert connection._hangup_headers == {"X-Fits": "a" * 2037}
+
+
+@pytest.mark.asyncio
+async def test_disconnect_finishes_when_the_stack_refuses_the_hangup_headers(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+    connection.set_hangup_headers({"X-RouteType": "queue"})
+
+    async def hangup(headers=None):
+        if headers:
+            raise ValueError("headers must fit in 2048 bytes")
+
+    call.hangup = AsyncMock(side_effect=hangup)
+
+    await connection.disconnect()
+
+    # Refused with the headers, then ended without them; teardown completed.
+    assert [c.kwargs for c in call.hangup.await_args_list] == [
+        {"headers": {"X-RouteType": "queue"}},
+        {},
+    ]
+    env.ua.unregister.assert_awaited_once()
+    env.runtime.close.assert_awaited_once()
+    assert not connection.has_active_call
 
 
 @pytest.mark.asyncio

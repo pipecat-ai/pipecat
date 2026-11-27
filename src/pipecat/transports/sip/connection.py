@@ -185,26 +185,34 @@ def _validate_extra_config(lines: tuple | None) -> tuple:
         raise ValueError("extra_config must be a tuple of lines, not a single string")
     checked = tuple(lines)
     for line in checked:
-        if not isinstance(line, str) or not line.strip() or "\n" in line or "\r" in line:
+        if not isinstance(line, str) or not line.strip() or any(c in line for c in "\n\r\0"):
             raise ValueError(f"extra_config entries must be non-empty single lines, got {line!r}")
     return checked
+
+
+# The stack's buffer for the headers of the message that ends a call, in
+# bytes. The headers are held there as ``"Name: value\r\n"`` lines with a
+# terminator, so their lines must come to less than this.
+_HANGUP_HEADERS_MAX_BYTES = 2048
 
 
 def _validate_headers(headers: dict | None) -> dict | None:
     """Check custom SIP headers and return a copy, or None for no headers.
 
-    The binding makes the same check when the headers are sent. Headers
+    The binding makes the same checks when the headers are sent. Headers
     stored for later (see :meth:`SIPConnection.set_hangup_headers`) are
     checked here instead, so a bad one is reported where it was given and
     not while the call is being torn down.
 
     Raises:
         ValueError: A name that is empty or holds a colon, a space or a line
-            break; a value that is None or holds a line break.
+            break; a value that is None or holds a line break; or headers
+            too long for the stack to carry.
     """
     if not headers:
         return None
     checked = {}
+    size = 0
     for name, value in headers.items():
         if not isinstance(name, str) or not name or any(c in name for c in "\r\n: "):
             raise ValueError(f"invalid SIP header name {name!r}")
@@ -214,6 +222,11 @@ def _validate_headers(headers: dict | None) -> dict | None:
         if "\r" in value or "\n" in value:
             raise ValueError(f"SIP header {name}: the value must be a single line")
         checked[name] = value
+        size += len(f"{name}: {value}\r\n".encode())
+    if size >= _HANGUP_HEADERS_MAX_BYTES:
+        raise ValueError(
+            f"SIP headers must come to less than {_HANGUP_HEADERS_MAX_BYTES} bytes, got {size}"
+        )
     return checked
 
 
@@ -947,6 +960,15 @@ class SIPConnection(BaseObject):
         if call is not None:
             try:
                 await self._hangup_call(call)
+            except ValueError as e:
+                # The stack refused the hang-up headers. Teardown must still
+                # finish and the far end must still be released, so the call
+                # ends without them.
+                logger.warning(f"{self} hang-up headers were not sent: {e}")
+                try:
+                    await call.hangup()
+                except BaresipError as bare_error:
+                    logger.debug(f"{self} hangup on disconnect: {bare_error}")
             except BaresipError as e:
                 logger.debug(f"{self} hangup on disconnect: {e}")
             self._detach_call()
