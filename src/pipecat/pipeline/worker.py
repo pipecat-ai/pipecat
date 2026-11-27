@@ -562,9 +562,7 @@ class PipelineWorker(BaseWorker):
 
             # Republish inbound client UI messages onto the bus so
             # UIWorker subscribers can dispatch them.
-            @self.rtvi.event_handler("on_ui_message")
-            async def on_ui_message(rtvi: RTVIProcessor, message):
-                await self._republish_ui_message_on_bus(message)
+            self.rtvi.add_event_handler("on_ui_message", self._on_rtvi_ui_message)
 
         # This is the idle event. When selected frames are pushed from any
         # processor we consider the pipeline is not idle. We use an observer
@@ -593,13 +591,11 @@ class PipelineWorker(BaseWorker):
         # (via ``attach()``) before ``run()`` is called.
         if bridged is not None:
             edge_source = _BusEdgeProcessor(
-                worker=self,
                 direction=FrameDirection.UPSTREAM,
                 exclude_frames=exclude_frames,
                 name=f"{self}::EdgeSource",
             )
             edge_sink = _BusEdgeProcessor(
-                worker=self,
                 direction=FrameDirection.DOWNSTREAM,
                 exclude_frames=exclude_frames,
                 name=f"{self}::EdgeSink",
@@ -645,12 +641,12 @@ class PipelineWorker(BaseWorker):
         # Bridge pipeline lifecycle to the BaseWorker lifecycle so the bus
         # registry sees this worker as ready/finished.
         @self.event_handler("on_pipeline_started")
-        async def on_started(_task, _frame):
-            await self.start()
+        async def on_started(worker, _frame):
+            await worker.start()
 
         @self.event_handler("on_pipeline_finished")
-        async def on_finished(_task, _frame):
-            await self.stop()
+        async def on_finished(worker, _frame):
+            await worker.stop()
 
     @property
     def params(self) -> PipelineParams:
@@ -1497,6 +1493,9 @@ class PipelineWorker(BaseWorker):
         if not task.cancelled():
             self._pipeline._setup_finished()
 
+    async def _on_rtvi_ui_message(self, rtvi: RTVIProcessor, message):
+        await self._republish_ui_message_on_bus(message)
+
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline worker and processors."""
         # Cleanup base object.
@@ -1505,6 +1504,15 @@ class PipelineWorker(BaseWorker):
         # Cleanup observers.
         await self._observer.cleanup()
 
+        # The pipeline and the RTVI processor may be used again by another
+        # worker, so this one takes back only what it added to them. The turn
+        # observers are this worker's own and are done.
+        if self._rtvi:
+            self._rtvi.remove_event_handler("on_ui_message", self._on_rtvi_ui_message)
+        for observer in (self._turn_tracking_observer, self._turn_trace_observer):
+            if observer:
+                observer._clear_event_handlers()
+
         # End conversation tracing if it's active - this will also close any active turn span
         if self._enable_tracing and self._turn_trace_observer:
             self._turn_trace_observer.end_conversation_tracing()
@@ -1512,6 +1520,7 @@ class PipelineWorker(BaseWorker):
         # Cleanup pipeline processors.
         if cleanup_pipeline:
             await self._pipeline.cleanup()
+            self._pipeline._cleanup_finished()
 
         # Nothing left to answer a probe we are still holding.
         self._foreign_probes.clear()

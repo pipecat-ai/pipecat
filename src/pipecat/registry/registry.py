@@ -101,6 +101,22 @@ class WorkerRegistry:
         if existing:
             await handler(existing)
 
+    async def unwatch(self, worker_name: str, handler: WatchHandler) -> None:
+        """Stop watching for a worker's registration.
+
+        No-op if the handler isn't watching that worker.
+
+        Args:
+            worker_name: The worker name passed to :meth:`watch`.
+            handler: The handler passed to :meth:`watch`.
+        """
+        handlers = self._watches.get(worker_name)
+        if not handlers or handler not in handlers:
+            return
+        handlers.remove(handler)
+        if not handlers:
+            del self._watches[worker_name]
+
     async def register(self, worker_data: WorkerReadyData) -> bool:
         """Register a worker. Returns True if the worker was new.
 

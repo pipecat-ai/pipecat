@@ -179,6 +179,16 @@ class BaseObject(ABC):
             logger.debug(f"{self}: waiting on event handlers to finish {list(event_names)}...")
             await asyncio.wait(tasks)
 
+    def _clear_event_handlers(self):
+        """Drop every registered handler, keeping the events registered.
+
+        For objects that are used once, after their last event: handlers are
+        usually closures over the objects around them, which would otherwise
+        keep this object and its owner alive in a reference cycle.
+        """
+        for event_handler in self._event_handlers.values():
+            event_handler.handlers.clear()
+
     def event_handler(self, event_name: str):
         """Decorator for registering event handlers.
 

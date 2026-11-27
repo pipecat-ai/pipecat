@@ -228,6 +228,11 @@ class UserTurnProcessor(FrameProcessor):
         await self._user_turn_controller.stop()
         await self._user_idle_controller.stop()
 
+    def _cleanup_finished(self):
+        """Drop the setups held by this processor and its turn controller."""
+        super()._cleanup_finished()
+        self._user_turn_controller._cleanup_finished()
+
     async def _cleanup(self):
         await self._user_turn_controller.cleanup()
         await self._user_idle_controller.cleanup()

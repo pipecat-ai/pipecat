@@ -241,6 +241,13 @@ class UserTurnController(BaseObject):
 
         await self._cleanup_strategies()
 
+    def _cleanup_finished(self):
+        """Drop the setup, which holds the worker, once :meth:`cleanup` has returned.
+
+        Setting the controller up again gives it a new one.
+        """
+        self._setup = None
+
     async def update_strategies(self, strategies: UserTurnStrategies):
         """Replace the current strategies with the given ones.
 

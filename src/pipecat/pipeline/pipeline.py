@@ -11,11 +11,26 @@ in sequence and manages frame flow between them, along with helper classes
 for pipeline source and sink operations.
 """
 
+import inspect
+import weakref
 from collections.abc import Callable, Coroutine, Sequence
 
 from pipecat.frames.frames import Frame
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+
+FramePushHandler = Callable[[Frame, FrameDirection], Coroutine]
+
+
+def _owner_handler(handler: FramePushHandler) -> Callable[[], FramePushHandler | None]:
+    """Hold a handler that is a method of the processor's owner weakly.
+
+    The owner holds the processor, so a strong reference back to it would
+    make the two a reference cycle.
+    """
+    if inspect.ismethod(handler):
+        return weakref.WeakMethod(handler)
+    return lambda: handler
 
 
 class PipelineSource(FrameProcessor):
@@ -34,7 +49,7 @@ class PipelineSource(FrameProcessor):
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(enable_direct_mode=True, **kwargs)
-        self._upstream_push_frame = upstream_push_frame
+        self._upstream_push_frame = _owner_handler(upstream_push_frame)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and route them based on direction.
@@ -47,7 +62,8 @@ class PipelineSource(FrameProcessor):
 
         match direction:
             case FrameDirection.UPSTREAM:
-                await self._upstream_push_frame(frame, direction)
+                if handler := self._upstream_push_frame():
+                    await handler(frame, direction)
             case FrameDirection.DOWNSTREAM:
                 await self.push_frame(frame, direction)
 
@@ -70,7 +86,7 @@ class PipelineSink(FrameProcessor):
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(enable_direct_mode=True, **kwargs)
-        self._downstream_push_frame = downstream_push_frame
+        self._downstream_push_frame = _owner_handler(downstream_push_frame)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and route them based on direction.
@@ -85,7 +101,8 @@ class PipelineSink(FrameProcessor):
             case FrameDirection.UPSTREAM:
                 await self.push_frame(frame, direction)
             case FrameDirection.DOWNSTREAM:
-                await self._downstream_push_frame(frame, direction)
+                if handler := self._downstream_push_frame():
+                    await handler(frame, direction)
 
 
 class Pipeline(BasePipeline):
