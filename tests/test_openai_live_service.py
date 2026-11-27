@@ -22,6 +22,7 @@ import pytest
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     ExternalFunctionCallInProgressFrame,
     FunctionCallCancelFrame,
     FunctionCallResultFrame,
@@ -539,8 +540,10 @@ async def test_assistant_turn_brackets_text_with_one_response_and_tts_pair():
         LLMFullResponseStartFrame,
         TTSStartedFrame,
         LLMTextFrame,
+        AggregatedTextFrame,
         TTSTextFrame,
         LLMTextFrame,
+        AggregatedTextFrame,
         TTSTextFrame,
         TTSStoppedFrame,
         LLMFullResponseEndFrame,
@@ -548,9 +551,13 @@ async def test_assistant_turn_brackets_text_with_one_response_and_tts_pair():
     llm_text = recorder.of_types(LLMTextFrame)
     assert [f.text for f in llm_text] == ["Hi", " there"]
     assert all(f.append_to_context is False for f in llm_text)
+    announcements = [f for f in frames if type(f) is AggregatedTextFrame]
+    assert [f.text for f in announcements] == ["Hi", " there"]
+    assert all(f.will_be_spoken and f.append_to_context is False for f in announcements)
     tts_text = recorder.of_types(TTSTextFrame)
     assert [f.text for f in tts_text] == ["Hi", " there"]
     assert all(f.includes_inter_frame_spaces for f in tts_text)
+    assert [f.segment_id for f in tts_text] == [f.id for f in announcements]
 
 
 @pytest.mark.asyncio
