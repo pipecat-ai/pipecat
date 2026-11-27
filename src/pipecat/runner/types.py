@@ -348,7 +348,8 @@ class SIPRunnerArguments(RunnerArguments):
             address per destination. Set it for a registrar on loopback
             ("127.0.0.1") or one address of a multi-homed host. See
             :class:`~pipecat.transports.sip.connection.SIPConnection`.
-        sip_port: A fixed local SIP port (TLS on the next one); None binds an
+        sip_port: A fixed local SIP port, for inbound calls over UDP and TCP
+            (the stack cannot accept TLS connections); None binds an
             ephemeral port. Set it for trunk mode behind a carrier that
             routes to a fixed host:port.
         jitter_buffer_mode: The receive jitter buffer: "off", "fixed", or

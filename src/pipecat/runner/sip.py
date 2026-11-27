@@ -83,9 +83,11 @@ Environment variables:
 - SIP_NET_INTERFACE (optional) - Restrict the stack to one local interface, by
   name or address: "127.0.0.1" for a registrar on loopback, or one address of
   a multi-homed host. Unset lets the OS pick the source address.
-- SIP_PORT (optional) - A fixed local SIP port for UDP and TCP, TLS on the next
-  one. Unset binds an ephemeral port, which suits a registering bot; set it for
-  trunk mode (SIP_REG_INTERVAL=0) behind a carrier that routes to host:port.
+- SIP_PORT (optional) - A fixed local SIP port, for inbound calls over UDP and
+  TCP. The stack opens the next port for TLS, but without a server certificate
+  a peer cannot connect to it. Unset binds an ephemeral port, which suits a
+  registering bot; set it for trunk mode (SIP_REG_INTERVAL=0) behind a carrier
+  that routes to host:port.
 - SIP_JITTER_BUFFER (optional) - The receive jitter buffer: "off",
   "fixed:MIN-MAX" or "adaptive:MIN-MAX" in milliseconds (a bare "MIN-MAX"
   means fixed). Unset selects the transport's default, a fixed 40–60 ms;

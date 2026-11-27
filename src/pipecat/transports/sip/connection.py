@@ -672,8 +672,11 @@ class SIPConnection(BaseObject):
                 breaks all address selection. Runtime-wide.
             sip_port: The local SIP port, e.g. ``5060``. The stack binds it
                 on each interface it uses, so ``net_interface`` decides
-                the addresses. UDP and TCP listen on this port and TLS on
-                the next one (``5060`` gives TLS on ``5061``). None (the
+                the addresses. UDP and TCP listen on this port. The stack
+                also opens the next port for TLS (``5060`` gives
+                ``5061``), but it has no server certificate, so a TLS
+                connection from a peer fails its handshake there: a fixed
+                port cannot take inbound calls over TLS. None (the
                 default) binds an ephemeral port, which is correct for a
                 registering connection: the registration tells the server
                 where the bot is. Set it for trunk mode (``reg_interval=0``)
