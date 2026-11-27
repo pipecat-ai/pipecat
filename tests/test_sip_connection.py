@@ -823,6 +823,30 @@ async def test_hangup_headers_do_not_reach_the_next_call(env):
 
 
 @pytest.mark.asyncio
+async def test_transfer_without_headers_calls_the_binding_bare(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+
+    await connection.transfer("sip:9197@example.com")
+
+    call.transfer.assert_awaited_once_with("sip:9197@example.com")
+
+
+@pytest.mark.asyncio
+async def test_transfer_passes_headers_through(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+
+    await connection.transfer("sip:9197@example.com", headers={"User-to-User": "56a3;encoding=hex"})
+
+    call.transfer.assert_awaited_once_with(
+        "sip:9197@example.com", headers={"User-to-User": "56a3;encoding=hex"}
+    )
+
+
+@pytest.mark.asyncio
 async def test_reject_defaults_to_busy_here(env):
     connection = make_connection()
     await connection.connect()

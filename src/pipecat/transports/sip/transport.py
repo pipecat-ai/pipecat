@@ -36,7 +36,8 @@ errors and warnings carry ``errorMsg``. Daily's ``provider`` and
 ``sip_attended_transfer`` and ``set_hangup_headers`` — all return
 ``str | None`` errors and never raise.
 
-**Equivalent with deltas:** ``sip_refer`` sends a true SIP REFER;
+**Equivalent with deltas:** ``sip_refer`` sends a true SIP REFER, and
+takes Daily's ``sipHeaders`` to carry call context to the destination;
 ``sip_call_transfer`` is **rejected with an error for now** — Daily's
 version re-anchors the call in its cloud, and substituting a REFER
 would silently change the semantics (mediated transfer, with the bot
@@ -771,9 +772,25 @@ class SIPTransport(BaseTransport):
         registrar, not a carrier PSTN trunk. For a transfer that confirms the
         target answered first, see :meth:`sip_attended_transfer`.
 
+        ``sipHeaders`` carries call context to the destination, so the
+        caller does not have to repeat it: a contact center's
+        ``User-to-User`` data, or a case number in an ``X-`` header. The
+        headers travel attached to the destination URI, and the far end
+        sets them on the call it places. Put them all in ``sipHeaders``:
+        a ``toEndPoint`` that already carries headers (after a ``?``) is
+        refused when ``sipHeaders`` is given too.
+
+        Example::
+
+            await transport.sip_refer({
+                "toEndPoint": "sip:agents@pbx.example.com",
+                "sipHeaders": {"User-to-User": "56a390f3;encoding=hex", "X-Case": "1234"},
+            })
+
         Args:
             settings: ``toEndPoint`` (the destination URI); optional
-                ``sessionId``.
+                ``sessionId`` and ``sipHeaders`` (header names to string
+                values).
 
         Returns:
             An error description, or None on success.
@@ -800,11 +817,15 @@ class SIPTransport(BaseTransport):
         Args:
             settings: ``toEndPoint`` (the target URI); optional ``sessionId``
                 (the leg to transfer; defaults to the active call).
+                ``sipHeaders`` is refused: an attended transfer carries no
+                context to the target.
 
         Returns:
             An error description, or None on success.
         """
         settings = settings or {}
+        if settings.get("sipHeaders"):
+            return "sipHeaders is not supported on an attended transfer; use sip_refer"
         session_id = (
             settings.get("sessionId") or self._dial_out_session_id or self._dial_in_session_id
         )
@@ -917,8 +938,22 @@ class SIPTransport(BaseTransport):
         to_end_point = settings.get("toEndPoint")
         if not to_end_point:
             return "Can't transfer SIP call if 'toEndPoint' is not set"
+        sip_headers = settings.get("sipHeaders")
+        if sip_headers is not None:
+            if not isinstance(sip_headers, dict) or not all(
+                isinstance(value, str) for value in sip_headers.values()
+            ):
+                return "sipHeaders must be a dict of header names to string values"
+            if sip_headers and "?" in to_end_point:
+                return (
+                    "SIP headers were given in both toEndPoint and sipHeaders: "
+                    "put them all in sipHeaders"
+                )
         try:
-            await self._connection.transfer(to_end_point)
+            if sip_headers:
+                await self._connection.transfer(to_end_point, headers=sip_headers)
+            else:
+                await self._connection.transfer(to_end_point)
         except Exception as e:
             return str(e)
         return None

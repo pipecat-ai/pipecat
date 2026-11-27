@@ -1063,16 +1063,31 @@ class SIPConnection(BaseObject):
         call = self._require_call()
         await call.resume()
 
-    async def transfer(self, uri: str):
+    async def transfer(self, uri: str, headers: dict | None = None):
         """Blind-transfer the active call (REFER).
 
         On success the call closes — that is the protocol, not an error.
 
+        Args:
+            uri: The SIP URI the far end should call.
+            headers: Context for the party the far end calls, such as
+                ``{"User-to-User": "56a390f3;encoding=hex"}`` or a case
+                number in an ``X-`` header. They travel attached to
+                ``uri``, escaped, and the far end sets them on the call it
+                places; whether it does is the far end's choice. None
+                sends the bare URI.
+
         Raises:
+            ValueError: A header with an invalid name or value, or one
+                that defines the call itself (From, To, Call-ID, Via,
+                Contact and the like).
             TransferFailed: The far end refused or the transfer failed.
         """
         call = self._require_call()
-        await call.transfer(uri)
+        if headers:
+            await call.transfer(uri, headers=headers)
+        else:
+            await call.transfer(uri)
 
     async def attended_transfer(self, consult: "SIPConnection"):
         """Splice the active call together with a consult call.

@@ -384,6 +384,69 @@ async def test_sip_refer_sends_refer_and_call_transfer_is_rejected():
     assert connection.transfer.await_count == 1  # the rejection never touched the call
 
 
+@pytest.mark.asyncio
+async def test_sip_refer_passes_sip_headers_to_the_transfer():
+    transport, connection = make_transport()
+    set_active_call(connection, handle=7)
+    transport._dial_in_session_id = "7"
+    headers = {"User-to-User": "56a390f3;encoding=hex", "X-Case": "1234"}
+
+    assert (
+        await transport.sip_refer({"toEndPoint": "sip:9197@x.com", "sipHeaders": headers}) is None
+    )
+    connection.transfer.assert_awaited_once_with("sip:9197@x.com", headers=headers)
+
+    # An empty dict is the same as none: the bare call, as without the key.
+    connection.transfer.reset_mock()
+    assert await transport.sip_refer({"toEndPoint": "sip:9197@x.com", "sipHeaders": {}}) is None
+    connection.transfer.assert_awaited_once_with("sip:9197@x.com")
+
+
+@pytest.mark.parametrize("sip_headers", ["X-Case: 1", ["X-Case"], {"X-Case": 1}, {"X-Case": None}])
+@pytest.mark.asyncio
+async def test_sip_refer_refuses_sip_headers_of_the_wrong_shape(sip_headers):
+    transport, connection = make_transport()
+    set_active_call(connection, handle=7)
+    transport._dial_in_session_id = "7"
+
+    error = await transport.sip_refer({"toEndPoint": "sip:9197@x.com", "sipHeaders": sip_headers})
+
+    assert error == "sipHeaders must be a dict of header names to string values"
+    connection.transfer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sip_refer_refuses_headers_in_both_places():
+    transport, connection = make_transport()
+    set_active_call(connection, handle=7)
+    transport._dial_in_session_id = "7"
+
+    error = await transport.sip_refer(
+        {"toEndPoint": "sip:9197@x.com?X-A=1", "sipHeaders": {"X-B": "2"}}
+    )
+    assert "both toEndPoint and sipHeaders" in error
+    connection.transfer.assert_not_awaited()
+
+    # Headers in the URI alone still go through untouched, as before.
+    assert await transport.sip_refer({"toEndPoint": "sip:9197@x.com?X-A=1"}) is None
+    connection.transfer.assert_awaited_once_with("sip:9197@x.com?X-A=1")
+
+
+@pytest.mark.asyncio
+async def test_attended_transfer_refuses_sip_headers():
+    transport, connection = make_transport()
+    set_active_call(connection, handle=7)
+    transport._dial_in_session_id = "7"
+    connection.consult_connection = Mock()
+
+    error = await transport.sip_attended_transfer(
+        {"toEndPoint": "sip:9197@x.com", "sipHeaders": {"X-Case": "1"}}
+    )
+
+    assert "not supported on an attended transfer" in error
+    connection.consult_connection.assert_not_called()
+
+
 def _fake_consult():
     consult = Mock()
     consult.connect = AsyncMock()
