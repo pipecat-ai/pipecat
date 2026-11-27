@@ -1061,6 +1061,12 @@ class SarvamRealtimeSTTSettings(STTSettings):
         threshold: Optional VAD sensitivity threshold.
         silence_duration_ms: Optional silence duration for end-of-speech.
         min_speech_duration_ms: Optional minimum speech duration.
+        speaker_format: Optional format string for diarized speaker runs, used
+            with ``with_diarization=True``. Use ``{speaker}`` for Sarvam's speaker
+            label (e.g. ``"spk_0"``), ``{speaker_number}`` for the speaker's order
+            of first appearance in the session, and ``{text}`` for the transcript
+            text, e.g. ``"Speaker {speaker_number}: {text}"``. If ``None``,
+            transcript text is not modified.
     """
 
     language_code: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -1072,6 +1078,7 @@ class SarvamRealtimeSTTSettings(STTSettings):
     threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 def _error_event_category(message: dict[str, Any]) -> ErrorCategory | None:
@@ -1148,6 +1155,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         endpointing: Literal["vad", "manual"] = "vad",
         sample_rate: int | None = None,
         return_timestamps: bool = False,
+        with_diarization: bool = False,
         keyterms: list[str] | None = None,
         prefix_padding_ms: int | None = None,
         settings: Settings | None = None,
@@ -1166,8 +1174,18 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
                 fixed for the life of the service. Defaults to ``vad``.
             sample_rate: Declared input audio sample rate, 8000 or 16000. ``None``
                 adopts the pipeline's input rate.
-            return_timestamps: Whether final transcripts should include segment
-                offsets. Defaults to False.
+            return_timestamps: Whether final transcripts should include the
+                utterance's start and end times (``start_s``/``end_s`` in
+                ``result``). Word-level times need ``with_diarization``. Defaults
+                to False.
+            with_diarization: Speaker diarization with word-level timestamps
+                (beta, ``saaras:v4`` only, not in ``translate`` mode). Each final
+                is pushed as one ``TranscriptionFrame`` per contiguous speaker run,
+                with ``speaker`` set, and ``result["words"]`` carries each word's
+                ``start_s``/``end_s`` (seconds from the start of the connection)
+                and ``speaker`` on partials and finals. Sarvam enables the beta per
+                account; without access the connection is refused. Fixed for the
+                life of the service. Defaults to False.
             keyterms: Connection-time recognition hints for saaras:v4. At most 50
                 terms of 64 characters each; put each phrase in a separate item.
             prefix_padding_ms: Optional VAD prefix padding, used only under
@@ -1202,6 +1220,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             threshold=None,
             silence_duration_ms=None,
             min_speech_duration_ms=None,
+            speaker_format=None,
         )
         if settings is not None:
             default_settings.apply_update(_without_language_code(settings))
@@ -1218,6 +1237,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._base_url = base_url
         self._return_timestamps = return_timestamps
+        self._with_diarization = with_diarization
         self._keyterms = list(keyterms) if keyterms is not None else None
         self._prefix_padding_ms = prefix_padding_ms
         self._should_interrupt = should_interrupt
@@ -1578,7 +1598,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        unsupported = set(changed) - _RUNTIME_CONFIG_FIELDS - {"language"}
+        # speaker_format only changes how this service formats diarized text.
+        unsupported = set(changed) - _RUNTIME_CONFIG_FIELDS - {"language", "speaker_format"}
         if unsupported:
             self._warn_unhandled_updated_settings({key: changed[key] for key in unsupported})
 
@@ -1645,15 +1666,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             language = self._language_for_frame(message.get("language"))
             result = self._result_payload(message)
             result["speech_end_audio_position_s"] = self._speech_end_audio_position_s
-            await self.push_frame(
-                TranscriptionFrame(
-                    text,
-                    self._user_id,
-                    time_now_iso8601(),
-                    language,
-                    result=result,
-                    finalized=True,
-                )
+            runs = self._diarized_runs(text, self._word_speakers(message))
+            await self._push_transcription_runs(
+                runs, language=language, result=result, finalized=True
             )
             await self._trace_transcription(text, True, language)
 
@@ -1721,6 +1736,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             "mode": self._settings.mode,
             "return_timestamps": str(self._return_timestamps).lower(),
         }
+        if self._with_diarization:
+            params["with_diarization"] = "true"
         if self._keyterms is not None:
             params["keyterms"] = json.dumps(self._keyterms)
         optional: dict[str, Any] = {"prompt": self._settings.prompt}
@@ -1745,6 +1762,19 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         if bytes_per_second <= 0:
             return 0.0
         return byte_count / bytes_per_second
+
+    def _word_speakers(self, message: dict[str, Any]) -> list[tuple[str, Any]] | None:
+        """Return ``(word, speaker)`` pairs of a diarized final, or ``None``."""
+        if not self._with_diarization:
+            return None
+        words = message.get("words")
+        if not isinstance(words, list) or not words:
+            return None
+        return [
+            (word["word"], word.get("speaker"))
+            for word in words
+            if isinstance(word, dict) and isinstance(word.get("word"), str)
+        ]
 
     def _result_payload(self, message: dict[str, Any]) -> dict[str, Any]:
         payload = dict(message)
