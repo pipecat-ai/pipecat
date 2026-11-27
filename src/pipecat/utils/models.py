@@ -14,7 +14,9 @@ from typing import Any, TypeVar
 _M = TypeVar("_M")
 
 _models: dict[Hashable, Any] = {}
-_loading = threading.Lock()
+# One lock per key, so loading one model never holds up another.
+_key_locks: dict[Hashable, threading.Lock] = {}
+_key_locks_lock = threading.Lock()
 
 
 async def load_shared_model(key: Hashable, load: Callable[[], _M]) -> _M:
@@ -34,12 +36,33 @@ async def load_shared_model(key: Hashable, load: Callable[[], _M]) -> _M:
     Raises:
         Exception: Whatever ``load`` raised.
     """
-    return await asyncio.to_thread(_shared_model, key, load)
+    return await asyncio.to_thread(get_shared_model, key, load)
 
 
-def _shared_model(key: Hashable, load: Callable[[], _M]) -> _M:
-    """The model loaded for ``key``, loading it first if no one has."""
-    with _loading:
+def get_shared_model(key: Hashable, load: Callable[[], _M]) -> _M:
+    """Load a model in the calling thread, or share the one already loaded for ``key``.
+
+    The blocking form of :func:`load_shared_model`, for models that must be
+    ready as soon as their owner is constructed. The first call for a key
+    blocks while ``load`` runs, so keep it to models that load quickly from
+    local files; later calls return the loaded model without locking.
+
+    Args:
+        key: What identifies the model and its settings.
+        load: Loads the model.
+
+    Returns:
+        The model.
+
+    Raises:
+        Exception: Whatever ``load`` raised.
+    """
+    model = _models.get(key)
+    if model is not None:
+        return model
+    with _key_locks_lock:
+        key_lock = _key_locks.setdefault(key, threading.Lock())
+    with key_lock:
         if key not in _models:
             _models[key] = load()
         return _models[key]

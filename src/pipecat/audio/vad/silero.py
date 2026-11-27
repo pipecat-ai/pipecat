@@ -17,6 +17,7 @@ import numpy as np
 from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
+from pipecat.utils.models import get_shared_model
 
 # Model state resets.
 #
@@ -47,12 +48,52 @@ except ModuleNotFoundError as e:
     raise ImportError(f"Missing module(s): {e}") from e
 
 
+def _resolve_bundled_model_path() -> str:
+    """Resolve the filesystem path to the bundled Silero VAD ONNX model."""
+    model_name = "silero_vad.onnx"
+    package_path = "pipecat.audio.vad.data"
+
+    try:
+        import importlib_resources as impresources
+
+        return str(impresources.files(package_path).joinpath(model_name))
+    except BaseException:
+        from importlib import resources as impresources
+
+        try:
+            with impresources.path(package_path, model_name) as f:
+                return str(f)
+        except BaseException:
+            return str(impresources.files(package_path).joinpath(model_name))
+
+
+def _open_session(path: str, force_onnx_cpu: bool) -> "onnxruntime.InferenceSession":
+    """Load the Silero VAD model into an ONNX inference session."""
+    logger.debug("Loading Silero VAD model...")
+    opts = onnxruntime.SessionOptions()
+    opts.inter_op_num_threads = 1
+    opts.intra_op_num_threads = 1
+
+    if force_onnx_cpu and "CPUExecutionProvider" in onnxruntime.get_available_providers():
+        session = onnxruntime.InferenceSession(
+            path, providers=["CPUExecutionProvider"], sess_options=opts
+        )
+    else:
+        session = onnxruntime.InferenceSession(path, sess_options=opts)
+    logger.debug("Loaded Silero VAD")
+    return session
+
+
 class SileroOnnxModel:
     """ONNX runtime wrapper for the Silero VAD model.
 
     Provides voice activity detection using the pre-trained Silero VAD model
     with ONNX runtime for efficient inference. Handles model state management
     and input validation for audio processing.
+
+    Every instance with the same path and ``force_onnx_cpu`` shares one ONNX
+    session, loaded once a process (see :func:`pipecat.utils.models.get_shared_model`).
+    The recurrent state managed by ``reset_states`` stays per-instance.
     """
 
     def __init__(self, path, force_onnx_cpu=True):
@@ -62,16 +103,12 @@ class SileroOnnxModel:
             path: Path to the ONNX model file.
             force_onnx_cpu: Whether to force CPU execution provider.
         """
-        opts = onnxruntime.SessionOptions()
-        opts.inter_op_num_threads = 1
-        opts.intra_op_num_threads = 1
-
-        if force_onnx_cpu and "CPUExecutionProvider" in onnxruntime.get_available_providers():
-            self.session = onnxruntime.InferenceSession(
-                path, providers=["CPUExecutionProvider"], sess_options=opts
-            )
-        else:
-            self.session = onnxruntime.InferenceSession(path, sess_options=opts)
+        # The session's weights are immutable and ONNX Runtime runs a CPU session
+        # concurrently, so one session serves every instance.
+        path = str(path)
+        self.session = get_shared_model(
+            ("silero-vad", path, force_onnx_cpu), lambda: _open_session(path, force_onnx_cpu)
+        )
 
         self.reset_states()
         self.sample_rates = [8000, 16000]
@@ -166,23 +203,7 @@ class SileroVADAnalyzer(VADAnalyzer):
         """
         super().__init__(sample_rate=sample_rate, params=params)
 
-        logger.debug("Loading Silero VAD model...")
-
-        model_name = "silero_vad.onnx"
-        package_path = "pipecat.audio.vad.data"
-
-        try:
-            import importlib_resources as impresources
-
-            model_file_path = str(impresources.files(package_path).joinpath(model_name))
-        except BaseException:
-            from importlib import resources as impresources
-
-            try:
-                with impresources.path(package_path, model_name) as f:
-                    model_file_path = f
-            except BaseException:
-                model_file_path = str(impresources.files(package_path).joinpath(model_name))
+        model_file_path = _resolve_bundled_model_path()
 
         self._model = SileroOnnxModel(model_file_path, force_onnx_cpu=True)
 
@@ -190,8 +211,6 @@ class SileroVADAnalyzer(VADAnalyzer):
         # most recent windows in a row scored below _MODEL_RESET_MAX_CONFIDENCE.
         self._windows_since_reset = 0
         self._low_confidence_windows = 0
-
-        logger.debug("Loaded Silero VAD")
 
     #
     # VADAnalyzer
