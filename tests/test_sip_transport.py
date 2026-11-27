@@ -10,6 +10,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+import numpy as np
 import pytest
 
 # The ``sip`` extra is optional; skip the whole module when baresip-python
@@ -18,14 +19,17 @@ pytest.importorskip("baresip")
 
 from pipecat.frames.frames import (  # noqa: E402
     ClientConnectedFrame,
+    ErrorFrame,
     InputAudioRawFrame,
     InputDTMFFrame,
     InterruptionFrame,
     KeypadEntry,
     OutputAudioRawFrame,
     OutputDTMFFrame,
+    TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection  # noqa: E402
+from pipecat.tests.utils import run_test  # noqa: E402
 from pipecat.transports.base_output import BaseOutputTransport  # noqa: E402
 from pipecat.transports.sip.connection import SIPConnection  # noqa: E402
 from pipecat.transports.sip.transport import (  # noqa: E402
@@ -517,6 +521,107 @@ async def test_write_audio_frame_upmixes_mono_to_call_channels():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "out_channels, tx_channels, audio, written",
+    [
+        (1, 1, b"\x02\x00\x04\x00", b"\x02\x00\x04\x00"),
+        (1, 2, b"\x02\x00\x04\x00", b"\x02\x00\x02\x00\x04\x00\x04\x00"),
+        (2, 1, b"\x02\x00\x04\x00\x06\x00\x08\x00", b"\x03\x00\x07\x00"),
+        (2, 2, b"\x02\x00\x04\x00\x06\x00\x08\x00", b"\x02\x00\x04\x00\x06\x00\x08\x00"),
+    ],
+)
+async def test_write_audio_frame_converts_pipeline_channels_to_call_channels(
+    out_channels, tx_channels, audio, written
+):
+    transport, connection = make_transport(audio_out_channels=out_channels)
+    output = SIPOutputTransport(transport, connection, transport._params)
+    connection.audio_info = Mock(
+        return_value=tx_info(tx_sample_rate=48000, tx_channels=tx_channels)
+    )
+    connection.write_audio = Mock(side_effect=len)
+
+    frame = OutputAudioRawFrame(audio=audio, sample_rate=48000, num_channels=out_channels)
+    assert await output.write_audio_frame(frame) is True
+
+    connection.write_audio.assert_called_once_with(written)
+
+
+@pytest.mark.asyncio
+async def test_write_audio_frame_resamples_two_channels_through_mono():
+    transport, connection = make_transport(audio_out_channels=2)
+    output = SIPOutputTransport(transport, connection, transport._params)
+    connection.audio_info = Mock(return_value=tx_info(tx_sample_rate=48000, tx_channels=2))
+    written = bytearray()
+    connection.write_audio = Mock(side_effect=lambda b: written.extend(b) or len(b))
+
+    # 100 ms of 16 kHz stereo, both channels alike.
+    frame = OutputAudioRawFrame(audio=b"\x10\x00" * 3200, sample_rate=16000, num_channels=2)
+    await output.write_audio_frame(frame)
+    await output.write_audio_frame(frame)
+
+    # 200 ms of 48 kHz stereo is 9600 frames of 4 bytes, less whatever the
+    # resampler still holds; both channels of every frame are equal.
+    assert len(written) % 4 == 0
+    assert 30000 <= len(written) <= 38400
+    samples = np.frombuffer(bytes(written), dtype=np.int16).reshape(-1, 2)
+    assert (samples[:, 0] == samples[:, 1]).all()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tx_channels, written",
+    [
+        (2, b"\x02\x00\x02\x00\x04\x00\x04\x00"),
+        (1, b"\x02\x00\x04\x00"),
+    ],
+)
+async def test_write_audio_frame_converts_from_the_frames_own_channel_count(tx_channels, written):
+    # The base output transport labels a chunk with its source frame's
+    # channel count, so mono TTS audio arrives mono at audio_out_channels=2.
+    transport, connection = make_transport(audio_out_channels=2)
+    output = SIPOutputTransport(transport, connection, transport._params)
+    connection.audio_info = Mock(
+        return_value=tx_info(tx_sample_rate=48000, tx_channels=tx_channels)
+    )
+    connection.write_audio = Mock(side_effect=len)
+
+    mono = OutputAudioRawFrame(audio=b"\x02\x00\x04\x00", sample_rate=48000, num_channels=1)
+    assert await output.write_audio_frame(mono) is True
+
+    connection.write_audio.assert_called_once_with(written)
+
+
+@pytest.mark.asyncio
+async def test_mono_tts_and_end_silence_reach_a_two_channel_call():
+    # Through the base output transport: a mono TTS frame, then the mono
+    # silence the base sends before the pipeline ends.
+    transport, connection = make_transport(audio_out_channels=2, audio_out_sample_rate=48000)
+    output = SIPOutputTransport(transport, connection, transport._params)
+    connection.audio_info = Mock(return_value=tx_info(tx_sample_rate=48000, tx_channels=2))
+    written = bytearray()
+    connection.write_audio = Mock(side_effect=lambda b: written.extend(b) or len(b))
+
+    # 40 ms of mono fills exactly one output chunk at two channels.
+    speech = TTSAudioRawFrame(audio=b"\x02\x00" * 1920, sample_rate=48000, num_channels=1)
+    _, up_frames = await run_test(output, frames_to_send=[speech])
+
+    assert not [f for f in up_frames if isinstance(f, ErrorFrame)]
+    samples = np.frombuffer(bytes(written), dtype=np.int16).reshape(-1, 2)
+    assert (samples[:, 0] == samples[:, 1]).all()
+    assert (samples[:1920, 0] == 2).all()
+    assert (samples[1920:, 0] == 0).all()
+    # The speech, then the base's end-of-call silence, at real-time length.
+    assert len(samples) == 1920 + 48000 * output._params.audio_out_end_silence_secs
+
+
+def test_params_reject_unsupported_channel_counts():
+    with pytest.raises(ValueError, match="audio_in_channels"):
+        make_transport(audio_in_channels=3)
+    with pytest.raises(ValueError, match="audio_out_channels"):
+        make_transport(audio_out_channels=0)
+
+
+@pytest.mark.asyncio
 async def test_write_audio_frame_without_ready_call_returns_false():
     transport, connection = make_transport()
     output = SIPOutputTransport(transport, connection, transport._params)
@@ -760,6 +865,61 @@ async def test_receive_audio_downmixes_interleaved_channels():
     connection.read_audio.assert_called_with(7680)  # 40 ms of 48 kHz stereo
     frame = input_transport.push_audio_frame.await_args.args[0]
     assert frame.audio == b"\x03\x00\x07\x00"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "in_channels, rx_channels, pcm, pushed",
+    [
+        (1, 1, b"\x02\x00\x04\x00", b"\x02\x00\x04\x00"),
+        (1, 2, b"\x02\x00\x04\x00\x06\x00\x08\x00", b"\x03\x00\x07\x00"),
+        (2, 1, b"\x02\x00\x04\x00", b"\x02\x00\x02\x00\x04\x00\x04\x00"),
+        (2, 2, b"\x02\x00\x04\x00\x06\x00\x08\x00", b"\x02\x00\x04\x00\x06\x00\x08\x00"),
+    ],
+)
+async def test_receive_audio_converts_call_channels_to_pipeline_channels(
+    in_channels, rx_channels, pcm, pushed
+):
+    from pipecat.transports.sip.transport import SIPInputTransport
+
+    transport, connection = make_transport(audio_in_channels=in_channels)
+    input_transport = SIPInputTransport(transport, connection, transport._params)
+    input_transport._streaming = True
+    input_transport._sample_rate = 48000  # pipeline rate == call rate: no resampling
+    input_transport.push_audio_frame = AsyncMock()
+    connection.audio_info = Mock(
+        return_value=SimpleNamespace(rx_sample_rate=48000, rx_channels=rx_channels)
+    )
+    connection.read_audio = Mock(side_effect=[pcm, asyncio.CancelledError()])
+
+    with pytest.raises(asyncio.CancelledError):
+        await input_transport._receive_audio()
+
+    frame = input_transport.push_audio_frame.await_args.args[0]
+    assert frame.audio == pushed
+    assert frame.num_channels == in_channels
+
+
+@pytest.mark.asyncio
+async def test_receive_audio_resamples_two_channels_through_mono():
+    from pipecat.transports.sip.transport import SIPInputTransport
+
+    transport, connection = make_transport(audio_in_channels=2)
+    input_transport = SIPInputTransport(transport, connection, transport._params)
+    input_transport._streaming = True
+    input_transport._sample_rate = 16000  # call is 48 kHz stereo: downsample
+    input_transport.push_audio_frame = AsyncMock()
+    connection.audio_info = Mock(return_value=SimpleNamespace(rx_sample_rate=48000, rx_channels=2))
+    pcm = b"\x10\x00" * 3840  # 40 ms of 48 kHz stereo
+    connection.read_audio = Mock(side_effect=[pcm, pcm, pcm, asyncio.CancelledError()])
+
+    with pytest.raises(asyncio.CancelledError):
+        await input_transport._receive_audio()
+
+    frames = [c.args[0] for c in input_transport.push_audio_frame.await_args_list]
+    assert frames and all(f.num_channels == 2 and f.sample_rate == 16000 for f in frames)
+    samples = np.frombuffer(b"".join(f.audio for f in frames), dtype=np.int16).reshape(-1, 2)
+    assert (samples[:, 0] == samples[:, 1]).all()
 
 
 @pytest.mark.asyncio
