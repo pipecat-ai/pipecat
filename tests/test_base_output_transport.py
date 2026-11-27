@@ -103,9 +103,11 @@ async def _make_transport(
     audio_out_sample_rate: int | None = None,
     audio_filter: BaseAudioFilter | None = None,
     audio_out_volume: float = 1.0,
+    audio_out_channels: int = 1,
 ) -> BaseOutputTransport:
     params = TransportParams(
         audio_out_enabled=True,
+        audio_out_channels=audio_out_channels,
         audio_out_mixer=mixer,
         audio_out_filter=audio_filter,
         audio_out_sample_rate=audio_out_sample_rate,
@@ -439,6 +441,32 @@ class TestBaseOutputTransportAudioBuffering(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(written, expected)
             # The buffer should be drained by the flush, not just cleared.
             self.assertEqual(sender._buffered_audio_bytes, 0)
+        finally:
+            await transport.cancel(CancelFrame())
+
+    async def test_flushed_partial_chunk_keeps_the_channel_count_of_its_audio(self):
+        transport = await _make_transport(audio_out_channels=2)
+        try:
+            sender = transport._media_senders[None]
+            chunk_size = sender.audio_chunk_size
+
+            # Mono audio, one and a half chunks long: one whole chunk and a
+            # leftover that the end of the turn pads.
+            audio = b"\x01\x02" * (chunk_size * 3 // 4)
+            await transport.process_frame(
+                TTSAudioRawFrame(
+                    audio=audio, sample_rate=sender.sample_rate, num_channels=1, context_id="ctx1"
+                ),
+                FrameDirection.DOWNSTREAM,
+            )
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.1)
+
+            written = [call.args[0] for call in transport.write_audio_frame.call_args_list]
+            self.assertEqual([len(frame.audio) for frame in written], [chunk_size, chunk_size])
+            self.assertEqual([frame.num_channels for frame in written], [1, 1])
         finally:
             await transport.cancel(CancelFrame())
 
