@@ -91,6 +91,15 @@ class EvalSessionParams(BaseModel):
             (failure kind ``audio_unsupported``); a bot that reports nothing,
             such as one on Pipecat before 1.13, runs unchecked. Defaults to
             ``off``.
+        function_call_report_level: Scripted scenarios only: the least detail
+            the bot reports function calls with, whatever the scenario asserts:
+            ``name``, ``arguments`` or ``full``. Once configured,
+            ``name`` records call names in ``events_seen``; ``arguments`` adds
+            their arguments; ``full`` also sends results, which
+            ``events_seen`` leaves out. Defaults to ``None``, asking only
+            for what the expectations need. The level applies to all of the
+            bot's functions, replacing per-function levels the bot set.
+            ``arguments`` needs the bot on Pipecat 1.12 or later.
         stop_bot: No effect: the harness ends the bot's session when a run
             finishes.
 
@@ -114,6 +123,7 @@ class EvalSessionParams(BaseModel):
     cache_dir: str | None = None
     use_cache: bool = True
     audio_support_check: Literal["off", "when_advertised"] = "off"
+    function_call_report_level: Literal["name", "arguments", "full"] | None = None
     stop_bot: bool = False
     trigger_disconnect: bool = False
 

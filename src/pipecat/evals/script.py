@@ -754,7 +754,8 @@ class EvalScriptScenario:
         """The function-call report level the scenario's assertions need: ``full`` for args, ``name`` for names, else ``None``.
 
         A call with an ``eval:`` needs ``full`` too: the judge is asked about
-        the call's arguments.
+        the call's arguments. A run can ask for more with
+        :attr:`~pipecat.evals.session.EvalSessionParams.function_call_report_level`.
         """
         needs_name = False
         for turn in self.turns:
