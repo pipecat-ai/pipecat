@@ -960,13 +960,15 @@ _ERROR_CODE_CATEGORIES = {
 # Accepted in a `config.update` message. `Settings.language` reaches Sarvam as
 # `language_code`; the rest share their `Settings` names. Of these,
 # `language_code`, `stream_type`, `mode`, and `prompt` are boundary-gated: the
-# server defers them to the next utterance boundary.
+# server defers them to the next utterance boundary. `keyterms` travels as a
+# JSON array here, unlike the JSON-encoded string the connection query takes.
 _RUNTIME_CONFIG_FIELDS = frozenset(
     {
         "language_code",
         "stream_type",
         "mode",
         "prompt",
+        "keyterms",
         "threshold",
         "silence_duration_ms",
         "min_speech_duration_ms",
@@ -1058,6 +1060,9 @@ class SarvamRealtimeSTTSettings(STTSettings):
         stream_type: Streaming cadence: ``fast``, ``balanced``, or ``simulated``.
         mode: Realtime STT task mode.
         prompt: Optional decoding prompt.
+        keyterms: Recognition hints for saaras:v4. At most 50 terms of 64
+            characters each; put each phrase in a separate item. ``None`` or
+            an empty list clears them.
         threshold: Optional VAD sensitivity threshold.
         silence_duration_ms: Optional silence duration for end-of-speech.
         min_speech_duration_ms: Optional minimum speech duration.
@@ -1069,6 +1074,7 @@ class SarvamRealtimeSTTSettings(STTSettings):
     )
     mode: SarvamMode | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     prompt: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterms: list[str] | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     silence_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_speech_duration_ms: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -1168,8 +1174,10 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
                 adopts the pipeline's input rate.
             return_timestamps: Whether final transcripts should include segment
                 offsets. Defaults to False.
-            keyterms: Connection-time recognition hints for saaras:v4. At most 50
-                terms of 64 characters each; put each phrase in a separate item.
+            keyterms: Initial recognition hints for saaras:v4. At most 50 terms
+                of 64 characters each; put each phrase in a separate item.
+                ``Settings.keyterms`` takes precedence when both are given,
+                and changes them mid-call.
             prefix_padding_ms: Optional VAD prefix padding, used only under
                 ``endpointing="vad"``.
             settings: Runtime-updatable realtime settings.
@@ -1199,6 +1207,7 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             stream_type="balanced",
             mode="transcribe",
             prompt=None,
+            keyterms=list(keyterms) if keyterms is not None else None,
             threshold=None,
             silence_duration_ms=None,
             min_speech_duration_ms=None,
@@ -1218,7 +1227,6 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._base_url = base_url
         self._return_timestamps = return_timestamps
-        self._keyterms = list(keyterms) if keyterms is not None else None
         self._prefix_padding_ms = prefix_padding_ms
         self._should_interrupt = should_interrupt
         self._receive_task: asyncio.Task | None = None
@@ -1568,6 +1576,8 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
         stored = dict(fields)
         if "language_code" in stored:
             stored["language"] = _language_from_code(stored.pop("language_code"))
+        if stored.get("keyterms") is not None:
+            stored["keyterms"] = list(stored["keyterms"])
         self._settings.apply_update(self.Settings(**stored))
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
@@ -1721,8 +1731,9 @@ class SarvamRealtimeSTTService(WebsocketSTTService):
             "mode": self._settings.mode,
             "return_timestamps": str(self._return_timestamps).lower(),
         }
-        if self._keyterms is not None:
-            params["keyterms"] = json.dumps(self._keyterms)
+        keyterms = self._settings.keyterms
+        if is_given(keyterms) and keyterms is not None:
+            params["keyterms"] = json.dumps(keyterms)
         optional: dict[str, Any] = {"prompt": self._settings.prompt}
         if self._endpointing == "vad":
             optional["prefix_padding_ms"] = self._prefix_padding_ms
