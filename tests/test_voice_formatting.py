@@ -431,6 +431,19 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_units("5m/sec", "*"), "5 meters per second")
         self.assertEqual(await expand_units("2 L/min", "*"), "2 liters per minute")
         self.assertEqual(await expand_units("100 MB/s", "*"), "100 megabytes per second")
+        # Spaces around the slash are the same rate, not a unit left next to "/ h".
+        self.assertEqual(
+            await expand_units("Limit is 100 km / h", "*"), "Limit is 100 kilometers per hour"
+        )
+        self.assertEqual(await expand_units("at 50km / h", "*"), "at 50 kilometers per hour")
+        self.assertEqual(await expand_units("80 km/ h", "*"), "80 kilometers per hour")
+        self.assertEqual(await expand_units("80 km /h", "*"), "80 kilometers per hour")
+        self.assertEqual(
+            await expand_units("wind at 9.8 m / s", "*"), "wind at 9.8 meters per second"
+        )
+        self.assertEqual(await expand_units("5 m / sec", "*"), "5 meters per second")
+        self.assertEqual(await expand_units("2 L / min", "*"), "2 liters per minute")
+        self.assertEqual(await expand_units("100 MB / s", "*"), "100 megabytes per second")
 
     async def test_km(self):
         result = await expand_units("5km away", "*")
