@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.assemblyai.models import (
     AssemblyAIConnectionParams,
+    SilenceMessage,
     TerminationMessage,
     TurnMessage,
     Word,
@@ -1495,3 +1496,77 @@ def test_disconnect_terminates_an_open_session_before_closing():
     ]
     assert service._receive_task is None
     assert service._websocket is None
+
+
+@pytest.mark.parametrize(
+    "setting_val,expected_query_val",
+    [
+        (None, None),
+        (True, "true"),
+        (False, "false"),
+    ],
+)
+def test_acknowledge_silence_in_url_query(setting_val, expected_query_val):
+    kwargs = {}
+    if setting_val is not None:
+        kwargs["settings"] = AssemblyAISTTService.Settings(acknowledge_silence=setting_val)
+    service = AssemblyAISTTService(api_key="test-key", **kwargs)
+    q = _query(service)
+    if expected_query_val is None:
+        assert "acknowledge_silence" not in q
+    else:
+        assert q["acknowledge_silence"] == [expected_query_val]
+
+
+def test_acknowledge_silence_omitted_for_non_u3_model():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(
+            model="universal-streaming-english",
+            acknowledge_silence=True,
+        ),
+    )
+    assert "acknowledge_silence" not in _query(service)
+
+
+def test_deprecated_connection_params_acknowledge_silence():
+    with pytest.warns(DeprecationWarning):
+        service = AssemblyAISTTService(
+            api_key="test-key",
+            connection_params=AssemblyAIConnectionParams(acknowledge_silence=True),
+        )
+    assert _query(service)["acknowledge_silence"] == ["true"]
+
+
+def test_silence_message_is_not_an_error():
+    service = AssemblyAISTTService(api_key="test-key")
+    errors = []
+
+    async def fake_push_error(*args, **kwargs):
+        errors.append((args, kwargs))
+
+    service.push_error = fake_push_error
+    message = {
+        "type": "Silence",
+        "start_ms": 1200,
+        "end_ms": 2200,
+    }
+
+    parsed = service._parse_message(message)
+    assert isinstance(parsed, SilenceMessage)
+    assert parsed.start_ms == 1200
+    assert parsed.end_ms == 2200
+
+    asyncio.run(service._handle_message(message))
+    assert errors == []
+
+
+def test_update_settings_acknowledge_silence_sends_without_reconnect():
+    service = AssemblyAISTTService(api_key="test-key")
+    sent, reconnects = _stub_connection(service)
+
+    delta = AssemblyAISTTService.Settings(acknowledge_silence=True)
+    asyncio.run(service._update_settings(delta))
+
+    assert sent == [{"acknowledge_silence": True}]
+    assert reconnects == []

@@ -139,9 +139,30 @@ class SpeakerRevisionMessage(BaseMessage):
     revisions: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class SilenceMessage(BaseMessage):
+    """Message emitted during periods of silence when acknowledge_silence is enabled.
+
+    Emitted roughly once per second while no speech is being transcribed (U3 Pro only).
+
+    Parameters:
+        type: Always "Silence" for this message type.
+        start_ms: Session audio position start timestamp in milliseconds.
+        end_ms: Session audio position end timestamp in milliseconds.
+    """
+
+    type: Literal["Silence"] = "Silence"
+    start_ms: int
+    end_ms: int
+
+
 # Union type for all possible message types
 AnyMessage = (
-    BeginMessage | TurnMessage | SpeechStartedMessage | TerminationMessage | SpeakerRevisionMessage
+    BeginMessage
+    | TurnMessage
+    | SpeechStartedMessage
+    | TerminationMessage
+    | SpeakerRevisionMessage
+    | SilenceMessage
 )
 
 
@@ -182,6 +203,9 @@ class AssemblyAIConnectionParams(BaseModel):
             align this value with your VAD's activation threshold to avoid the "dead zone"
             where AssemblyAI transcribes speech that your VAD hasn't detected yet.
             Defaults to None (not sent).
+        acknowledge_silence: Enable periodic Silence messages from the server during
+            stretches of audio where no speech is transcribed (U3 Pro only).
+            Defaults to None (not sent).
     """
 
     sample_rate: int = 16000
@@ -205,6 +229,7 @@ class AssemblyAIConnectionParams(BaseModel):
     format_turns: bool = True
     speaker_labels: bool | None = None
     vad_threshold: float | None = None
+    acknowledge_silence: bool | None = None
 
     @model_validator(mode="after")
     def handle_deprecated_param(self):

@@ -52,6 +52,7 @@ from .models import (
     AssemblyAIConnectionParams,
     BaseMessage,
     BeginMessage,
+    SilenceMessage,
     SpeakerRevisionMessage,
     SpeechStartedMessage,
     TerminationMessage,
@@ -78,7 +79,7 @@ U3_PRO_MODEL_PREFIXES = (
 # Settings AssemblyAI accepts in an ``UpdateConfiguration`` message, so changing
 # them applies to the live session. Every other setting is a connect-time query
 # parameter and only takes effect on a new connection.
-HOT_UPDATABLE_SETTINGS = frozenset({"agent_context", "language_codes"})
+HOT_UPDATABLE_SETTINGS = frozenset({"agent_context", "language_codes", "acknowledge_silence"})
 
 # Settings applied locally to the transcripts AssemblyAI returns; never sent.
 LOCAL_SETTINGS = frozenset({"speaker_format"})
@@ -274,6 +275,9 @@ class AssemblyAISTTSettings(STTSettings):
             changing it does not reconnect.
         filter_profanity: Replace profanity in transcribed text with asterisks.
             Defaults to None (not sent; the server leaves text unfiltered).
+        acknowledge_silence: Enable periodic Silence messages from the server during
+            stretches of audio where no speech is transcribed (U3 Pro only).
+            Defaults to None (not sent). Can be updated mid-session via UpdateConfiguration.
         vad_threshold: VAD confidence threshold (0.0–1.0) for classifying
             audio frames as silence. Only applicable to U3 Pro models.
         domain: Optional domain for specialized recognition modes. For example,
@@ -334,6 +338,7 @@ class AssemblyAISTTSettings(STTSettings):
     max_speakers: int | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speaker_format: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     filter_profanity: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    acknowledge_silence: bool | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_threshold: float | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     domain: str | None | NotGiven = field(default_factory=lambda: NOT_GIVEN)
     continuous_partials: bool | NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -464,6 +469,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             voice_focus=None,
             voice_focus_threshold=None,
             mode=None,
+            acknowledge_silence=None,
         )
 
         # 2. Apply direct init arg overrides (deprecated)
@@ -500,6 +506,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 default_settings.format_turns = connection_params.format_turns
                 default_settings.speaker_labels = connection_params.speaker_labels
                 default_settings.vad_threshold = connection_params.vad_threshold
+                default_settings.acknowledge_silence = connection_params.acknowledge_silence
 
         # 4. Apply settings delta (canonical API, always wins)
         if settings is not None:
@@ -590,6 +597,13 @@ class AssemblyAISTTService(WebsocketSTTService):
         if not is_u3_pro and isinstance(default_settings.language_codes, list):
             logger.warning(
                 "language_codes is only supported by U3 Pro models and will be ignored "
+                f"for model '{default_settings.model}'."
+            )
+
+        # acknowledge_silence is U3 Pro-only.
+        if not is_u3_pro and default_settings.acknowledge_silence is not None:
+            logger.warning(
+                "acknowledge_silence is only supported by U3 Pro models and will be ignored "
                 f"for model '{default_settings.model}'."
             )
 
@@ -770,8 +784,20 @@ class AssemblyAISTTService(WebsocketSTTService):
         if "language_codes" in changed and isinstance(self._settings.language_codes, list):
             # _update_language_codes() guards on model.
             await self._update_language_codes(self._settings.language_codes)
+        if "acknowledge_silence" in changed and isinstance(
+            self._settings.acknowledge_silence, bool
+        ):
+            await self._update_acknowledge_silence(self._settings.acknowledge_silence)
 
         return changed
+
+    async def _update_acknowledge_silence(self, acknowledge_silence: bool):
+        """Toggle silence event reporting on the live WebSocket session.
+
+        Args:
+            acknowledge_silence: True to enable Silence events, False to disable.
+        """
+        await self._send_update_configuration(acknowledge_silence=acknowledge_silence)
 
     async def _update_language_codes(self, language_codes: list[Language]):
         """Re-steer the live session toward a new set of declared languages.
@@ -902,8 +928,8 @@ class AssemblyAISTTService(WebsocketSTTService):
         }
 
         # continuous_partials, interruption_delay, agent_context,
-        # previous_context_n_turns, voice_focus(_threshold), mode, and
-        # language_codes only apply to the U3 Pro family.
+        # previous_context_n_turns, voice_focus(_threshold), mode,
+        # language_codes, and acknowledge_silence only apply to the U3 Pro family.
         if is_u3_pro_model(s.model):
             optional_fields["continuous_partials"] = s.continuous_partials
             optional_fields["interruption_delay"] = s.interruption_delay
@@ -911,12 +937,13 @@ class AssemblyAISTTService(WebsocketSTTService):
             optional_fields["voice_focus"] = s.voice_focus
             optional_fields["voice_focus_threshold"] = s.voice_focus_threshold
             optional_fields["mode"] = s.mode
+            optional_fields["acknowledge_silence"] = s.acknowledge_silence
             # isinstance narrows away None/NOT_GIVEN for the typed clip call.
             if isinstance(s.agent_context, str):
                 optional_fields["agent_context"] = self._clip_agent_context(s.agent_context)
 
         for k, v in optional_fields.items():
-            if v is not None:
+            if v is not None and is_given(v):
                 if isinstance(v, bool):
                     params[k] = str(v).lower()
                 else:
@@ -1144,6 +1171,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             return TerminationMessage.model_validate(message)
         elif msg_type == "SpeakerRevision":
             return SpeakerRevisionMessage.model_validate(message)
+        elif msg_type == "Silence":
+            return SilenceMessage.model_validate(message)
         else:
             raise ValueError(f"Unknown message type: {msg_type}")
 
@@ -1167,6 +1196,11 @@ class AssemblyAISTTService(WebsocketSTTService):
                 # labels they were sent with.
                 turns = [revision.get("turn_order") for revision in parsed_message.revisions]
                 logger.debug(f"{self} speaker labels revised for turns {turns}")
+            elif isinstance(parsed_message, SilenceMessage):
+                logger.debug(
+                    f"{self} Silence received: start_ms={parsed_message.start_ms}, "
+                    f"end_ms={parsed_message.end_ms}"
+                )
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
