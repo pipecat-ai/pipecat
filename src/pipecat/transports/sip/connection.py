@@ -46,6 +46,7 @@ from typing import Optional
 
 from loguru import logger
 
+from pipecat.transports.sip.media_encryption import SIPMediaEncryption
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.shared import acquires, releases
 
@@ -376,7 +377,8 @@ class _SharedRuntime:
                     f"a user agent for {aor} is already up with different account "
                     "parameters; connections sharing an address-of-record must agree "
                     "on transport, registrar, password, auth_user, audio_codecs, "
-                    "dtmf_mode, and extra_params (only reg_interval may differ)"
+                    "dtmf_mode, media_encryption, and extra_params (only "
+                    "reg_interval may differ)"
                 )
             if aor not in self._uas:
                 ua = await UserAgent.create(self._runtime, account)
@@ -541,6 +543,7 @@ class SIPConnection(BaseObject):
         reg_interval: int = 240,
         audio_codecs: tuple | None = None,
         dtmf_mode: str = "rtpevent",
+        media_encryption: SIPMediaEncryption = SIPMediaEncryption.NONE,
         extra_params: tuple | None = None,
         jitter_buffer_mode: str | None = None,
         jitter_buffer_ms: tuple | None = None,
@@ -585,6 +588,13 @@ class SIPConnection(BaseObject):
             audio_codecs: Codec preference order by stack name; None uses
                 the binding's default.
             dtmf_mode: How DTMF is sent: "rtpevent", "info", or "auto".
+            media_encryption: Whether call media is encrypted, a
+                :class:`~pipecat.transports.sip.media_encryption.SIPMediaEncryption`.
+                ``NONE`` (the default) places unencrypted calls and accepts
+                a received call either way, encrypting it when the caller
+                offers SRTP. ``SRTP`` encrypts every call and refuses a
+                received one that offers none. :attr:`media_encrypted`
+                reports what the active call ended up with.
             extra_params: Extra baresip account parameters, each a
                 ``"key=value"`` string, appended verbatim to the SIP
                 address-of-record — the escape hatch for account directives
@@ -685,8 +695,11 @@ class SIPConnection(BaseObject):
             dtmf_mode=dtmf_mode,
             auth_user=auth_user,
         )
+        media_encryption = SIPMediaEncryption.parse(media_encryption)
         if audio_codecs is not None:
             account_args["audio_codecs"] = tuple(audio_codecs)
+        if media_encryption is not SIPMediaEncryption.NONE:
+            account_args["media_encryption"] = media_encryption.value
         if extra_params is not None:
             account_args["extra_params"] = tuple(extra_params)
         self._account = Account(**account_args)
@@ -701,6 +714,7 @@ class SIPConnection(BaseObject):
             registrar=registrar,
             audio_codecs=tuple(audio_codecs) if audio_codecs is not None else None,
             dtmf_mode=dtmf_mode,
+            media_encryption=media_encryption,
             extra_params=tuple(extra_params) if extra_params is not None else None,
         )
         jitter_buffer_mode, jitter_buffer_ms = _normalize_jitter_buffer(
@@ -1279,6 +1293,16 @@ class SIPConnection(BaseObject):
         choice.
         """
         return self._account.dtmf_mode
+
+    @property
+    def media_encrypted(self) -> bool:
+        """Whether the active call's audio is encrypted with SRTP.
+
+        True once the stack reports the audio stream secured, which happens
+        as the call is established; False before that, on an unencrypted
+        call, and without a call.
+        """
+        return self._call is not None and bool(self._call.media_encrypted)
 
     @property
     def call_direction(self) -> str | None:

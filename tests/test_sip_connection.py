@@ -21,6 +21,7 @@ from baresip.events import Event, StackEvent  # noqa: E402
 
 import pipecat.transports.sip.connection as sip_connection  # noqa: E402
 from pipecat.transports.sip.connection import SIPConnection, _SharedRuntime  # noqa: E402
+from pipecat.transports.sip.media_encryption import SIPMediaEncryption  # noqa: E402
 
 EVENT_TIMEOUT = 2.0
 
@@ -289,6 +290,55 @@ def test_extra_params_render_into_the_account_aor():
     aor = connection._account.aor()
     assert "medianat=ice" in aor
     assert "stunserver=stun:stun.example.com:3478" in aor
+
+
+def test_media_encryption_defaults_to_none_and_leaves_the_account_as_before():
+    connection = make_connection()
+
+    assert connection._account.media_encryption == "none"
+    assert connection._account.requires_srtp is False
+    assert "mediaenc" not in connection._account.aor()
+    assert connection._account_kwargs["media_encryption"] is SIPMediaEncryption.NONE
+
+
+@pytest.mark.parametrize("value", [SIPMediaEncryption.SRTP, "srtp", "SRTP"])
+def test_media_encryption_srtp_reaches_the_account(value):
+    connection = make_connection(media_encryption=value)
+
+    assert connection._account.media_encryption == "srtp"
+    assert connection._account.requires_srtp is True
+    assert connection._account_kwargs["media_encryption"] is SIPMediaEncryption.SRTP
+    # The consult leg of a transfer is on the same account, so it encrypts too.
+    assert connection.consult_connection()._account.media_encryption == "srtp"
+
+
+@pytest.mark.parametrize("value", ["dtls", "", None, 0, True])
+def test_media_encryption_rejects_an_unknown_value(value):
+    with pytest.raises(ValueError, match="media encryption must be one of 'none', 'srtp'"):
+        make_connection(media_encryption=value)
+
+
+@pytest.mark.asyncio
+async def test_conflicting_media_encryption_on_one_account_raises(env):
+    first = make_connection()
+    await first.connect()
+
+    second = make_connection(media_encryption=SIPMediaEncryption.SRTP)
+    with pytest.raises(ValueError, match="media_encryption"):
+        await second.connect()
+
+
+@pytest.mark.asyncio
+async def test_media_encrypted_follows_the_active_call(env):
+    connection = make_connection()
+    await connection.connect()
+    assert connection.media_encrypted is False  # no call
+
+    call = await _answered_outbound_call(env, connection)
+    call.media_encrypted = False
+    assert connection.media_encrypted is False
+    call.media_encrypted = True
+    assert connection.media_encrypted is True
 
 
 @pytest.mark.asyncio

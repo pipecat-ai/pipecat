@@ -721,6 +721,7 @@ def _create_sip_transport(
         sip_port=runner_args.sip_port,
         jitter_buffer_mode=runner_args.jitter_buffer_mode,
         jitter_buffer_ms=runner_args.jitter_buffer_ms,
+        media_encryption=runner_args.media_encryption,
     )
     return SIPTransport(connection, params=params)
 

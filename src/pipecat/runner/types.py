@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
+from pipecat.transports.sip.media_encryption import SIPMediaEncryption
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.file_storage import FileStorage
 
@@ -318,6 +319,10 @@ class SIPRunnerArguments(RunnerArguments):
             ``("opus/48000/2", "PCMU/8000/1")``); None uses the stack default.
         auth_user: Digest username when the credential store keys it
             differently from ``user`` (credential-list trunks).
+        media_encryption: Whether call media is encrypted, a
+            :class:`~pipecat.transports.sip.media_encryption.SIPMediaEncryption`.
+            ``NONE`` accepts a received call either way; ``SRTP`` encrypts
+            every call and refuses a received one that offers none.
         extra_params: Extra baresip account parameters, each a
             ``"key=value"`` string, appended verbatim to the SIP
             address-of-record — e.g. ``("medianat=stun",
@@ -371,6 +376,7 @@ class SIPRunnerArguments(RunnerArguments):
     sip_port: int | None = None
     jitter_buffer_mode: str | None = None
     jitter_buffer_ms: tuple | None = None
+    media_encryption: SIPMediaEncryption = SIPMediaEncryption.NONE
 
 
 @dataclass
