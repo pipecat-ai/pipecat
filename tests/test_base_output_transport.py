@@ -695,6 +695,36 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
         finally:
             await transport.cancel(CancelFrame())
 
+    async def test_interruption_before_playback_does_not_replay_aborted_audio(self):
+        """Audio abandoned before the first write is dropped with the resampler state.
+
+        A reply too short to fill a chunk leaves nothing in the buffer for an
+        interruption to discard, but the resampler has already seen it, so its
+        filter would otherwise ring out at the start of the next reply.
+        """
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            for frame in self._constant_frames(8000, 96):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.1)
+            self.assertEqual(transport.write_audio_frame.call_args_list, [])
+
+            # The next reply is silence, so anything the abandoned one left
+            # behind comes out as sound.
+            for frame in self._constant_frames(0, 480):
+                await transport.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.2)
+
+            samples = np.frombuffer(self._written(transport), dtype=np.int16)
+            self.assertGreater(len(samples), 0)
+            self.assertLess(int(np.abs(samples.astype(np.int32)).max()), 8000 // 4)
+        finally:
+            await transport.cancel(CancelFrame())
+
     async def test_a_turn_without_audio_writes_nothing(self):
         """A TTS turn that produced no audio writes nothing and starts no bot turn.
 
