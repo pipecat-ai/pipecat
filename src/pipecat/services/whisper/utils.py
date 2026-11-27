@@ -17,7 +17,8 @@ def extract_whisper_probability(frame: TranscriptionFrame) -> float | None:
     Works with Groq, OpenAI Whisper, or other Whisper-based services that use
     verbose_json format with segments containing avg_logprob.
 
-    Converts avg_logprob to probability.
+    Averages avg_logprob over all segments, weighted by each segment's token
+    count, and converts it to a probability.
 
     Args:
         frame: TranscriptionFrame with result from GroqSTTService or OpenAISTTService
@@ -44,12 +45,20 @@ def extract_whisper_probability(frame: TranscriptionFrame) -> float | None:
     if not frame.result:
         return None
 
-    # Whisper verbose_json format: response.segments[0].avg_logprob
-    if hasattr(frame.result, "segments") and frame.result.segments:
-        segment = frame.result.segments[0]
+    # Whisper verbose_json format: one avg_logprob per segment, so the
+    # transcription's average is weighted by each segment's token count.
+    total_logprob = 0.0
+    total_tokens = 0
+    for segment in getattr(frame.result, "segments", None) or []:
         avg_logprob = getattr(segment, "avg_logprob", None)
-        if avg_logprob is not None:
-            return math.exp(avg_logprob)
+        if avg_logprob is None:
+            continue
+        num_tokens = len(getattr(segment, "tokens", None) or []) or 1
+        total_logprob += avg_logprob * num_tokens
+        total_tokens += num_tokens
+
+    if total_tokens:
+        return math.exp(total_logprob / total_tokens)
 
     return None
 
