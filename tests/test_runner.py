@@ -72,6 +72,29 @@ class TestWorkerRunner(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(runner_started.is_set())
 
+    async def test_cancel_during_setup_stops_bus_and_workers(self):
+        """A cancel that lands while run() is still starting workers tears everything down."""
+        runner = WorkerRunner(handle_sigint=False)
+        run_task: asyncio.Task | None = None
+
+        class CancelsRunnerOnStart(StubTask):
+            async def run(self, params):
+                run_task.cancel()
+                await super().run(params)
+
+        await runner.add_workers(CancelsRunnerOnStart("task_a"))
+
+        run_task = asyncio.create_task(runner.run())
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(run_task, timeout=5.0)
+
+        leftover = [
+            task.get_name()
+            for task in asyncio.all_tasks()
+            if task is not asyncio.current_task() and not task.done()
+        ]
+        self.assertEqual(leftover, [])
+
     async def test_end_is_idempotent(self):
         """end() is idempotent — subsequent calls are no-ops."""
         runner = WorkerRunner(handle_sigint=False)
