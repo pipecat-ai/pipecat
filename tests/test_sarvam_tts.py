@@ -92,6 +92,110 @@ async def _synthesize(service: SarvamHttpTTSService) -> dict:
     return service._session.payloads[-1]
 
 
+def test_websocket_service_defaults_to_v4_flash():
+    service = SarvamTTSService(api_key="test-key")
+
+    assert service._settings.model == V4_FLASH
+    assert _url_model(service) == V4_FLASH
+    assert service._settings.voice == "shubh_en_narration_gentle"
+
+
+def test_http_service_defaults_to_v4_flash():
+    service = SarvamHttpTTSService(api_key="test-key", aiohttp_session=_FakeSession())  # type: ignore[arg-type]
+
+    assert service._settings.model == V4_FLASH
+    assert service._settings.voice == "shubh_en_narration_gentle"
+
+
+def test_bulbul_v3_keeps_its_own_default_voice():
+    service = SarvamTTSService(
+        api_key="test-key", settings=SarvamTTSService.Settings(model="bulbul:v3")
+    )
+
+    assert service._settings.voice == "shubh"
+
+
+@pytest.fixture
+def warnings():
+    """Collect loguru warnings."""
+    from loguru import logger
+
+    messages = []
+    handler_id = logger.add(messages.append, level="WARNING", format="{message}")
+    yield messages
+    logger.remove(handler_id)
+
+
+def _http(**kwargs) -> SarvamHttpTTSService:
+    return SarvamHttpTTSService(api_key="test-key", aiohttp_session=_FakeSession(), **kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        # As `pipecat init` generates it: `voice=os.getenv("SARVAM_VOICE_ID")`, no model.
+        lambda: SarvamTTSService(
+            api_key="test-key", settings=SarvamTTSService.Settings(voice="priya")
+        ),
+        lambda: _http(settings=SarvamHttpTTSService.Settings(voice="priya")),
+        lambda: SarvamTTSService(api_key="test-key", voice_id="priya"),
+        lambda: _http(voice_id="priya"),
+    ],
+    ids=["websocket", "http", "websocket-voice_id", "http-voice_id"],
+)
+def test_a_v3_voice_without_a_model_stays_on_v3(build, warnings):
+    """v4-flash refuses every v3 voice, so the old default model is kept."""
+    service = build()
+
+    assert service._settings.model == "bulbul:v3"
+    assert service._settings.voice == "priya"
+    assert service._config.supports_temperature is True
+    assert service._init_sample_rate == 24000
+    if isinstance(service, SarvamTTSService):
+        assert _url_model(service) == "bulbul:v3"
+    assert any("'priya'" in m and 'model="bulbul:v3"' in m for m in warnings)
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: SarvamTTSService(
+            api_key="test-key", settings=SarvamTTSService.Settings(model=V4_FLASH, voice="priya")
+        ),
+        lambda: _http(settings=SarvamHttpTTSService.Settings(model=V4_FLASH, voice="priya")),
+        lambda: SarvamTTSService(api_key="test-key", model=V4_FLASH, voice_id="priya"),
+    ],
+    ids=["websocket", "http", "websocket-deprecated-model"],
+)
+def test_an_explicit_model_with_a_v3_voice_is_left_alone(build, warnings):
+    service = build()
+
+    assert service._settings.model == V4_FLASH
+    assert service._settings.voice == "priya"
+    assert not any("bulbul:v3 voice" in m for m in warnings)
+
+
+def test_a_v4_flash_voice_without_a_model_uses_v4_flash(warnings):
+    service = SarvamTTSService(
+        api_key="test-key", settings=SarvamTTSService.Settings(voice="ritu_hi_edtech")
+    )
+
+    assert service._settings.model == V4_FLASH
+    assert _url_model(service) == V4_FLASH
+    assert not any("bulbul:v3 voice" in m for m in warnings)
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_v3_voice_on_v4_flash_warns_without_switching(warnings):
+    service = _service()
+    service._websocket = _FakeWebsocket()
+
+    await service._update_settings(SarvamTTSService.Settings(voice="priya"))
+
+    assert service._settings.model == V4_FLASH
+    assert any("'priya'" in m and "bulbul:v4-flash refuses" in m for m in warnings)
+
+
 def test_v4_flash_defaults():
     """The service has to land on the same speaker and rate the API defaults to."""
     service = _service()
