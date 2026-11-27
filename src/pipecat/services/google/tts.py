@@ -1226,7 +1226,7 @@ class GeminiTTSService(GoogleBaseTTSService):
     ``gemini-3.8-flash-tts``, ``gemini-3.8-flash-lite-tts`` and
     ``gemini-3.1-flash-tts-preview``, and defaults to
     ``gemini-3.8-flash-lite-tts``, the replacement Google names for the preview
-    model it shuts down there on November 17, 2026.
+    model it shuts down there on December 18, 2026.
 
     Gemini 3.8 TTS models (Gemini API backend, google-genai >= 2.25.0) treat the
     input text strictly as a verbatim transcript: the ``prompt`` setting is sent
@@ -1390,7 +1390,7 @@ class GeminiTTSService(GoogleBaseTTSService):
         # 1. Initialize default_settings with hardcoded defaults. The backends'
         # TTS catalogues are disjoint at the top: Cloud Text-to-Speech serves no
         # Gemini 3.8 model, and the Gemini API retires
-        # gemini-3.1-flash-tts-preview on November 17, 2026 in favour of
+        # gemini-3.1-flash-tts-preview on December 18, 2026 in favour of
         # gemini-3.8-flash-lite-tts.
         default_settings = self.Settings(
             model=(
