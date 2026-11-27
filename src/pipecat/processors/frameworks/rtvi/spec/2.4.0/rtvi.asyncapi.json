@@ -1598,7 +1598,7 @@
       "user_audio_level": {
         "name": "user-audio-level",
         "title": "user-audio-level",
-        "summary": "How loud the user's audio is, from 0 (quiet) to 1 (loud), sent regularly while the user's audio comes in. Off by default; turned on by the server's `user_audio_level_enabled` setting.",
+        "summary": "How loud the user's audio is, from 0 (quiet) to 1 (loud), as the server's pipeline receives it, sent regularly while the user's audio comes in. Off by default; turned on by the server's `user_audio_level_enabled` setting.",
         "tags": [
           {
             "name": "Speaking and Transcription"
@@ -1634,13 +1634,13 @@
             }
           }
         ],
-        "description": "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting.",
+        "description": "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting. The server measures the level, so it isn't the level a client measures on the device, such as the one its transport reports for the microphone.",
         "x-rtvi-enabled-by": "user_audio_level_enabled"
       },
       "bot_audio_level": {
         "name": "bot-audio-level",
         "title": "bot-audio-level",
-        "summary": "How loud the bot's audio is, from 0 (quiet) to 1 (loud), sent regularly while the bot speaks. Off by default; turned on by the server's `bot_audio_level_enabled` setting.",
+        "summary": "How loud the bot's audio is, from 0 (quiet) to 1 (loud), as the server's pipeline produces it, sent regularly while the bot speaks. Off by default; turned on by the server's `bot_audio_level_enabled` setting.",
         "tags": [
           {
             "name": "Speaking and Transcription"
@@ -1676,7 +1676,7 @@
             }
           }
         ],
-        "description": "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting.",
+        "description": "Sent every 0.15 seconds by default, the server's `audio_level_period_secs` setting. The server measures the level, so it isn't the level a client measures on the device, such as the one its transport reports for the audio it plays.",
         "x-rtvi-enabled-by": "bot_audio_level_enabled"
       },
       "user_input": {

@@ -33,6 +33,7 @@ from pipecat.observers.bot_speech_observer import BotSpeechObserver
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import STTSettings
+from pipecat.services.soniox.stream_reconnect import SonioxWebSocket
 from pipecat.services.soniox.stt import (
     DEFAULT_AGENT_TEXT_LEAD_MS,
     END_TOKEN,
@@ -57,6 +58,7 @@ class _FakeWebsocket:
         self.state = state
         self.closed = False
         self.send = AsyncMock(side_effect=send_side_effect)
+        self.transport = MagicMock()
 
     async def close(self):
         self.closed = True
@@ -1348,3 +1350,80 @@ async def test_setup_does_not_observe_the_pipeline_for_a_model_without_agent_tex
     await service.setup(frame_processor_setup(TaskManager(), pipeline_worker=worker))
 
     assert not worker.add_observer.called
+
+
+async def _connect_with_reconnect(monkeypatch, enabled):
+    """Connect a service to a fake socket, with reconnect on or off."""
+    websocket = _FakeWebsocket([], state=State.OPEN)
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(enable_reconnect=enabled)
+    )
+    await service._connect_websocket()
+    return service, websocket
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.asyncio
+async def test_connect_requests_reconnect_only_when_enabled(monkeypatch, enabled):
+    _, websocket = await _connect_with_reconnect(monkeypatch, enabled)
+
+    config = json.loads(_sent_payloads(websocket)[0])
+    assert config.get("enable_reconnect") is (True if enabled else None)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.asyncio
+async def test_connect_wraps_the_connection_only_when_reconnect_is_enabled(monkeypatch, enabled):
+    service, websocket = await _connect_with_reconnect(monkeypatch, enabled)
+
+    assert isinstance(service._websocket, SonioxWebSocket) is enabled
+    assert service._websocket.state is State.OPEN
+
+
+@pytest.mark.asyncio
+async def test_audio_after_the_config_is_sent_through_the_reconnecting_connection(monkeypatch):
+    service, websocket = await _connect_with_reconnect(monkeypatch, True)
+
+    async for _ in service.run_stt(b"audio"):
+        pass
+
+    assert _sent_payloads(websocket)[1:] == [b"audio"]
+
+
+@pytest.mark.asyncio
+async def test_disconnecting_closes_the_reconnecting_connection(monkeypatch):
+    service, websocket = await _connect_with_reconnect(monkeypatch, True)
+
+    await service._disconnect_websocket()
+
+    # A close, with status 1000, ends the Soniox stream.
+    assert websocket.closed
+    assert service._websocket is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_config_send_aborts_the_connection(monkeypatch):
+    websocket = _FakeWebsocket([], send_side_effect=ConnectionResetError("send failed"))
+
+    async def fake_websocket_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(
+        "pipecat.services.websocket_service.websocket_connect", fake_websocket_connect
+    )
+    service = SonioxSTTService(
+        api_key="test-key", settings=SonioxSTTService.Settings(enable_reconnect=True)
+    )
+    monkeypatch.setattr(service, "push_error", AsyncMock())
+
+    await service._connect_websocket()
+
+    assert service._websocket is None
+    websocket.transport.abort.assert_called()

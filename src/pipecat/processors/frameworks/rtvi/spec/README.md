@@ -39,6 +39,19 @@ The schema of a client message says what the server accepts, and the schema of a
 
 The document's `x-rtvi-behaviors` lists the rules the server follows across messages, beyond the shape of each one: which message answers a request and with which `id`, which version `bot-ready` reports, which messages the settings turn off, and how the server holds the bot's text until the bot speaks it and drops it when the user interrupts. Each behavior has an `id`, a `description`, and the types of the `messages` it involves.
 
+## Writing a client
+
+A client hands each server message to the app as a callback or an event named after the message's type, such as `onBotStartedSpeaking` for `bot-started-speaking`.
+
+The audio level messages are the exception. `user-audio-level` and `bot-audio-level` carry levels the server measures in its pipeline, while a client's transport often measures levels of its own on the device, outside RTVI. A client names each after where it's measured, so an app can tell the two apart:
+
+| Level | Measured by | Callback |
+| --- | --- | --- |
+| The user's audio | the server (`user-audio-level`) | `onServerUserAudioLevel` |
+| The bot's audio | the server (`bot-audio-level`) | `onServerBotAudioLevel` |
+| The user's microphone audio | the client's transport, on the device | `onClientUserAudioLevel` |
+| The bot's audio as the device plays it | the client's transport, on the device | `onClientBotAudioLevel` |
+
 ## Changing the protocol
 
 The documents are generated, never edited by hand. The current version's document is built from `MESSAGES` and `BEHAVIORS` in `__init__.py` and from the models in `../models.py`: each message's schema comes from its model, and each field's description from the `Parameters:` section of the model's docstring.

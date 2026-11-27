@@ -17,6 +17,7 @@ DO NOT edit _configs.py or _imports.py directly - they are auto-generated from t
 This module contains:
   - ServiceDefinition dataclass
   - Service lists (WEBRTC_TRANSPORTS, STT_SERVICES, LLM_SERVICES, etc.)
+  - EXCLUDED_SERVICES: service classes the CLI deliberately doesn't offer
   - FEATURE_DEFINITIONS dict
   - MANUAL_SERVICE_CONFIGS for complex initialization
 
@@ -90,6 +91,24 @@ class ServiceDefinition:
             raise ValueError("Service must have a package")
         if bool(self.client_package) != bool(self.client_package_version):
             raise ValueError("client_package and client_package_version go together")
+
+
+# Service classes the CLI doesn't offer, keyed by class name, with the reason.
+# scripts/cli/check_service_coverage.py fails CI for any concrete service class that
+# is neither offered nor listed here. Base classes, deprecated classes and the HTTP
+# versions of streaming services are skipped by that check and don't belong here.
+EXCLUDED_SERVICES: dict[str, str] = {
+    # Offered in another form
+    "AssemblyAISyncSTTService": "The streaming AssemblyAISTTService is offered.",
+    "DeepgramSegmentedSTTService": "The streaming DeepgramSTTService is offered.",
+    "NvidiaSegmentedSTTService": "The streaming NvidiaSTTService is offered.",
+    "WhisperSTTServiceMLX": "Runs only on Apple Silicon; WhisperSTTService is offered.",
+    # Doesn't fit the CLI's bot templates
+    "NvidiaOmniLLMService": (
+        "Hears the user but replies with text, so it needs a TTS service and no STT; "
+        "neither the cascade nor the realtime bot template fits that."
+    ),
+}
 
 
 # Feature definitions with metadata for auto-generation
@@ -359,6 +378,13 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="funasr_stt",
+            label="FunASR (Local)",
+            package="pipecat-ai[funasr]",
+            class_name=["FunASRSTTService"],
+            env_prefix="FUNASR",
+        ),
+        ServiceDefinition(
             value="gemini_stt",
             label="Gemini Transcribe Live",
             package="pipecat-ai[google]",
@@ -463,6 +489,14 @@ class ServiceRegistry:
             include_params=["api_key"],
         ),
         ServiceDefinition(
+            value="sarvam_realtime_stt",
+            label="Sarvam Realtime",
+            package="pipecat-ai[sarvam]",
+            class_name=["SarvamRealtimeSTTService"],
+            env_prefix="SARVAM",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
             value="smallest_stt",
             label="Smallest",
             package="pipecat-ai[smallest]",
@@ -484,6 +518,14 @@ class ServiceRegistry:
             package="pipecat-ai[speechmatics]",
             class_name=["SpeechmaticsSTTService"],
             env_prefix="SPEECHMATICS",
+            include_params=["api_key"],
+        ),
+        ServiceDefinition(
+            value="together_stt",
+            label="Together",
+            package="pipecat-ai[together]",
+            class_name=["TogetherSTTService"],
+            env_prefix="TOGETHER",
             include_params=["api_key"],
         ),
         ServiceDefinition(
@@ -652,20 +694,20 @@ class ServiceRegistry:
             settings_params=["model", "system_instruction"],
         ),
         ServiceDefinition(
-            value="inception_llm",
-            label="Inception",
-            package="pipecat-ai[inception]",
-            class_name=["InceptionLLMService"],
-            env_prefix="INCEPTION",
-            include_params=["api_key"],
-            settings_params=["model", "system_instruction"],
-        ),
-        ServiceDefinition(
             value="mistral_llm",
             label="Mistral",
             package="pipecat-ai[mistral]",
             class_name=["MistralLLMService"],
             env_prefix="MISTRAL",
+            include_params=["api_key"],
+            settings_params=["model", "system_instruction"],
+        ),
+        ServiceDefinition(
+            value="nebius_llm",
+            label="Nebius",
+            package="pipecat-ai[nebius]",
+            class_name=["NebiusLLMService"],
+            env_prefix="NEBIUS",
             include_params=["api_key"],
             settings_params=["model", "system_instruction"],
         ),
@@ -1038,6 +1080,16 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="plivo_tts",
+            label="Plivo",
+            package="pipecat-ai[plivo]",
+            class_name=["PlivoTTSService"],
+            env_prefix="PLIVO",
+            include_params=["auth_id", "auth_token"],
+            settings_params=["voice"],
+            param_defaults={"voice": "lC7qzMoRE7SSjaNCVeff"},
+        ),
+        ServiceDefinition(
             value="pockettts_tts",
             label="Pocket TTS",
             package="pipecat-ai[pocket-tts]",
@@ -1063,6 +1115,16 @@ class ServiceRegistry:
             env_prefix="RIME",
             include_params=["api_key"],
             settings_params=["voice"],
+        ),
+        ServiceDefinition(
+            value="rime_v1_tts",
+            label="Rime (WebSocket v1)",
+            package="pipecat-ai[rime]",
+            class_name=["RimeV1TTSService"],
+            env_prefix="RIME",
+            include_params=["api_key"],
+            settings_params=["model", "voice"],
+            param_defaults={"model": "coda"},
         ),
         ServiceDefinition(
             value="sarvam_tts",
@@ -1092,11 +1154,29 @@ class ServiceRegistry:
             settings_params=["voice"],
         ),
         ServiceDefinition(
+            value="speechmatics_tts",
+            label="Speechmatics",
+            package="pipecat-ai[speechmatics]",
+            class_name=["SpeechmaticsTTSService"],
+            env_prefix="SPEECHMATICS",
+            include_params=["api_key"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
             value="speechify_tts",
             label="Speechify",
             package="pipecat-ai",
             class_name=["SpeechifyHttpTTSService"],
             env_prefix="SPEECHIFY",
+            include_params=["api_key"],
+            settings_params=["voice"],
+        ),
+        ServiceDefinition(
+            value="together_tts",
+            label="Together",
+            package="pipecat-ai[together]",
+            class_name=["TogetherTTSService"],
+            env_prefix="TOGETHER",
             include_params=["api_key"],
             settings_params=["voice"],
         ),
@@ -1107,15 +1187,6 @@ class ServiceRegistry:
             class_name=["XAITTSService"],
             env_prefix="XAI",
             include_params=["api_key"],
-            settings_params=["voice"],
-        ),
-        ServiceDefinition(
-            value="xtts_tts",
-            label="XTTS (Coqui)",
-            package="pipecat-ai[xtts]",
-            class_name=["XTTSService"],
-            env_prefix="XTTS",
-            include_params=["base_url"],
             settings_params=["voice"],
         ),
         ServiceDefinition(
@@ -1183,6 +1254,15 @@ class ServiceRegistry:
             manual_config=True,
         ),
         ServiceDefinition(
+            value="inworld_realtime",
+            label="Inworld Realtime",
+            package="pipecat-ai",
+            class_name=["InworldRealtimeLLMService"],
+            env_prefix="INWORLD",
+            include_params=["api_key"],
+            manual_config=True,
+        ),
+        ServiceDefinition(
             value="xai_realtime",
             label="Grok Realtime",
             package="pipecat-ai[xai]",
@@ -1205,6 +1285,24 @@ class ServiceRegistry:
                 "InputAudioNoiseReduction",
             ],
             env_prefix="OPENAI",
+            include_params=[],
+            manual_config=True,
+        ),
+        ServiceDefinition(
+            value="openai_live_realtime",
+            label="OpenAI Live",
+            package="pipecat-ai[openai]",
+            class_name=["OpenAILiveLLMService"],
+            env_prefix="OPENAI",
+            include_params=["api_key"],
+            manual_config=True,
+        ),
+        ServiceDefinition(
+            value="rime_realtime",
+            label="Rime Realtime",
+            package="pipecat-ai[rime]",
+            class_name=["RimeRealtimeLLMService"],
+            env_prefix="RIME",
             include_params=[],
             manual_config=True,
         ),
@@ -1343,6 +1441,32 @@ MANUAL_SERVICE_CONFIGS = {
         "    ),\n"
         ")"
     ),
+    "inworld_realtime": (
+        "llm = InworldRealtimeLLMService(\n"
+        '    api_key=os.getenv("INWORLD_API_KEY"),\n'
+        '    llm_model=os.getenv("INWORLD_MODEL"),\n'
+        '    voice=os.getenv("INWORLD_VOICE_ID"),\n'
+        "    settings=InworldRealtimeLLMService.Settings(\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
+    "openai_live_realtime": (
+        "llm = OpenAILiveLLMService(\n"
+        '    api_key=os.getenv("OPENAI_API_KEY"),\n'
+        "    settings=OpenAILiveLLMService.Settings(\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
+    "rime_realtime": (
+        "# The Rime SDK reads RIME_API_KEY from the environment.\n"
+        "llm = RimeRealtimeLLMService(\n"
+        "    settings=RimeRealtimeLLMService.Settings(\n"
+        f'        system_instruction="{DEFAULT_SYSTEM_INSTRUCTION}",\n'
+        "    ),\n"
+        ")"
+    ),
     "zoom_ai_realtime": (
         "llm = ZoomAIRealtimeLLMService(\n"
         '    api_key=os.getenv("ZOOM_AI_API_KEY"),\n'
@@ -1405,7 +1529,7 @@ MANUAL_SERVICE_CONFIGS = {
         "    service_type=ServiceType.LIVE_AVATAR,\n"
         "    session=session,\n"
         "    session_request=LiveAvatarNewSessionRequest(\n"
-        '        avatar_id="HEYGEN_AVATAR_ID",\n'
+        '        avatar_id=os.getenv("HEYGEN_AVATAR_ID"),\n'
         "    ),\n"
         ")"
     ),

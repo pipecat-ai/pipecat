@@ -348,7 +348,11 @@ class EvalJudge:
             it). A suite whose judged replies are all final answers turns it
             off, and a reply is then ``yes`` or ``no``.
         max_tokens: Cap on the explainer's response length for one reason.
-            Default 200, enough for a short sentence.
+            Default 200, enough for a short sentence. The call that explains
+            a whole conversation writes several reasons, so it gets room for
+            each of them, and never less than this. Tokens the explainer
+            spends thinking count against the cap: raise it for an explainer
+            that thinks first, or its reasons come back empty.
     """
 
     def __init__(
@@ -898,7 +902,9 @@ class _Explainer:
         service: A pipecat LLM service with a ``run_inference()`` method
             (i.e. ``BaseOpenAILLMService`` or any subclass: OpenAI, Ollama, etc.).
         max_tokens: Cap on the explainer's response length for one reason.
-            Default 200, enough for a short sentence in JSON.
+            Default 200, enough for a short sentence in JSON. A whole
+            conversation's call gets room for each of its reasons, and never
+            less than this. Thinking counts against the cap.
     """
 
     def __init__(self, service: LLMService[Any], *, max_tokens: int = 200):
@@ -1017,7 +1023,7 @@ class _Explainer:
         key = _cache_key(ask, [])
         if key not in self._run_cache:
             # Room for a reason per verdict; a budget sized for one cuts it short.
-            budget = max(300, 50 * len(verdicts) + 80)
+            budget = max(300, 50 * len(verdicts) + 80, self._max_tokens)
             schema = self._run_schema(goal, turns)
             reasons = _RunReasons(goal="", turns={})
             for attempt in (1, 2):

@@ -1109,6 +1109,35 @@ async def test_pipecat_mode_skips_an_empty_final(monkeypatch):
     assert frames == []
 
 
+@pytest.mark.asyncio
+async def test_pipecat_mode_empty_final_for_a_commit_confirms_the_finalization(monkeypatch):
+    """A commit whose audio held no words still answers the VAD stop's finalize.
+
+    Without the confirmation the user turn stop strategies wait out the STT
+    p99 timeout before ending the turn on the transcripts already pushed.
+    """
+    from pipecat.frames.frames import TranscriptionFinalizedFrame
+    from pipecat.services.ai_service import AIService
+
+    # Capture below STTService.push_frame, so its finalize handling still runs.
+    pushed = []
+
+    async def fake_push_frame(self, frame, direction=None):
+        pushed.append(frame)
+
+    monkeypatch.setattr(AIService, "push_frame", fake_push_frame)
+    service = _live(vad_force_turn_endpoint=True)
+    service._user_id = "session-user"
+    service._websocket = _FakeWebsocket([_event("transcription.completed", transcript="")])
+    service.request_finalize()  # as the VAD stop's commit does
+
+    await service._receive_messages()
+
+    [confirmation] = pushed
+    assert isinstance(confirmation, TranscriptionFinalizedFrame)
+    assert confirmation.user_id == "session-user"
+
+
 def test_pipecat_mode_reports_ttfs_and_keeps_default_turn_strategies():
     service = _live(vad_force_turn_endpoint=True)
 

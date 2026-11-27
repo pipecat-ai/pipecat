@@ -532,6 +532,91 @@ class TestCartesiaCJKPunctuationTokens(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context_text, "".join(sentences))
 
 
+class TestCartesiaThaiTimestamps(unittest.IsolatedAsyncioTestCase):
+    """Cartesia reports Thai one character at a time, one message per word.
+
+    Each vowel or tone mark and each punctuation mark is a token of its own, and
+    the spaces between phrases are never reported. The batches below are
+    Cartesia's output for these sentences.
+    """
+
+    async def _queued_words(self, batches: list[list[str]]) -> list[WordTimestamp]:
+        service = _service("th-TH")
+        queued: list[WordTimestamp] = []
+
+        async def messages():
+            for words in batches:
+                yield json.dumps(
+                    {
+                        "type": "timestamps",
+                        "context_id": "ctx1",
+                        "word_timestamps": {"words": words, "start": [0.0] * len(words)},
+                    }
+                )
+
+        async def append(context_id, frame):
+            queued.append(frame)
+
+        service._websocket = messages()
+        service.audio_context_available = lambda context_id: True
+        service.append_to_audio_context = append
+        await service._process_messages()
+        return queued
+
+    async def _spoken(self, sentence: str, batches: list[list[str]]) -> list[TTSTextFrame]:
+        queued = await self._queued_words(batches)
+        seq = AggregatedFrameSequencer()
+        frame = AggregatedTextFrame(sentence, TextType.SENTENCE, raw_text=sentence)
+        await seq.register_spoken(frame, "ctx1", sentence, append_to_context=True)
+        frames = []
+        for i, w in enumerate(queued):
+            frames.extend(
+                seq.process_word(w.word, (i + 1) * 10, w.context_id, w.includes_inter_frame_spaces)
+            )
+        return [f for f in frames if isinstance(f, TTSTextFrame)]
+
+    def _context_text(self, frames: list[TTSTextFrame]) -> str:
+        return concatenate_aggregated_text(
+            [
+                TextPartForConcatenation(
+                    f.raw_text or f.text, includes_inter_part_spaces=f.includes_inter_frame_spaces
+                )
+                for f in frames
+                if f.append_to_context
+            ]
+        )
+
+    async def test_marks_attach_to_the_preceding_character(self):
+        queued = await self._queued_words([["ส", "ว", "ั", "ส", "ด", "ี"], ["ค", "่", "ะ", "!"]])
+        self.assertEqual([w.word for w in queued], ["ส", "วั", "ส", "ดี", "ค่", "ะ!"])
+        self.assertTrue(all(w.includes_inter_frame_spaces for w in queued))
+
+    async def test_spaces_between_phrases_reach_the_transcript(self):
+        sentence = "สวัสดีค่ะ คุณต้องการความช่วยเหลืออะไรคะ"
+        frames = await self._spoken(
+            sentence,
+            [
+                ["ส", "ว", "ั", "ส", "ด", "ี"],
+                ["ค", "่", "ะ"],
+                ["ค", "ุ", "ณ"],
+                ["ต", "้", "อ", "ง", "ก", "า", "ร"],
+                ["ค", "ว", "า", "ม", "ช", "่", "ว", "ย", "เ", "ห", "ล", "ื", "อ"],
+                ["อ", "ะ", "ไ", "ร"],
+                ["ค", "ะ"],
+            ],
+        )
+        self.assertEqual(self._context_text(frames), sentence)
+        self.assertEqual("".join(f.text for f in frames), sentence)
+
+    async def test_numbers_and_latin_letters_keep_their_spaces(self):
+        sentence = "ราคา 500 บาท VAT"
+        frames = await self._spoken(
+            sentence, [["ร", "า", "ค", "า"], ["500"], ["บ", "า", "ท"], ["V", "A", "T"]]
+        )
+        self.assertEqual(self._context_text(frames), sentence)
+        self.assertEqual("".join(f.text for f in frames), sentence)
+
+
 def test_spell_tag_aggregator_keeps_the_settings_language():
     service = CartesiaTTSService(
         api_key="test-api-key",

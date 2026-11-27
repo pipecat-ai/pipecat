@@ -797,6 +797,10 @@ class ZoomAISTTService(WebsocketSTTService):
         self.confirm_finalize()
         text = self._final_text(event)
         if not text:
+            # The committed audio held no words, so no transcript carries the
+            # confirmation. Push it on its own: the user turn then ends on the
+            # transcripts already pushed instead of waiting out the STT timeout.
+            await self._push_transcription_finalized()
             return
         language = _reported_language(
             event.get("language"), self._view.language_detection, self._settings.language

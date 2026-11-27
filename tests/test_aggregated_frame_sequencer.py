@@ -488,6 +488,29 @@ class TestForceComplete(unittest.IsolatedAsyncioTestCase):
         tts_frames = [f for f in result if isinstance(f, TTSTextFrame)]
         self.assertEqual(tts_frames[0].segment_id, segment.id)
 
+    async def test_remaining_text_keeps_its_space_when_words_carry_spacing(self):
+        seq = _seq()
+        sentence = "สวัสดีค่ะ คุณต้องการอะไรคะ"
+        await seq.register_spoken(
+            _spoken_frame(sentence), "ctx1", sentence, True, includes_inter_frame_spaces=True
+        )
+        frames = seq.process_word(
+            "สวัสดีค่ะ", pts=10, context_id="ctx1", includes_inter_frame_spaces=True
+        )
+        frames += seq.force_complete("ctx1", last_word_pts=50)  # the rest never arrives
+
+        words = [f for f in frames if isinstance(f, TTSTextFrame)]
+        self.assertEqual([f.text for f in words], ["สวัสดีค่ะ", " คุณต้องการอะไรคะ"])
+        context = concatenate_aggregated_text(
+            [
+                TextPartForConcatenation(
+                    f.raw_text or f.text, includes_inter_part_spaces=f.includes_inter_frame_spaces
+                )
+                for f in words
+            ]
+        )
+        self.assertEqual(context, sentence)
+
     async def test_emits_full_text_when_no_words_arrived(self):
         seq = _seq()
         await seq.register_spoken(_spoken_frame("hello world"), "ctx1", "hello world", True)

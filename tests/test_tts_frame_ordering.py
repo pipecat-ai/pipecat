@@ -758,7 +758,7 @@ async def test_http_word_timestamps_verbatim_tokens():
     tts_text_frames = [f for f in down if isinstance(f, TTSTextFrame)]
     audio_frames = [f for f in down if isinstance(f, TTSAudioRawFrame)]
 
-    assert [f.text for f in tts_text_frames] == ["hello", "world"]
+    assert [f.text for f in tts_text_frames] == ["hello", " world"]
 
     pts_values = [f.pts for f in tts_text_frames]
     assert pts_values == sorted(pts_values) and len(set(pts_values)) == len(pts_values), (
@@ -844,7 +844,7 @@ async def test_websocket_word_timestamps_verbatim_tokens():
     tts_text_frames = [f for f in down if isinstance(f, TTSTextFrame)]
     audio_frames = [f for f in down if isinstance(f, TTSAudioRawFrame)]
 
-    assert [f.text for f in tts_text_frames] == ["hello", "world"]
+    assert [f.text for f in tts_text_frames] == ["hello", " world"]
 
     pts_values = [f.pts for f in tts_text_frames]
     assert pts_values == sorted(pts_values) and len(set(pts_values)) == len(pts_values), (

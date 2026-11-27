@@ -187,6 +187,11 @@ class WordCompletionTracker:
             head = self._segment_map.last_leading_duplicate if self._llm_text is not None else 0
             tail = len(word) - len(overflow) if overflow else len(word)
             self._frame_word = word[head:tail]
+            if not word[:1].isspace():
+                # Kept for callers that put no space before the word themselves
+                # (``strip=False``), so the word brings the one the text has.
+                spacing = spoken[: len(spoken) - len(spoken.lstrip())]
+                self._frame_word = spacing + self._frame_word
         self._overflow_word = overflow
 
         self._user_facing_pos = self._segment_map.user_facing_pos
@@ -331,7 +336,7 @@ class WordCompletionTracker:
             self._llm_text is not None and not (self._llm_consumed or "").strip()
         )
 
-    def get_word_for_frame(self) -> str | None:
+    def get_word_for_frame(self, strip: bool = True) -> str | None:
         """Return this frame's share of the last word -- the text to emit for it.
 
         Usually the whole word. A word straddling the boundary gives up its tail
@@ -340,8 +345,14 @@ class WordCompletionTracker:
         provider never sent brings along the text it passed over, and after a
         force-complete this is the frame's unspoken remainder instead -- either
         way, nothing is missing from the turn.
+
+        Args:
+            strip: Whether to trim surrounding whitespace. Pass False for words
+                that carry their own spacing (``includes_inter_frame_spaces``):
+                nothing downstream puts a space before them, so the word brings
+                the one the text has (``"ค่ะ"`` then ``" คุณ"``).
         """
-        return self._frame_word.strip() if self._frame_word else self._frame_word
+        return self._word_span(self._frame_word, strip)
 
     def get_overflow_word(self) -> str | None:
         """Return the part of the last word that belongs to the *next* frame.
@@ -352,7 +363,7 @@ class WordCompletionTracker:
         """
         return self._overflow_word.strip() if self._overflow_word else self._overflow_word
 
-    def get_llm_consumed(self) -> str | None:
+    def get_llm_consumed(self, strip: bool = True) -> str | None:
         """Return the LLM's own text that the last word stands for.
 
         This is what the conversation context records, so it keeps the tags and
@@ -362,10 +373,20 @@ class WordCompletionTracker:
         None when there is nothing to attribute: no ``llm_text`` was given, the
         word is mid-rewrite, or ``llm_text`` is already exhausted (a trailing
         emoji it never carried).
+
+        Args:
+            strip: Whether to trim surrounding whitespace. Pass False to keep the
+                leading space, as :meth:`get_word_for_frame` does.
         """
-        if not self._llm_consumed:
+        if not (self._llm_consumed or "").strip():
             return None
-        return self._llm_consumed.strip() or None
+        return self._word_span(self._llm_consumed, strip)
+
+    def _word_span(self, text: str | None, strip: bool) -> str | None:
+        """Return *text* trimmed, or as written when *strip* is False."""
+        if not text or not strip:
+            return text
+        return text.strip()
 
     def get_accumulated_user_facing_text(self) -> str:
         """Return the part of the frame spoken so far, as the user sees it.
@@ -427,7 +448,7 @@ class WordCompletionTracker:
         remaining = self._tts_text[self._segment_map.raw_pos :]
         return remaining.strip() if strip else remaining
 
-    def get_remaining_llm_text(self) -> str | None:
+    def get_remaining_llm_text(self, strip: bool = True) -> str | None:
         """Return what this frame still has left to record, as the LLM wrote it.
 
         The companion to :meth:`get_remaining_tts_text` when ending a frame
@@ -436,12 +457,18 @@ class WordCompletionTracker:
         with a spoken word is not recorded again. After such a punctuation sweep,
         this and :meth:`get_accumulated_llm_text` do not necessarily form an exact
         partition of ``llm_text``. None without an ``llm_text``, or when nothing
-        is left.
+        but whitespace is left.
+
+        Args:
+            strip: Whether to trim surrounding whitespace. Pass False to keep the
+                leading space, as :meth:`get_remaining_tts_text` does.
         """
         if self._llm_text is None:
             return None
-        remaining = self._llm_text[self._llm_pos :].strip()
-        return remaining if remaining else None
+        remaining = self._llm_text[self._llm_pos :]
+        if not remaining.strip():
+            return None
+        return remaining.strip() if strip else remaining
 
     @property
     def is_complete(self) -> bool:
