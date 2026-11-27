@@ -504,6 +504,12 @@ class SIPConnection(BaseObject):
       ``message``.
     - dtmf: the far end pressed a key; receives the binding's DigitEvent
       and the call's session id.
+    - info: the far end sent a SIP INFO request on the call; receives a
+      payload dict with ``sessionId``, ``contentType`` (empty when the
+      request had none) and ``body`` (the raw bytes, exactly as sent). A
+      PBX or contact-center platform uses INFO to pass an application
+      event inside a call; what the body means is between the two sides.
+      DTMF sent as INFO arrives as ``dtmf``, not here.
     - remote_hold: the far end put the call on hold or resumed it;
       receives a payload dict with ``on`` (bool).
     - renegotiated: an established call renegotiated (a mid-call
@@ -805,6 +811,7 @@ class SIPConnection(BaseObject):
         self._establish_task: asyncio.Task | None = None
         self._call_listener = None
         self._dtmf_listener = None
+        self._info_listener = None
         self._warning_listener = None
         self._emit_tasks: set = set()
 
@@ -819,6 +826,7 @@ class SIPConnection(BaseObject):
         self._register_event_handler("call_closed")
         self._register_event_handler("call_failed")
         self._register_event_handler("dtmf")
+        self._register_event_handler("info")
         self._register_event_handler("audio_warning")
         self._register_event_handler("media_restarted")
 
@@ -1392,14 +1400,24 @@ class SIPConnection(BaseObject):
         def on_dtmf(digit_event):
             self._emit("dtmf", digit_event, session_id)
 
+        def on_info(info_event):
+            payload = {
+                "sessionId": session_id,
+                "contentType": info_event.content_type,
+                "body": info_event.body,
+            }
+            self._emit("info", payload)
+
         def on_warning(warning):
             self._emit("audio_warning", warning, direction, session_id)
 
         self._call_listener = on_event
         self._dtmf_listener = on_dtmf
+        self._info_listener = on_info
         self._warning_listener = on_warning
         call.on(on_event)
         call.on_dtmf(on_dtmf)
+        call.on_info(on_info)
         call.on_audio_warning(on_warning)
 
     def _detach_call(self):
@@ -1410,12 +1428,15 @@ class SIPConnection(BaseObject):
             call.off(self._call_listener)
         if self._dtmf_listener is not None:
             call.off_dtmf(self._dtmf_listener)
+        if self._info_listener is not None:
+            call.off_info(self._info_listener)
         if self._warning_listener is not None:
             call.off_audio_warning(self._warning_listener)
         self._call = None
         self._hangup_headers = None
         self._call_listener = None
         self._dtmf_listener = None
+        self._info_listener = None
         self._warning_listener = None
 
     def _on_call_event(self, call: Call, event: StackEvent):

@@ -34,7 +34,8 @@ errors and warnings carry ``errorMsg``. Daily's ``provider`` and
 ``on_call_state_updated``. Methods: ``start_dialout``, ``stop_dialout``,
 ``send_dtmf``, ``sip_call_transfer``, ``sip_refer``, and the SIP-only
 ``sip_attended_transfer`` and ``set_hangup_headers`` — all return
-``str | None`` errors and never raise.
+``str | None`` errors and never raise. ``on_sip_info`` is a SIP-only event:
+a SIP INFO request the far end sent on the call.
 
 **Equivalent with deltas:** ``sip_refer`` sends a true SIP REFER, and
 takes Daily's ``sipHeaders`` to carry call context to the destination;
@@ -573,6 +574,7 @@ class SIPTransport(BaseTransport):
         self._register_event_handler("on_dialout_error")
         self._register_event_handler("on_dialout_warning")
         self._register_event_handler("on_dtmf_event")
+        self._register_event_handler("on_sip_info")
         self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_joined")
         self._register_event_handler("on_participant_left")
@@ -588,6 +590,7 @@ class SIPTransport(BaseTransport):
         connection.add_event_handler("call_closed", self._on_call_closed)
         connection.add_event_handler("call_failed", self._on_call_failed)
         connection.add_event_handler("dtmf", self._on_dtmf)
+        connection.add_event_handler("info", self._on_info)
         connection.add_event_handler("remote_hold", self._on_remote_hold)
         connection.add_event_handler("renegotiated", self._on_renegotiated)
         connection.add_event_handler("audio_warning", self._on_audio_warning)
@@ -1067,6 +1070,12 @@ class SIPTransport(BaseTransport):
             "error": data.get("error"),
         }
         await self._call_event_handler("on_dialout_error", error)
+
+    async def _on_info(self, connection, data: dict):
+        # A received SIP INFO request, passed on as it arrived: sessionId,
+        # contentType and the raw body. DTMF sent as INFO is not one of
+        # these; it arrives through _on_dtmf.
+        await self._call_event_handler("on_sip_info", data)
 
     async def _on_dtmf(self, connection, digit_event, session_id):
         # No "method" key: the binding's DigitEvent does not say how the

@@ -8,6 +8,7 @@
 
 import asyncio
 import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -48,6 +49,8 @@ def make_fake_call(handle=0x1, peer="sip:2002@example.com", headers=None):
     call.off = Mock()
     call.on_dtmf = Mock()
     call.off_dtmf = Mock()
+    call.on_info = Mock()
+    call.off_info = Mock()
     call.on_audio_warning = Mock()
     call.off_audio_warning = Mock()
     return call
@@ -913,6 +916,34 @@ async def test_hangup_headers_do_not_reach_the_next_call(env):
     await connection.hangup()
 
     second.hangup.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_sip_info_is_emitted_with_its_content_type_and_body(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+    payloads, arrived = capture(connection, "info")
+
+    (on_info,) = call.on_info.call_args.args
+    on_info(SimpleNamespace(content_type="application/json", body=b'{"event":"hold"}'))
+
+    await asyncio.wait_for(arrived.wait(), EVENT_TIMEOUT)
+    assert payloads == [
+        {"sessionId": "1", "contentType": "application/json", "body": b'{"event":"hold"}'}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sip_info_listener_is_removed_when_the_call_closes(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+    (on_info,) = call.on_info.call_args.args
+
+    call.listeners[0](StackEvent(event=Event.CALL_CLOSED, call=call.handle, text="hangup"))
+
+    call.off_info.assert_called_once_with(on_info)
 
 
 @pytest.mark.asyncio
