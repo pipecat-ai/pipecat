@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     LLMContextAssistantTurnFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     TranscriptionSpeaker,
     TTSTextFrame,
@@ -186,6 +187,7 @@ async def test_receive_messages_sets_final_transcription_language(monkeypatch):
                     {"text": " zoek", "is_final": True, "language": "nl"},
                     {"text": " computer", "is_final": True, "language": "en"},
                     {"text": END_TOKEN, "is_final": True},
+                    {"text": FINALIZED_TOKEN, "is_final": True},
                 ]
             }
         ),
@@ -195,6 +197,8 @@ async def test_receive_messages_sets_final_transcription_language(monkeypatch):
     service._websocket = _FakeWebsocket(messages)
     monkeypatch.setattr(service, "push_frame", fake_push_frame)
     monkeypatch.setattr(service, "_handle_transcription", fake_handle_transcription)
+    # The tokens answer a finalize, as after a VAD stop.
+    service.request_finalize()
 
     await service._receive_messages()
 
@@ -218,11 +222,21 @@ async def _final_frames_for(service, tokens, monkeypatch) -> list[TranscriptionF
         pushed_frames.append(frame)
 
     messages = [
-        json.dumps({"tokens": [*tokens, {"text": END_TOKEN, "is_final": True}]}),
+        json.dumps(
+            {
+                "tokens": [
+                    *tokens,
+                    {"text": END_TOKEN, "is_final": True},
+                    {"text": FINALIZED_TOKEN, "is_final": True},
+                ]
+            }
+        ),
         json.dumps({"tokens": [], "finished": True}),
     ]
     service._websocket = _FakeWebsocket(messages)
     monkeypatch.setattr(service, "push_frame", fake_push_frame)
+    # The tokens answer a finalize, as after a VAD stop.
+    service.request_finalize()
 
     await service._receive_messages()
 
@@ -525,6 +539,97 @@ async def test_pipecat_mode_endpoint_and_finalize_push_one_transcription(monkeyp
     ]
 
 
+async def _receive(service, *token_lists):
+    """Feed Soniox messages to the service, one list of tokens per message."""
+    messages = [json.dumps({"tokens": tokens}) for tokens in token_lists]
+    messages.append(json.dumps({"tokens": [], "finished": True}))
+    service._websocket = _FakeWebsocket(messages)
+    await service._receive_messages()
+    # The socket stays open for the next finalize, as a live one would.
+    service._websocket = _FakeWebsocket([])
+
+
+def _recording_service(monkeypatch, finals, **kwargs):
+    """Create a service that records its transcripts and finalize confirmations."""
+    service = SonioxSTTService(api_key="test-key", **kwargs)
+
+    async def fake_push_frame(frame, direction=None):
+        if isinstance(frame, TranscriptionFrame):
+            finals.append((frame.text, frame.finalized))
+        elif isinstance(frame, TranscriptionFinalizedFrame):
+            finals.append(TranscriptionFinalizedFrame)
+
+    monkeypatch.setattr(service, "push_frame", fake_push_frame)
+    service._websocket = _FakeWebsocket([])
+    return service
+
+
+YES = {"text": "Yes.", "is_final": True}
+END = {"text": END_TOKEN, "is_final": True}
+FIN = {"text": FINALIZED_TOKEN, "is_final": True}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("vad_force_turn_endpoint", "finalized"),
+    [(True, False), (False, True)],
+    ids=["pipecat-mode", "soniox-mode"],
+)
+async def test_endpoint_transcript_is_finalized_only_in_soniox_mode(
+    monkeypatch, vad_force_turn_endpoint, finalized
+):
+    """In Pipecat mode an endpoint can come mid-utterance, so it finalizes nothing."""
+    finals = []
+    service = _recording_service(
+        monkeypatch, finals, vad_force_turn_endpoint=vad_force_turn_endpoint
+    )
+
+    await _receive(service, [YES, END])
+
+    assert finals == [("Yes.", finalized)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", [[YES, END, FIN], [YES, FIN]], ids=["end-and-fin", "fin"])
+async def test_pipecat_mode_finalize_answer_with_text_finalizes_it(monkeypatch, answer):
+    finals = []
+    service = _recording_service(monkeypatch, finals)
+
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await _receive(service, answer)
+
+    assert finals == [("Yes.", True)]
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_confirms_a_finalize_whose_text_came_with_the_endpoint(monkeypatch):
+    """Endpoint detection can send the text before the VAD stop asks Soniox to
+    finalize. Soniox then answers with <fin> alone, which has no text to carry, so
+    the confirmation is pushed as a frame of its own.
+    """
+    finals = []
+    service = _recording_service(monkeypatch, finals)
+
+    await _receive(service, [YES, END])
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await _receive(service, [FIN])
+
+    assert finals == [("Yes.", False), TranscriptionFinalizedFrame]
+
+
+@pytest.mark.asyncio
+async def test_pipecat_mode_confirmation_after_new_speech_finalizes_nothing(monkeypatch):
+    """A <fin> that arrives once the user speaks again belongs to no utterance."""
+    finals = []
+    service = _recording_service(monkeypatch, finals)
+
+    await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await service.process_frame(VADUserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await _receive(service, [FIN])
+
+    assert finals == []
+
+
 @pytest.mark.asyncio
 async def test_vad_start_opens_turn_before_tokens(monkeypatch):
     events = []
@@ -690,6 +795,7 @@ async def test_receive_messages_allows_final_transcription_without_language(monk
                     {"text": " a", "is_final": True},
                     {"text": " joke.", "is_final": True},
                     {"text": END_TOKEN, "is_final": True},
+                    {"text": FINALIZED_TOKEN, "is_final": True},
                 ]
             }
         ),
@@ -699,6 +805,8 @@ async def test_receive_messages_allows_final_transcription_without_language(monk
     service._websocket = _FakeWebsocket(messages)
     monkeypatch.setattr(service, "push_frame", fake_push_frame)
     monkeypatch.setattr(service, "_handle_transcription", fake_handle_transcription)
+    # The tokens answer a finalize, as after a VAD stop.
+    service.request_finalize()
 
     await service._receive_messages()
 
