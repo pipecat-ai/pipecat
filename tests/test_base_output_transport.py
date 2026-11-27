@@ -337,6 +337,45 @@ class TestBaseOutputTransportInterruptions(unittest.IsolatedAsyncioTestCase):
         finally:
             await transport.cancel(CancelFrame())
 
+    async def test_interruption_discards_resampler_audio_before_playback(self):
+        # #6806: audio shorter than a chunk that only made it into the
+        # resampler (never queued for playback) must not leak into the next
+        # speech when the interruption arrives before playback started.
+        transport = await _make_transport(audio_out_sample_rate=8000)
+        try:
+            sender = transport._media_senders[None]
+            assert sender.sample_rate == 8000
+
+            # 96 samples at 24 kHz resampling down to 8 kHz (transport rate):
+            # not enough for one output chunk, so it stays inside the
+            # resampler's filter and no write happens.
+            abandoned = TTSAudioRawFrame((np.ones(96) * 20000).astype(np.int16).tobytes(), 24000, 1)
+            await transport.process_frame(abandoned, FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.05)
+            transport.write_audio_frame.assert_not_called()
+            self.assertFalse(sender._bot_speaking)
+
+            await transport.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+
+            # Exact zero input after the interruption exposes any old filter
+            # state: if the resampler was not reset, the old speech bleeds
+            # into the next reply.
+            zeros = TTSAudioRawFrame(bytes(1600 * 2), 24000, 1)
+            await transport.process_frame(zeros, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(TTSStoppedFrame(), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.05)
+
+            written = b"".join(
+                call.args[0].audio for call in transport.write_audio_frame.call_args_list
+            )
+            audio = np.frombuffer(written, dtype=np.int16)
+            self.assertTrue(
+                bool(np.max(np.abs(audio)) <= 1) if len(audio) else True,
+                f"stale audio leaked into next speech: peak {np.max(np.abs(audio)) if len(audio) else 0}",
+            )
+        finally:
+            await transport.cancel(CancelFrame())
+
 
 class TestBaseOutputTransportChunkInterruptibility(unittest.IsolatedAsyncioTestCase):
     """A chunk cut from the audio buffer keeps the ``interruptible`` flag of the audio it holds."""
