@@ -679,6 +679,19 @@ class TestExpandCurrency(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_currency("$3.567", "*"), "three dollars and fifty-six cents")
         self.assertEqual(await expand_currency("£1.999", "*"), "one pound and ninety-nine pence")
 
+    async def test_sub_cent_amount_not_read_as_zero(self):
+        # A price under one cent has no whole cents, so it is read digit by digit
+        # rather than as "zero dollars". Per-minute and per-token rates look like this.
+        self.assertEqual(
+            await expand_currency("Calls are $0.0085 per minute", "*"),
+            "Calls are zero point zero zero eight five dollars per minute",
+        )
+        self.assertEqual(await expand_currency("$0.005", "*"), "zero point zero zero five dollars")
+        self.assertEqual(await expand_currency("€0.001", "*"), "zero point zero zero one euros")
+        # An amount of a cent or more keeps the cent reading, and zero stays zero.
+        self.assertEqual(await expand_currency("$0.015", "*"), "zero dollars and one cent")
+        self.assertEqual(await expand_currency("$0.000", "*"), "zero dollars")
+
     async def test_scaled_amount_drops_trailing_zeros(self):
         # "$2.50 million" is two and a half million, so the zero is not read out.
         self.assertEqual(
