@@ -291,6 +291,59 @@ class TestLiveKitAudioStreamLeakOnUnsubscribe(unittest.IsolatedAsyncioTestCase):
         first_task.cancel.assert_called_once()
         self.assertIs(client._audio_streams[participant.identity][0], second)
 
+    async def test_late_unsubscribe_of_replaced_audio_track_keeps_new_stream(self):
+        """A republished mic is subscribed before the old track's unsubscribe arrives; the new stream must stay open."""
+        client = self._create_client()
+        old_track, old_pub, participant = self._audio_track(sid="audio-track-old")
+        new_track, new_pub, _ = self._audio_track(sid="audio-track-new")
+
+        old_stream = MagicMock()
+        old_stream.aclose = AsyncMock()
+        new_stream = MagicMock()
+        new_stream.aclose = AsyncMock()
+
+        with patch.object(rtc, "AudioStream", return_value=old_stream):
+            await client._async_on_track_subscribed(old_track, old_pub, participant)
+        with patch.object(rtc, "AudioStream", return_value=new_stream):
+            await client._async_on_track_subscribed(new_track, new_pub, participant)
+        new_task = client._audio_streams[participant.identity][1]
+
+        await client._async_on_track_unsubscribed(old_track, old_pub, participant)
+
+        new_stream.aclose.assert_not_awaited()
+        new_task.cancel.assert_not_called()
+        self.assertIs(client._audio_streams[participant.identity][0], new_stream)
+        client._callbacks.on_audio_track_unsubscribed.assert_not_called()
+
+        await client._async_on_track_unsubscribed(new_track, new_pub, participant)
+
+        new_stream.aclose.assert_awaited_once()
+        self.assertNotIn(participant.identity, client._audio_streams)
+        client._callbacks.on_audio_track_unsubscribed.assert_called_once()
+
+    async def test_late_unsubscribe_of_replaced_video_track_keeps_new_stream(self):
+        """Symmetric behaviour for a republished camera when ``video_in_enabled=True``."""
+        client = self._create_client(video_in_enabled=True)
+        old_track, old_pub, participant = self._video_track(sid="video-track-old")
+        new_track, new_pub, _ = self._video_track(sid="video-track-new")
+
+        old_stream = MagicMock()
+        old_stream.aclose = AsyncMock()
+        new_stream = MagicMock()
+        new_stream.aclose = AsyncMock()
+
+        with patch.object(rtc, "VideoStream", return_value=old_stream):
+            await client._async_on_track_subscribed(old_track, old_pub, participant)
+        with patch.object(rtc, "VideoStream", return_value=new_stream):
+            await client._async_on_track_subscribed(new_track, new_pub, participant)
+
+        await client._async_on_track_unsubscribed(old_track, old_pub, participant)
+
+        new_stream.aclose.assert_not_awaited()
+        self.assertIs(client._video_streams[(participant.identity, "camera")][0], new_stream)
+        self.assertIs(client._video_tracks[(participant.identity, "camera")], new_track)
+        client._callbacks.on_video_track_unsubscribed.assert_not_called()
+
     async def test_unsubscribe_without_subscribe_is_noop(self):
         """Unsubscribe for an unknown sid does not raise."""
         client = self._create_client()
