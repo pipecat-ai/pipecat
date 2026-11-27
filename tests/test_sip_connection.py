@@ -278,6 +278,49 @@ async def test_conflicting_sip_port_raise(env):
         await second.connect()
 
 
+@pytest.mark.asyncio
+async def test_extra_config_unset_leaves_the_config_text_as_before(env):
+    connection = make_connection(sip_port=5060)
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert config.extra_config_text == (
+        "sip_listen 0.0.0.0:5060\naudio_jitter_buffer_type fixed\naudio_jitter_buffer_ms 40-60\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_extra_config_lines_follow_the_transports_own(env):
+    connection = make_connection(
+        sip_port=5060, extra_config=("sip_verify_server no", "rtp_ports 20000-20100")
+    )
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert config.extra_config_text == (
+        "sip_listen 0.0.0.0:5060\naudio_jitter_buffer_type fixed\naudio_jitter_buffer_ms 40-60\n"
+        "sip_verify_server no\nrtp_ports 20000-20100\n"
+    )
+
+
+@pytest.mark.parametrize("extra_config", ["sip_verify_server no", ("",), ("a b\nc d",), (5,)])
+def test_extra_config_rejects_malformed_values(extra_config):
+    with pytest.raises(ValueError, match="extra_config"):
+        make_connection(extra_config=extra_config)
+
+
+@pytest.mark.asyncio
+async def test_conflicting_extra_config_raises(env):
+    first = make_connection()
+    await first.connect()
+
+    second = make_connection(user="1002", extra_config=("sip_verify_server no",))
+    with pytest.raises(ValueError, match="extra_config"):
+        await second.connect()
+
+
 def test_extra_params_render_into_the_account_aor():
     connection = make_connection(
         extra_params=("medianat=ice", "stunserver=stun:stun.example.com:3478")

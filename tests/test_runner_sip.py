@@ -189,6 +189,7 @@ class TestSipRunnerArguments(unittest.TestCase):
         self.assertIsNone(args.jitter_buffer_mode)
         self.assertIsNone(args.jitter_buffer_ms)
         self.assertIs(args.media_encryption, SIPMediaEncryption.NONE)
+        self.assertIsNone(args.extra_config)
         self.assertEqual(args.body, {})
         self.assertIsNone(args.session_id)
         self.assertFalse(args.handle_sigint)
@@ -208,6 +209,7 @@ class TestSipRunnerArguments(unittest.TestCase):
             "SIP_PORT": "5060",
             "SIP_JITTER_BUFFER": "adaptive:20-100",
             "SIP_MEDIA_ENCRYPTION": "SRTP",
+            "SIP_EXTRA_CONFIG": "sip_verify_server no; rtp_ports 20000-20100;",
         }
         with patch.dict("os.environ", env, clear=True):
             args = sip_runner_arguments(self.CONFIG)
@@ -225,6 +227,7 @@ class TestSipRunnerArguments(unittest.TestCase):
         self.assertEqual(args.jitter_buffer_mode, "adaptive")
         self.assertEqual(args.jitter_buffer_ms, (20, 100))
         self.assertIs(args.media_encryption, SIPMediaEncryption.SRTP)
+        self.assertEqual(args.extra_config, ("sip_verify_server no", "rtp_ports 20000-20100"))
 
     def test_carries_the_session_over(self):
         base = RunnerArguments(

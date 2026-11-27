@@ -430,6 +430,7 @@ class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
             jitter_buffer_mode="fixed",
             jitter_buffer_ms=(40, 60),
             media_encryption=SIPMediaEncryption.SRTP,
+            extra_config=("rtp_ports 20000-20100",),
         )
         transport = await create_transport(
             args, {"sip": lambda: SIPParams(audio_in_enabled=True, audio_out_enabled=True)}
@@ -443,6 +444,7 @@ class TestCreateTransportSIP(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transport._connection._settings.jitter_buffer_ms, (40, 60))
         self.assertEqual(transport._connection._account.audio_codecs, ("PCMU/8000/1",))
         self.assertEqual(transport._connection._account.media_encryption, "srtp")
+        self.assertEqual(transport._connection._settings.extra_config, ("rtp_ports 20000-20100",))
         self.assertEqual(transport._connection._account.auth_user, "trunk-user")
         self.assertEqual(
             transport._connection._account.extra_params,

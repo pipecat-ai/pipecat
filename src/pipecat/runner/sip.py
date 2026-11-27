@@ -71,6 +71,10 @@ Environment variables:
   still encrypts a received call whose caller offers SRTP.
 - SIP_EXTRA_PARAMS (optional) - Comma-separated raw baresip account
   parameters (``key=value``), passed verbatim; wins over SIP_STUN_SERVER.
+- SIP_EXTRA_CONFIG (optional) - Semicolon-separated raw lines for the SIP
+  stack's configuration (``key value``), passed verbatim: the escape hatch for
+  stack settings with no variable of their own. "sip_verify_server no" turns
+  TLS verification off, for a development server only.
 - SIP_STUN_SERVER (optional) - STUN server for the default media-NAT traversal
   (medianat=stun, default stun.l.google.com); set to "off" to disable. Ignored
   when SIP_EXTRA_PARAMS is set. The address STUN reports does not reach the bot
@@ -373,8 +377,8 @@ def sip_runner_arguments(
     ``SIP_AUTH_USER``, ``SIP_EXTRA_PARAMS``/``SIP_STUN_SERVER``,
     ``SIP_REG_INTERVAL``, ``SIP_RTP_TIMEOUT``, ``SIP_INSTANCE_ID``,
     ``SIP_NATIVE_LOG_LEVEL``, ``SIP_TRACE``, ``SIP_NET_INTERFACE``,
-    ``SIP_PORT``, ``SIP_JITTER_BUFFER``, ``SIP_MEDIA_ENCRYPTION``) on top of
-    the account, and carries
+    ``SIP_PORT``, ``SIP_JITTER_BUFFER``, ``SIP_MEDIA_ENCRYPTION``,
+    ``SIP_EXTRA_CONFIG``) on top of the account, and carries
     the session's ``body``, ``session_id``, signal flags and ``cli_args``
     over from ``runner_args`` when given. The development runner, its routes and
     :func:`~pipecat.runner.utils.create_transport` all build their SIP
@@ -417,6 +421,7 @@ def sip_runner_arguments(
         raise ValueError(f"SIP_MEDIA_ENCRYPTION: {e}") from None
 
     codecs = os.getenv("SIP_AUDIO_CODECS")
+    extra_config = os.getenv("SIP_EXTRA_CONFIG")
     args = SIPRunnerArguments(
         user=config.user,
         domain=config.domain,
@@ -435,6 +440,11 @@ def sip_runner_arguments(
         jitter_buffer_mode=jitter_buffer_mode,
         jitter_buffer_ms=jitter_buffer_ms,
         media_encryption=media_encryption,
+        extra_config=(
+            tuple(line.strip() for line in extra_config.split(";") if line.strip())
+            if extra_config
+            else None
+        ),
         body=runner_args.body if runner_args is not None else {},
         session_id=runner_args.session_id if runner_args is not None else None,
     )

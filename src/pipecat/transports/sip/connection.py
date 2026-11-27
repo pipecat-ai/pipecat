@@ -172,6 +172,24 @@ def _validate_sip_port(port: int | None) -> int | None:
     return port
 
 
+def _validate_extra_config(lines: tuple | None) -> tuple:
+    """Check ``extra_config`` lines and return them as a tuple.
+
+    Raises:
+        ValueError: ``lines`` is a bare string, or an entry is not a
+            non-empty single line.
+    """
+    if lines is None:
+        return ()
+    if isinstance(lines, str):
+        raise ValueError("extra_config must be a tuple of lines, not a single string")
+    checked = tuple(lines)
+    for line in checked:
+        if not isinstance(line, str) or not line.strip() or "\n" in line or "\r" in line:
+            raise ValueError(f"extra_config entries must be non-empty single lines, got {line!r}")
+    return checked
+
+
 def _validate_headers(headers: dict | None) -> dict | None:
     """Check custom SIP headers and return a copy, or None for no headers.
 
@@ -221,6 +239,7 @@ class _RuntimeSettings:
     sip_trace: bool = False
     jitter_buffer_mode: str | None = None
     jitter_buffer_ms: tuple | None = None
+    extra_config: tuple = ()
 
     def to_config(self) -> Config:
         """These settings as the binding's ``Config`` object.
@@ -240,7 +259,9 @@ class _RuntimeSettings:
             video_bitrate=self.video_bitrate,
             native_log_level=self.native_log_level,
             sip_trace=self.sip_trace,
-            extra_config_text=self._sip_listen_config() + self._jitter_buffer_config(),
+            extra_config_text=(
+                self._sip_listen_config() + self._jitter_buffer_config() + self._extra_config_text()
+            ),
         )
 
     def _sip_listen_config(self) -> str:
@@ -271,6 +292,15 @@ class _RuntimeSettings:
             lo, hi = self.jitter_buffer_ms
             lines.append(f"audio_jitter_buffer_ms {lo}-{hi}")
         return "".join(f"{line}\n" for line in lines)
+
+    def _extra_config_text(self) -> str:
+        """The application's own ``extra_config`` lines, one per line.
+
+        They come after the lines this class renders, so the text a
+        connection produced before ``extra_config`` existed is unchanged at
+        its start. Nothing given renders nothing.
+        """
+        return "".join(f"{line}\n" for line in self.extra_config)
 
     @property
     def stdlib_log_level(self) -> int:
@@ -334,8 +364,8 @@ class _SharedRuntime:
                     f"settings ({self._settings!r}); all SIPConnections in a process "
                     "must agree on net_interface, sip_port, expose_headers, "
                     "max_concurrent_calls, rtp_timeout, instance_id, "
-                    "native_log_level, sip_trace, the jitter buffer, and the "
-                    "video parameters"
+                    "native_log_level, sip_trace, the jitter buffer, extra_config, "
+                    "and the video parameters"
                 )
             self._owners += 1
             return self._runtime
@@ -450,7 +480,7 @@ class SIPConnection(BaseObject):
 
     Runtime-wide arguments (``net_interface``, ``sip_port``, ``expose_headers``,
     ``max_concurrent_calls``, the jitter buffer, the logging parameters,
-    and the video parameters) configure the process-wide SIP stack and are
+    ``extra_config``, and the video parameters) configure the process-wide SIP stack and are
     fixed by the first connection to connect; every later connection must
     pass the same values.
 
@@ -558,6 +588,7 @@ class SIPConnection(BaseObject):
         video_bitrate: int = 1_000_000,
         native_log_level: str = "warning",
         sip_trace: bool = False,
+        extra_config: tuple | None = None,
         route_inbound: bool = True,
         **kwargs,
     ):
@@ -676,6 +707,18 @@ class SIPConnection(BaseObject):
                 the tool for signaling and SDP/media-path debugging. The
                 trace contains call metadata and digest authentication
                 material, so keep it off in production. Runtime-wide.
+            extra_config: Extra lines for the SIP stack's configuration,
+                each a ``"key value"`` string in baresip's own config
+                syntax, appended verbatim after the lines the other
+                arguments produce — the escape hatch for stack settings
+                pipecat does not model. For a setting that has an argument
+                here, use the argument. One use is a development server
+                whose TLS certificate cannot be verified:
+                ``("sip_verify_server no",)`` turns verification off for
+                every TLS connection, so never set it for production
+                traffic; a private or self-signed certificate is better
+                served by pointing ``SIP_CA_FILE`` at its CA. None (the
+                default) adds nothing. Runtime-wide.
             route_inbound: Whether the shared inbound dispatcher routes
                 incoming calls to this connection (per-connection, not
                 runtime-wide). A consult/transfer leg sets ``False`` so an
@@ -734,6 +777,7 @@ class SIPConnection(BaseObject):
             sip_trace=sip_trace,
             jitter_buffer_mode=jitter_buffer_mode,
             jitter_buffer_ms=jitter_buffer_ms,
+            extra_config=_validate_extra_config(extra_config),
         )
         # Per-connection: a consult/transfer leg opts out of inbound routing so a
         # call never lands on it while it is briefly idle between connect and dial.

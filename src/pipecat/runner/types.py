@@ -358,6 +358,10 @@ class SIPRunnerArguments(RunnerArguments):
             what each mode costs.
         jitter_buffer_ms: ``(min, max)`` in milliseconds for a fixed or
             adaptive buffer; None with no mode selects the default.
+        extra_config: Extra lines for the SIP stack's configuration, each a
+            ``"key value"`` string in baresip's own syntax, appended
+            verbatim; None adds nothing. See
+            :class:`~pipecat.transports.sip.connection.SIPConnection`.
     """
 
     user: str
@@ -377,6 +381,7 @@ class SIPRunnerArguments(RunnerArguments):
     jitter_buffer_mode: str | None = None
     jitter_buffer_ms: tuple | None = None
     media_encryption: SIPMediaEncryption = SIPMediaEncryption.NONE
+    extra_config: tuple | None = None
 
 
 @dataclass
