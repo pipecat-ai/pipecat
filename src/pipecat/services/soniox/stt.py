@@ -62,6 +62,10 @@ _VERSIONED_MODEL = re.compile(r"stt-rt-v(\d+)")
 # The first real-time model version that accepts agent text input.
 _AGENT_TEXT_INPUT_MIN_VERSION = 6
 
+# The longest agent_text message Soniox accepts, in bytes of UTF-8. A longer one
+# is refused with a 400 ("Agent text too long") that ends the stream.
+_AGENT_TEXT_MAX_BYTES = 1000
+
 
 class SonioxContextGeneralItem(BaseModel):
     """Represents a key-value pair for structured general context information."""
@@ -132,6 +136,32 @@ class SonioxInputParams(BaseModel):
     enable_language_identification: bool | None = False
 
     client_reference_id: str | None = None
+
+
+def _split_agent_text(text: str, max_bytes: int = _AGENT_TEXT_MAX_BYTES) -> list[str]:
+    """Split agent text into pieces of at most ``max_bytes`` bytes of UTF-8.
+
+    Each piece but the last ends after a space where it has one, so words stay
+    whole, and a word longer than the limit is cut between characters. Joined,
+    the pieces are the text.
+
+    Args:
+        text: The text to split.
+        max_bytes: The most bytes of UTF-8 in a piece.
+
+    Returns:
+        The pieces, in order: one for text within the limit, including empty text.
+    """
+    pieces = []
+    while len(text.encode("utf-8")) > max_bytes:
+        piece = text.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
+        space = piece.rfind(" ")
+        if space > 0:
+            piece = piece[: space + 1]
+        pieces.append(piece)
+        text = text[len(piece) :]
+    pieces.append(text)
+    return pieces
 
 
 def is_end_token(token: dict) -> bool:
@@ -264,8 +294,9 @@ class SonioxSTTSettings(STTSettings):
             Soniox as agent text, so words the bot said (e.g. a product name)
             are recognized when the user says them. Defaults to True. Only
             takes effect on models that support agent text input
-            (``stt-rt-v6`` and later); it stays off for older models. Agent
-            text is billed as input text tokens.
+            (``stt-rt-v6`` and later); it stays off for older models. A reply
+            over Soniox's limit of 1000 bytes per message goes out as several
+            messages. Agent text is billed as input text tokens.
         enable_echo_cancellation: Whether to send the bot's speech to Soniox as
             agent text while it plays, which also lets Soniox cancel the bot's
             echo in the user's audio. Implies ``enable_agent_text_input``, and
@@ -678,15 +709,28 @@ class SonioxSTTService(WebsocketSTTService):
         return enabled and _supports_agent_text_input(s.model)
 
     async def _send_agent_text(self, text: str, end_of_segment: bool = True):
-        """Send text the bot is speaking, which Soniox places by its position in the audio."""
+        """Send text the bot is speaking, which Soniox places by its position in the audio.
+
+        Soniox ends the stream on a message over 1000 bytes of UTF-8, so longer
+        text goes out as several messages of the same segment, and only the last
+        one can end it.
+        """
         if not self._agent_text_input_enabled():
             return
-        if self._websocket and self._websocket.state is State.OPEN:
-            message = {"type": "agent_text", "text": text, "end_of_segment": end_of_segment}
+        pieces = _split_agent_text(text)
+        for i, piece in enumerate(pieces):
+            if not self._websocket or self._websocket.state is not State.OPEN:
+                return
+            message = {
+                "type": "agent_text",
+                "text": piece,
+                "end_of_segment": end_of_segment and i == len(pieces) - 1,
+            }
             try:
                 await self._websocket.send(json.dumps(message))
             except Exception as e:
                 logger.warning(f"{self}: agent text send failed: {e}")
+                return
 
     async def _update_agent_text_observer(self):
         """Observe the bot's speech while echo cancellation is on."""
