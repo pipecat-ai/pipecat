@@ -66,10 +66,11 @@ _sorted_ambiguous = sorted(_AMBIGUOUS_UNITS | {"L"}, key=len, reverse=True)
 
 # A rate expands whole, so it is matched before single units. The slash marks
 # any unit as one, so even an ambiguous unit may follow a space ("9.8 m/s").
+# Optional spaces around the slash cover the common written form "km / h".
 _RATE_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*("
     + "|".join(re.escape(u) for u in sorted(_UNIT_MAP, key=len, reverse=True))
-    + r")/("
+    + r")\s*/\s*("
     + "|".join(re.escape(u) for u in sorted(_PER_UNIT_MAP, key=len, reverse=True))
     + r")\b",
     re.IGNORECASE,
