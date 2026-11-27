@@ -823,6 +823,32 @@ async def test_hangup_headers_do_not_reach_the_next_call(env):
 
 
 @pytest.mark.asyncio
+async def test_reject_defaults_to_busy_here(env):
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    env.ua.incoming_callbacks[0](call)
+
+    await connection.reject()
+
+    call.reject.assert_awaited_once_with(status=486, reason=None, headers=None)
+
+
+@pytest.mark.asyncio
+async def test_reject_passes_status_reason_and_headers_through(env):
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    env.ua.incoming_callbacks[0](call)
+
+    await connection.reject(503, reason="Try Elsewhere", headers={"Retry-After": "30"})
+
+    call.reject.assert_awaited_once_with(
+        status=503, reason="Try Elsewhere", headers={"Retry-After": "30"}
+    )
+
+
+@pytest.mark.asyncio
 async def test_answer_passes_video_and_headers_through(env):
     connection = make_connection()
     await connection.connect()

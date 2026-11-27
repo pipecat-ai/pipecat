@@ -975,10 +975,36 @@ class SIPConnection(BaseObject):
         call = self._require_call()
         await call.wait_established(timeout)
 
-    async def reject(self):
-        """Decline the active inbound call with 486 Busy Here."""
+    async def reject(
+        self, status: int = 486, reason: str | None = None, headers: dict | None = None
+    ):
+        """Refuse the active inbound call before it is answered.
+
+        The status tells the far end what to do next, and switches and
+        contact-center platforms act on it: 486 (the default) says this
+        endpoint is busy, 480 that it is unavailable for now, 503 that the
+        call should be tried elsewhere, 603 that it is declined. With no
+        arguments the call is refused with ``486 Busy Here``.
+
+        Example::
+
+            @connection.event_handler("incoming")
+            async def on_incoming(connection, data):
+                if overloaded():
+                    await connection.reject(503, headers={"Retry-After": "30"})
+
+        Args:
+            status: The SIP status of the refusal, 300 to 699.
+            reason: The reason phrase; None sends the standard phrase for
+                the status.
+            headers: Extra headers for the refusal, name to value.
+
+        Raises:
+            ValueError: A status outside 300-699, or a header name or
+                value that cannot go on the wire.
+        """
         call = self._require_call()
-        await call.reject()
+        await call.reject(status=status, reason=reason, headers=headers)
 
     async def hangup(self):
         """Hang up the active call; valid in any state.
