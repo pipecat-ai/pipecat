@@ -229,7 +229,7 @@ class JobGroup:
         """Wait for all workers in the group to respond.
 
         Raises:
-            JobGroupError: If the group was cancelled due to error or timeout.
+            JobGroupError: If the group was cancelled.
         """
         await self._done.wait()
         if self._error:
@@ -247,7 +247,7 @@ class JobGroup:
         Args:
             reason: Human-readable reason for the failure.
         """
-        self._error = reason
+        self._error = reason or "cancelled"
         self._done.set()
         if self.event_queue:
             self.event_queue.put_nowait(None)
@@ -261,9 +261,9 @@ class JobGroupContext:
     and streaming data) from workers while waiting for completion.
 
     On normal completion, results are available via ``responses``.
-    On worker error (with ``cancel_on_error=True``) or timeout, raises
-    ``JobGroupError``. If the ``async with`` block raises, remaining
-    jobs are cancelled.
+    If the group is cancelled, including on timeout or on worker error with
+    ``cancel_on_error=True``, raises ``JobGroupError``. If the
+    ``async with`` block raises, remaining jobs are cancelled.
 
     Example::
 
@@ -356,8 +356,8 @@ class JobContext:
     and streaming data) from the worker while waiting for completion.
 
     On normal completion, the result is available via ``response``.
-    On worker error or timeout, raises ``JobError``. If the
-    ``async with`` block raises, the job is cancelled.
+    If the job is cancelled, including on worker error or timeout, raises
+    ``JobError``. If the ``async with`` block raises, the job is cancelled.
 
     Example::
 
