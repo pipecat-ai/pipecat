@@ -1872,11 +1872,38 @@ def _split_wav(audio: bytes, max_secs: float) -> list[bytes]:
     return chunks
 
 
+def _shift_timestamps(result: dict[str, Any], offset_secs: float) -> None:
+    """Move a piece's timestamps onto the timeline of the whole segment.
+
+    Each piece of a split segment is timed from its own start, so its times are
+    shifted by where the piece starts in the segment.
+    """
+    timestamps = result.get("timestamps")
+    if not offset_secs or not isinstance(timestamps, dict):
+        return
+    for key in ("start_time_seconds", "end_time_seconds"):
+        times = timestamps.get(key)
+        if isinstance(times, list):
+            timestamps[key] = [round(t + offset_secs, 3) for t in times]
+
+
 @dataclass
 class SarvamHttpSTTSettings(STTSettings):
-    """Settings for SarvamHttpSTTService."""
+    """Settings for SarvamHttpSTTService.
 
-    pass
+    Parameters:
+        timestamp_granularity: Timestamps to request: ``segment`` or ``word``.
+            ``word`` works with ``saaras:v4`` in every mode but ``translate``.
+            The timestamps are in the frame's ``result["timestamps"]`` as parallel
+            ``words``, ``start_time_seconds`` and ``end_time_seconds`` lists, in
+            seconds from the start of the segment, with ``granularity`` set to
+            ``segment`` when Sarvam could not time every word. ``None`` requests
+            no timestamps.
+    """
+
+    timestamp_granularity: Literal["segment", "word"] | None | NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class SarvamHttpSTTService(SegmentedSTTService):
@@ -1891,7 +1918,9 @@ class SarvamHttpSTTService(SegmentedSTTService):
     The REST endpoint accepts at most 30 seconds of audio per request, so a
     longer segment is sent as consecutive 30-second pieces whose transcripts
     are joined into one ``TranscriptionFrame``. A word spoken across a piece
-    boundary may be transcribed less accurately.
+    boundary may be transcribed less accurately. Timestamps requested with the
+    ``timestamp_granularity`` setting are shifted so they count from the start
+    of the segment.
 
     Requires VAD to be enabled in the pipeline.
     """
@@ -1931,6 +1960,7 @@ class SarvamHttpSTTService(SegmentedSTTService):
         default_settings = self.Settings(
             model="saaras:v4",
             language=None,
+            timestamp_granularity=None,
         )
 
         if settings is not None:
@@ -2037,12 +2067,15 @@ class SarvamHttpSTTService(SegmentedSTTService):
         if self._config.supports_mode and self._mode is not None:
             request_kwargs["mode"] = self._mode
 
+        # transcribe() has no keyterms or timestamp_granularity parameter, so
+        # they go as extra form fields; keyterms is a JSON array.
+        body: dict[str, Any] = {}
         if self._keyterms is not None:
-            # transcribe() has no keyterms parameter; the REST API takes it as
-            # a form field holding a JSON array.
-            request_options: RequestOptions = {
-                "additional_body_parameters": {"keyterms": json.dumps(self._keyterms)}
-            }
+            body["keyterms"] = json.dumps(self._keyterms)
+        if self._settings.timestamp_granularity:
+            body["timestamp_granularity"] = self._settings.timestamp_granularity
+        if body:
+            request_options: RequestOptions = {"additional_body_parameters": body}
             request_kwargs["request_options"] = request_options
 
         return await self._sarvam_client.speech_to_text.transcribe(**request_kwargs)
@@ -2083,6 +2116,10 @@ class SarvamHttpSTTService(SegmentedSTTService):
             detected = next((r.language_code for r in responses if r.language_code), None)
             language = self._map_language_code_to_enum(detected or self._get_language_string())
 
+            results = [r.dict() for r in responses]
+            for index, result in enumerate(results):
+                _shift_timestamps(result, index * _HTTP_MAX_REQUEST_SECS)
+
             await self._handle_transcription(transcript, True, language)
             logger.debug(f"Transcription: [{transcript}]")
             yield TranscriptionFrame(
@@ -2090,9 +2127,7 @@ class SarvamHttpSTTService(SegmentedSTTService):
                 self._user_id,
                 time_now_iso8601(),
                 language,
-                result=(
-                    responses[0].dict() if len(responses) == 1 else [r.dict() for r in responses]
-                ),
+                result=results[0] if len(results) == 1 else results,
             )
 
         except Exception as e:
