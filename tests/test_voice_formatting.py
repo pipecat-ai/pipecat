@@ -432,6 +432,13 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_units("2 L/min", "*"), "2 liters per minute")
         self.assertEqual(await expand_units("100 MB/s", "*"), "100 megabytes per second")
 
+    async def test_pounds_written_as_lbs(self):
+        self.assertEqual(await expand_units("It weighs 10 lbs", "*"), "It weighs 10 pounds")
+        self.assertEqual(await expand_units("a 25lbs bag", "*"), "a 25 pounds bag")
+        self.assertEqual(await expand_units("2.5 LBS", "*"), "2.5 pounds")
+        self.assertEqual(await expand_units("1 lbs", "*"), "1 pound")
+        self.assertEqual(await expand_units("10 lb", "*"), "10 pounds")
+
     async def test_km(self):
         result = await expand_units("5km away", "*")
         self.assertIn("kilometers", result)

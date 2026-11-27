@@ -24,6 +24,7 @@ _UNIT_MAP: dict[str, tuple[str, str]] = {
     "g": ("gram", "grams"),
     "mg": ("milligram", "milligrams"),
     "lb": ("pound", "pounds"),
+    "lbs": ("pound", "pounds"),
     "oz": ("ounce", "ounces"),
     "l": ("liter", "liters"),
     "ml": ("milliliter", "milliliters"),
