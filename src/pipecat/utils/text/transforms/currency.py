@@ -43,6 +43,13 @@ _CURRENCY_RE = re.compile(
     re.IGNORECASE,
 )
 
+_CURRENCY_RANGE_RE = re.compile(
+    r"([€£¥₹\$]\s*\d[\d,]*(?:\.\d+)?"
+    r"(?:\s+(?:thousand|million|billion|trillion)\b|(?:k|mn|m|bn|b|tn|t)\b)?)"
+    r"(?:[-–]|\s[-–]\s)(?=[€£¥₹\$]\s*\d)",
+    re.IGNORECASE,
+)
+
 _NEGATIVE_CURRENCY_RE = minus_before(r"[€£¥₹\$]")
 
 
@@ -113,5 +120,6 @@ async def expand_currency(text: str, text_type: str | TextType) -> str:
         result = await expand_currency("Your balance is $42.50", "*")
         # "Your balance is forty-two dollars and fifty cents"
     """
+    text = _CURRENCY_RANGE_RE.sub(lambda m: f"{m.group(1)} to ", text)
     text = say_minus(_NEGATIVE_CURRENCY_RE, text)
     return _CURRENCY_RE.sub(_keep_code_apart, text)
