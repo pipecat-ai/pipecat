@@ -1515,6 +1515,34 @@ class InterruptionFrame(SystemFrame):
 
 
 @dataclass
+class InterruptionHoldFrame(SystemFrame):
+    """Frame pushed to pause bot output while waiting to see if a turn stays empty.
+
+    Emitted when a user turn starts in
+    :attr:`~pipecat.turns.types.InterruptionMode.HOLD` while the bot is
+    responding. Downstream output processors pause audio playback and buffer
+    subsequent LLM/TTS output without cancelling the active inference. If a
+    transcript arrives, a normal :class:`InterruptionFrame` commits the
+    interruption and drops the buffered output; if the turn ends empty, an
+    :class:`InterruptionResumeFrame` resumes playback.
+    """
+
+    pass
+
+
+@dataclass
+class InterruptionResumeFrame(SystemFrame):
+    """Frame pushed to resume bot output held by :class:`InterruptionHoldFrame`.
+
+    Emitted when a held user turn ends without a transcript, allowing output
+    processors to flush and resume playback of the buffered response without
+    making another LLM call.
+    """
+
+    pass
+
+
+@dataclass
 class UserStartedSpeakingFrame(SystemFrame):
     """Frame indicating that the user turn has started.
 

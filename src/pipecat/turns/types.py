@@ -52,6 +52,53 @@ class UserTurnSpeculation:
     perception: list[PerceptionSignal] | None = None
 
 
+class InterruptionMode(Enum):
+    """How a user turn start affects an in-progress bot response.
+
+    Parameters:
+        IMMEDIATE: Broadcast :class:`~pipecat.frames.frames.InterruptionFrame`
+            as soon as the user turn starts.
+        NONE: Do not interrupt the bot when the user turn starts.
+        HOLD: Broadcast :class:`~pipecat.frames.frames.InterruptionHoldFrame`
+            to pause output and buffer incoming bot frames until either a
+            transcript arrives (committing an interruption) or the turn ends
+            empty (resuming playback via
+            :class:`~pipecat.frames.frames.InterruptionResumeFrame`).
+    """
+
+    IMMEDIATE = "immediate"
+    NONE = "none"
+    HOLD = "hold"
+
+
+def resolve_interruption_mode(
+    interruptions: InterruptionMode | None = None,
+    enable_interruptions: bool | None = None,
+) -> InterruptionMode:
+    """Resolve an interruption mode from ``interruptions`` or ``enable_interruptions``.
+
+    Args:
+        interruptions: Explicit interruption mode, if provided.
+        enable_interruptions: Legacy boolean flag mapped to
+            ``InterruptionMode.IMMEDIATE`` / ``InterruptionMode.NONE``.
+
+    Returns:
+        The resolved :class:`InterruptionMode`, defaulting to
+        ``InterruptionMode.IMMEDIATE`` when neither argument is specified.
+
+    Raises:
+        ValueError: If both ``interruptions`` and ``enable_interruptions`` are
+            provided at the same time.
+    """
+    if interruptions is not None and enable_interruptions is not None:
+        raise ValueError("Cannot specify both 'interruptions' and 'enable_interruptions'")
+    if interruptions is not None:
+        return interruptions
+    if enable_interruptions is not None:
+        return InterruptionMode.IMMEDIATE if enable_interruptions else InterruptionMode.NONE
+    return InterruptionMode.IMMEDIATE
+
+
 @dataclass
 class UserTurnResumedParams:
     """Parameters emitted when the user speaks again in an open turn.
@@ -61,7 +108,19 @@ class UserTurnResumedParams:
             when it started.
         inference_triggered: Whether the turn's inference was already
             triggered. The new speech voids the answer it started.
+        interruption_mode: Interruption mode decided when the turn started.
+            Synchronized with ``enable_interruptions`` when omitted.
     """
 
     enable_interruptions: bool
     inference_triggered: bool
+    interruption_mode: InterruptionMode | None = None
+
+    def __post_init__(self):
+        """Keep ``enable_interruptions`` and ``interruption_mode`` consistent."""
+        if self.interruption_mode is None:
+            self.interruption_mode = (
+                InterruptionMode.IMMEDIATE if self.enable_interruptions else InterruptionMode.NONE
+            )
+        else:
+            self.enable_interruptions = self.interruption_mode != InterruptionMode.NONE

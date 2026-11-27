@@ -12,9 +12,13 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    InterruptionFrame,
+    InterruptionHoldFrame,
+    InterruptionResumeFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     StartFrame,
+    TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     UserTurnIdleFrame,
@@ -26,7 +30,7 @@ from pipecat.processors.frame_processor import (
     FrameProcessor,
     FrameProcessorSetup,
 )
-from pipecat.turns.types import UserTurnResumedParams, UserTurnSpeculation
+from pipecat.turns.types import InterruptionMode, UserTurnResumedParams, UserTurnSpeculation
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
@@ -160,6 +164,9 @@ class UserTurnProcessor(FrameProcessor):
         self._user_idle_controller.add_event_handler("on_user_turn_idle", self._on_user_turn_idle)
         self._user_idle_controller.add_event_handler("on_user_waiting", self._on_user_waiting)
 
+        self._interruption_held = False
+        self._turn_has_transcription = False
+
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor.
 
@@ -209,6 +216,17 @@ class UserTurnProcessor(FrameProcessor):
         elif isinstance(frame, ProposedUserStoppedSpeakingFrame):
             if not self._user_turn_controller.resolves_proposed_turn_stop_frames:
                 await self.push_frame(frame, direction)
+        elif isinstance(frame, TranscriptionFrame):
+            if frame.text.strip():
+                self._turn_has_transcription = True
+                if self._interruption_held:
+                    self._interruption_held = False
+                    await self.broadcast_interruption()
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, InterruptionFrame):
+            if self._interruption_held:
+                self._interruption_held = False
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -217,9 +235,11 @@ class UserTurnProcessor(FrameProcessor):
         await self._user_idle_controller.process_frame(frame)
 
     async def _stop(self, frame: EndFrame):
+        self._interruption_held = False
         await self._stop_controllers()
 
     async def _cancel(self, frame: CancelFrame):
+        self._interruption_held = False
         await self._stop_controllers()
 
     async def _stop_controllers(self):
@@ -251,13 +271,34 @@ class UserTurnProcessor(FrameProcessor):
     ):
         logger.debug(f"{self}: User started speaking (strategy: {strategy})")
 
+        mode = (
+            params.interruption_mode
+            if params.interruption_mode is not None
+            else (
+                InterruptionMode.IMMEDIATE if params.enable_interruptions else InterruptionMode.NONE
+            )
+        )
+        was_waiting_for_user = self._user_idle_controller.waiting_for_user
+        has_function_calls = self._user_idle_controller.function_calls_in_progress
+
+        should_hold = (
+            mode == InterruptionMode.HOLD and not has_function_calls and not was_waiting_for_user
+        )
+        should_interrupt_now = mode == InterruptionMode.IMMEDIATE or (
+            mode == InterruptionMode.HOLD and has_function_calls
+        )
+        self._turn_has_transcription = False
+        self._interruption_held = should_hold
+
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
         await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
 
-        if params.enable_interruptions:
+        if should_interrupt_now:
             await self.broadcast_interruption()
+        elif should_hold:
+            await self.broadcast_frame(InterruptionHoldFrame)
 
         await self._call_event_handler("on_user_turn_started", strategy)
 
@@ -273,6 +314,13 @@ class UserTurnProcessor(FrameProcessor):
             await self.broadcast_frame(UserStoppedSpeakingFrame)
 
         await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
+
+        if self._interruption_held:
+            self._interruption_held = False
+            if self._turn_has_transcription:
+                await self.broadcast_interruption()
+            else:
+                await self.broadcast_frame(InterruptionResumeFrame)
 
         await self._call_event_handler("on_user_turn_stopped", strategy)
 

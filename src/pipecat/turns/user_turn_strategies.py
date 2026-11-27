@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from pipecat.classifiers.base_classifier import BaseClassifier
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.turns.types import InterruptionMode, resolve_interruption_mode
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
@@ -202,16 +203,21 @@ class ExternalUserTurnStrategies(UserTurnStrategies):
     turn, so the aggregator emits nothing and the parameter below doesn't apply.
 
     Parameters:
-        enable_interruptions: Whether to broadcast an interruption when a
-            proposal starts a turn. Services route their ``should_interrupt``
-            setting here.
+        interruptions: How a proposal starting a turn handles an in-progress
+            bot response. Cannot be combined with ``enable_interruptions``.
+        enable_interruptions: Backward-compatible alias for ``interruptions``.
+            Services route their ``should_interrupt`` setting here.
 
     """
 
-    enable_interruptions: bool = True
+    interruptions: InterruptionMode | None = None
+    enable_interruptions: bool | None = None
 
     def __post_init__(self):
-        self.start = [ExternalUserTurnStartStrategy(enable_interruptions=self.enable_interruptions)]
+        mode = resolve_interruption_mode(self.interruptions, self.enable_interruptions)
+        self.interruptions = mode
+        self.enable_interruptions = mode != InterruptionMode.NONE
+        self.start = [ExternalUserTurnStartStrategy(interruptions=mode)]
         self.stop = [ExternalUserTurnStopStrategy()]
 
 

@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.turns.types import (
+    InterruptionMode,
     ProcessFrameResult,
     UserTurnResumedParams,
     UserTurnSpeculation,
@@ -181,6 +182,7 @@ class UserTurnController(BaseObject):
         self._user_turn_inference = _UserTurnInference.NONE
         # Whether the open turn interrupts the bot, as its start decided.
         self._user_turn_enable_interruptions = False
+        self._user_turn_interruption_mode = InterruptionMode.NONE
         self._user_turn_stop_timeout_event = asyncio.Event()
         self._user_turn_stop_timeout_task: asyncio.Task | None = None
 
@@ -445,6 +447,7 @@ class UserTurnController(BaseObject):
         params = UserTurnResumedParams(
             enable_interruptions=self._user_turn_enable_interruptions,
             inference_triggered=self._user_turn_inference_triggered,
+            interruption_mode=self._user_turn_interruption_mode,
         )
         self._user_speaking = True
         self._user_turn_stop_decisions.clear()
@@ -485,12 +488,26 @@ class UserTurnController(BaseObject):
             await self._trigger_user_turn_start(strategy, self._user_turn_start_params())
 
     def _user_turn_start_params(self) -> UserTurnStartedParams:
-        # One decision saying the turn shouldn't interrupt, or was announced
-        # elsewhere, applies to the whole turn.
-        decisions = self._user_turn_start_decisions.values()
+        # One decision saying the turn shouldn't interrupt, or should hold,
+        # or was announced elsewhere, applies to the whole turn
+        # (NONE overrides HOLD, which overrides IMMEDIATE).
+        decisions = list(self._user_turn_start_decisions.values())
+        modes = [
+            d.interruption_mode
+            if d.interruption_mode is not None
+            else (InterruptionMode.IMMEDIATE if d.enable_interruptions else InterruptionMode.NONE)
+            for d in decisions
+        ]
+        if InterruptionMode.NONE in modes:
+            mode = InterruptionMode.NONE
+        elif InterruptionMode.HOLD in modes:
+            mode = InterruptionMode.HOLD
+        else:
+            mode = InterruptionMode.IMMEDIATE
         return UserTurnStartedParams(
-            enable_interruptions=all(d.enable_interruptions for d in decisions),
+            enable_interruptions=mode != InterruptionMode.NONE,
             enable_user_speaking_frames=all(d.enable_user_speaking_frames for d in decisions),
+            interruption_mode=mode,
         )
 
     async def _trigger_user_turn_start(
@@ -504,6 +521,13 @@ class UserTurnController(BaseObject):
         self._user_turn_start_decisions.clear()
         self._user_turn_stop_timeout_event.set()
         self._user_turn_enable_interruptions = params.enable_interruptions
+        self._user_turn_interruption_mode = (
+            params.interruption_mode
+            if params.interruption_mode is not None
+            else (
+                InterruptionMode.IMMEDIATE if params.enable_interruptions else InterruptionMode.NONE
+            )
+        )
 
         # Notify every strategy that the turn has started. Start strategies
         # ready themselves for the next detection; stop strategies arm to detect
