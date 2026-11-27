@@ -387,6 +387,8 @@ class BaseWorker(BaseObject, BusSubscriber):
         that the worker has stopped.
         """
         await super().cleanup()
+        if self._bus is not None:
+            await self._bus.unsubscribe(self)
         await self.stop()
 
     async def run(self, params: WorkerParams) -> None:
