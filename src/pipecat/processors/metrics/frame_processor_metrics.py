@@ -304,6 +304,15 @@ class FrameProcessorMetrics(BaseObject):
 
         end_time = end_time or time.time()
 
+        if end_time < self._start_processing_time:
+            # Same bound as stop_ttfb_metrics: no interval to report.
+            logger.warning(
+                f"{self._processor_name()} processing time not reported: end predates the "
+                f"start of the measurement by {self._start_processing_time - end_time:.3f}s"
+            )
+            self._start_processing_time = 0
+            return None
+
         value = end_time - self._start_processing_time
         logger.debug(f"{self._processor_name()} processing time: {value:.3f}s")
         processing = ProcessingMetricsData(
@@ -384,6 +393,14 @@ class FrameProcessorMetrics(BaseObject):
             return None
 
         value = time.time() - self._start_text_aggregation_time
+        if value < 0:
+            # Same bound as stop_ttfb_metrics: no interval to report.
+            logger.warning(
+                f"{self._processor_name()} text aggregation time not reported: end predates the "
+                f"start of the measurement by {-value:.3f}s"
+            )
+            self._start_text_aggregation_time = 0
+            return None
         logger.debug(f"{self._processor_name()} text aggregation time: {value}")
         aggregation = TextAggregationMetricsData(
             processor=self._processor_name(), value=value, model=self._model_name()
