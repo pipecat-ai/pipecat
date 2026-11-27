@@ -56,7 +56,9 @@ Environment variables:
 - SIP_TRANSPORT (optional) - SIP transport protocol ("udp", "tcp", or "tls").
   Defaults to "udp" for an account from the environment and "tls" for a
   provisioned Daily SIP client or an account from the request body; a body
-  that names its own ``transport`` wins over this variable.
+  that names its own ``transport`` wins over this variable. Over TLS the
+  server's certificate is verified; SIP_CA_FILE names the CA certificate of a
+  server with a private or self-signed one.
 - SIP_REG_INTERVAL (optional) - Seconds between registration refreshes,
   default 240; 0 disables registration (trunk mode).
 - SIP_RTP_TIMEOUT (optional) - Seconds without received RTP after which a

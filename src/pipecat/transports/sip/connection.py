@@ -619,7 +619,13 @@ class SIPConnection(BaseObject):
             password: Authentication password; may be empty.
             auth_user: Digest username when the credential store keys it
                 differently from ``user`` (credential-list trunks).
-            transport: SIP transport: "udp", "tcp", or "tls".
+            transport: SIP transport: "udp", "tcp", or "tls". Over TLS the
+                server's certificate is verified: it has to chain to a
+                trusted CA and name the host connected to, or registration
+                and calls fail. For a server with a private or self-signed
+                certificate, point the ``SIP_CA_FILE`` environment variable
+                at its CA certificate; a server reached by IP address needs
+                a certificate that carries that address.
             registrar: Outbound proxy to register through, when that is
                 not the domain itself.
             reg_interval: Seconds between registration refreshes. The
@@ -733,8 +739,9 @@ class SIPConnection(BaseObject):
                 each a ``"key value"`` string in baresip's own config
                 syntax, appended verbatim after the lines the other
                 arguments produce — the escape hatch for stack settings
-                pipecat does not model. For a setting that has an argument
-                here, use the argument. One use is a development server
+                pipecat does not model. The stack reads the first line for
+                a setting, so a line for one that an argument here already
+                sets is ignored: use the argument. One use is a development server
                 whose TLS certificate cannot be verified:
                 ``("sip_verify_server no",)`` turns verification off for
                 every TLS connection, so never set it for production
