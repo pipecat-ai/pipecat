@@ -713,6 +713,115 @@ async def test_disconnect_hangs_up_active_call(env):
     assert not connection.is_connected
 
 
+async def _answered_outbound_call(env, connection):
+    """Dial and report the far end's answer; returns the fake call."""
+    call = make_fake_call()
+    env.ua.dial.return_value = call
+    await connection.dial("sip:9196@example.com")
+    call.listeners[0](StackEvent(event=Event.CALL_ANSWERED, call=call.handle))
+    return call
+
+
+@pytest.mark.asyncio
+async def test_hangup_without_headers_calls_the_binding_bare(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+
+    await connection.hangup()
+
+    call.hangup.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_hangup_sends_the_headers_set_for_it(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+
+    connection.set_hangup_headers({"X-RouteType": "queue", "X-RouteValue": 7})
+    await connection.hangup()
+
+    call.hangup.assert_awaited_once_with(headers={"X-RouteType": "queue", "X-RouteValue": "7"})
+
+
+@pytest.mark.asyncio
+async def test_disconnect_sends_the_headers_set_for_hangup(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+
+    connection.set_hangup_headers({"X-RouteType": "queue"})
+    await connection.disconnect()
+
+    call.hangup.assert_awaited_once_with(headers={"X-RouteType": "queue"})
+
+
+@pytest.mark.asyncio
+async def test_hangup_headers_are_replaced_and_cleared(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+
+    connection.set_hangup_headers({"X-RouteType": "queue"})
+    connection.set_hangup_headers({"X-RouteType": "agent"})
+    assert connection._hangup_headers == {"X-RouteType": "agent"}
+
+    connection.set_hangup_headers(None)
+    await connection.hangup()
+
+    call.hangup.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_hangup_headers_need_an_answered_call(env):
+    connection = make_connection()
+    await connection.connect()
+    with pytest.raises(RuntimeError, match="no active call"):
+        connection.set_hangup_headers({"X-RouteType": "queue"})
+
+    env.ua.dial.return_value = make_fake_call()
+    await connection.dial("sip:9196@example.com")
+    with pytest.raises(RuntimeError, match="answered"):
+        connection.set_hangup_headers({"X-RouteType": "queue"})
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"": "v"},
+        {"X Bad": "v"},
+        {"X-Bad:": "v"},
+        {"X-Bad\n": "v"},
+        {"X-Ok": "a\r\nInjected: 1"},
+        {"X-Ok": None},
+    ],
+)
+@pytest.mark.asyncio
+async def test_hangup_headers_are_checked_when_set(env, headers):
+    connection = make_connection()
+    await connection.connect()
+    await _answered_outbound_call(env, connection)
+
+    with pytest.raises(ValueError):
+        connection.set_hangup_headers(headers)
+    assert connection._hangup_headers is None
+
+
+@pytest.mark.asyncio
+async def test_hangup_headers_do_not_reach_the_next_call(env):
+    connection = make_connection()
+    await connection.connect()
+    first = await _answered_outbound_call(env, connection)
+    connection.set_hangup_headers({"X-RouteType": "queue"})
+    first.listeners[0](StackEvent(event=Event.CALL_CLOSED, call=first.handle, text="hangup"))
+
+    second = await _answered_outbound_call(env, connection)
+    await connection.hangup()
+
+    second.hangup.assert_awaited_once_with()
+
+
 @pytest.mark.asyncio
 async def test_answer_passes_video_and_headers_through(env):
     connection = make_connection()

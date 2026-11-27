@@ -171,6 +171,33 @@ def _validate_sip_port(port: int | None) -> int | None:
     return port
 
 
+def _validate_headers(headers: dict | None) -> dict | None:
+    """Check custom SIP headers and return a copy, or None for no headers.
+
+    The binding makes the same check when the headers are sent. Headers
+    stored for later (see :meth:`SIPConnection.set_hangup_headers`) are
+    checked here instead, so a bad one is reported where it was given and
+    not while the call is being torn down.
+
+    Raises:
+        ValueError: A name that is empty or holds a colon, a space or a line
+            break; a value that is None or holds a line break.
+    """
+    if not headers:
+        return None
+    checked = {}
+    for name, value in headers.items():
+        if not isinstance(name, str) or not name or any(c in name for c in "\r\n: "):
+            raise ValueError(f"invalid SIP header name {name!r}")
+        if value is None:
+            raise ValueError(f"SIP header {name}: the value is None")
+        value = str(value)
+        if "\r" in value or "\n" in value:
+            raise ValueError(f"SIP header {name}: the value must be a single line")
+        checked[name] = value
+    return checked
+
+
 @dataclass(frozen=True)
 class _RuntimeSettings:
     """Runtime-wide baresip settings, fixed by the first connection.
@@ -707,6 +734,9 @@ class SIPConnection(BaseObject):
         self._dialing = False
         # Set by hangup(); a close it caused is not a call failure.
         self._hangup_requested = False
+        # Headers for the BYE that ends the active call, set by
+        # set_hangup_headers(); per call (reset in _attach_call).
+        self._hangup_headers: dict | None = None
         # "Connect" for the transport means media is up — the call is answered
         # AND audio RTP flows — not merely the SIP handshake. These track that,
         # per call (reset in _attach_call).
@@ -847,7 +877,7 @@ class SIPConnection(BaseObject):
         call = self._call
         if call is not None:
             try:
-                await call.hangup()
+                await self._hangup_call(call)
             except BaresipError as e:
                 logger.debug(f"{self} hangup on disconnect: {e}")
             self._detach_call()
@@ -951,12 +981,46 @@ class SIPConnection(BaseObject):
         await call.reject()
 
     async def hangup(self):
-        """Hang up the active call; valid in any state."""
+        """Hang up the active call; valid in any state.
+
+        The BYE carries the headers given to :meth:`set_hangup_headers`,
+        if any.
+        """
         call = self._require_call()
         # Local hangup of a still-ringing dial is a stop, not a failure;
         # the establishment watcher stays quiet on the close it causes.
         self._hangup_requested = True
-        await call.hangup()
+        await self._hangup_call(call)
+
+    def set_hangup_headers(self, headers: dict | None):
+        """Set the custom headers for the BYE that ends the active call.
+
+        A contact-center platform reads its routing instructions from the
+        BYE the bot sends: where the caller goes next, and why. The headers
+        are stored and sent whenever this side ends the call, by
+        :meth:`hangup` or by :meth:`disconnect` (which is how a pipeline's
+        ``EndFrame`` ends it). Call it at any time once the call is
+        answered; each call replaces the headers set before.
+
+        The headers belong to the active call only and are dropped when it
+        ends. When the far end hangs up first there is no BYE from this
+        side, and they are not sent.
+
+        Example::
+
+            connection.set_hangup_headers({"X-RouteType": "queue", "X-RouteValue": "billing"})
+
+        Args:
+            headers: Header names to values, or None to send none.
+
+        Raises:
+            RuntimeError: No call is active, or it is not answered yet.
+            ValueError: A header name or value that cannot go on the wire.
+        """
+        self._require_call()
+        if not self._answered:
+            raise RuntimeError("SIPConnection: hang-up headers need an answered call")
+        self._hangup_headers = _validate_headers(headers)
 
     async def send_dtmf(self, digits: str):
         """Send DTMF digits on the active call."""
@@ -1159,6 +1223,13 @@ class SIPConnection(BaseObject):
             raise RuntimeError("SIPConnection has no active call")
         return self._call
 
+    async def _hangup_call(self, call: Call):
+        """Hang up ``call``, with the headers from :meth:`set_hangup_headers`."""
+        if self._hangup_headers:
+            await call.hangup(headers=self._hangup_headers)
+        else:
+            await call.hangup()
+
     @property
     def dtmf_mode(self) -> str:
         """How this connection sends DTMF: "rtpevent", "info", or "auto".
@@ -1199,6 +1270,7 @@ class SIPConnection(BaseObject):
         self._answered = False
         self._audio_rtp = False
         self._hangup_requested = False
+        self._hangup_headers = None
 
         def on_event(event: StackEvent):
             self._on_call_event(call, event)
@@ -1232,6 +1304,7 @@ class SIPConnection(BaseObject):
         if self._warning_listener is not None:
             call.off_audio_warning(self._warning_listener)
         self._call = None
+        self._hangup_headers = None
         self._call_listener = None
         self._dtmf_listener = None
         self._warning_listener = None

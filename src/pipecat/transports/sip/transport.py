@@ -33,7 +33,8 @@ errors and warnings carry ``errorMsg``. Daily's ``provider`` and
 ``on_connected``, ``on_left``, ``on_before_leave``, ``on_error``,
 ``on_call_state_updated``. Methods: ``start_dialout``, ``stop_dialout``,
 ``send_dtmf``, ``sip_call_transfer``, ``sip_refer``, and the SIP-only
-``sip_attended_transfer`` — all return ``str | None`` errors and never raise.
+``sip_attended_transfer`` and ``set_hangup_headers`` — all return
+``str | None`` errors and never raise.
 
 **Equivalent with deltas:** ``sip_refer`` sends a true SIP REFER;
 ``sip_call_transfer`` is **rejected with an error for now** — Daily's
@@ -660,6 +661,35 @@ class SIPTransport(BaseTransport):
             return "no such dial-out session"
         try:
             await self._connection.hangup()
+        except Exception as e:
+            return str(e)
+        return None
+
+    async def set_hangup_headers(self, headers: dict | None) -> str | None:
+        """Set the custom headers for the BYE that ends the active call.
+
+        A contact-center platform reads from the bot's BYE where to route
+        the caller next. The headers are sent whenever this side ends the
+        call: on an ``EndFrame``, on :meth:`stop_dialout`, or when the
+        pipeline is cancelled. Call it at any time once the call is
+        connected; each call replaces the headers set before, and None
+        clears them. A SIP-only addition; see
+        :meth:`SIPConnection.set_hangup_headers
+        <pipecat.transports.sip.connection.SIPConnection.set_hangup_headers>`.
+
+        Example::
+
+            await transport.set_hangup_headers({"X-RouteType": "queue", "X-RouteValue": "billing"})
+            await task.queue_frames([TTSSpeakFrame("Connecting you now."), EndFrame()])
+
+        Args:
+            headers: Header names to values, or None to send none.
+
+        Returns:
+            An error description, or None on success.
+        """
+        try:
+            self._connection.set_hangup_headers(headers)
         except Exception as e:
             return str(e)
         return None

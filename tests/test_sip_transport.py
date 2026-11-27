@@ -348,6 +348,25 @@ async def test_send_dtmf_method_validated_against_connection_mode():
 
 
 @pytest.mark.asyncio
+async def test_set_hangup_headers_reaches_the_connection_and_reports_errors():
+    transport, connection = make_transport()
+
+    # No call yet: the connection refuses, and the transport reports it.
+    assert "no active call" in await transport.set_hangup_headers({"X-RouteType": "queue"})
+
+    set_active_call(connection, handle=7)
+    connection._answered = True
+    assert await transport.set_hangup_headers({"X-RouteType": "queue"}) is None
+    assert connection._hangup_headers == {"X-RouteType": "queue"}
+
+    assert "invalid SIP header name" in await transport.set_hangup_headers({"X Bad": "v"})
+    assert connection._hangup_headers == {"X-RouteType": "queue"}
+
+    assert await transport.set_hangup_headers(None) is None
+    assert connection._hangup_headers is None
+
+
+@pytest.mark.asyncio
 async def test_sip_refer_sends_refer_and_call_transfer_is_rejected():
     transport, connection = make_transport()
     set_active_call(connection, handle=7)
