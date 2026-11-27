@@ -22,6 +22,20 @@ except ModuleNotFoundError as e:
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 
 
+def _start_transaction(*, op: str, name: str):
+    """Start a Sentry transaction on both sentry-sdk 2.x and 3.x.
+
+    sentry-sdk 3.0 removed ``start_transaction``; a span started with
+    ``start_span`` carries the operation in its ``sentry.op`` attribute
+    instead. ``active=False`` keeps it from becoming the current span, like a
+    2.x transaction that is never entered. Both return objects with
+    ``finish()``, ``span_id`` and ``name``.
+    """
+    if hasattr(sentry_sdk, "start_transaction"):
+        return sentry_sdk.start_transaction(op=op, name=name)
+    return sentry_sdk.start_span(name=name, attributes={"sentry.op": op}, active=False)
+
+
 class SentryMetrics(FrameProcessorMetrics):
     """Frame processor metrics integration with Sentry monitoring.
 
@@ -85,9 +99,8 @@ class SentryMetrics(FrameProcessorMetrics):
         )
 
         if should_report_ttfb and self._sentry_available:
-            self._ttfb_metrics_tx = sentry_sdk.start_transaction(
-                op="ttfb",
-                name=f"TTFB for {self._processor_name()}",
+            self._ttfb_metrics_tx = _start_transaction(
+                op="ttfb", name=f"TTFB for {self._processor_name()}"
             )
             logger.debug(
                 f"{self} Sentry transaction started (ID: {self._ttfb_metrics_tx.span_id} Name: {self._ttfb_metrics_tx.name})"
@@ -121,9 +134,8 @@ class SentryMetrics(FrameProcessorMetrics):
         await super().start_processing_metrics(start_time=start_time)
 
         if self._sentry_available:
-            self._processing_metrics_tx = sentry_sdk.start_transaction(
-                op="processing",
-                name=f"Processing for {self._processor_name()}",
+            self._processing_metrics_tx = _start_transaction(
+                op="processing", name=f"Processing for {self._processor_name()}"
             )
             logger.debug(
                 f"{self} Sentry transaction started (ID: {self._processing_metrics_tx.span_id} Name: {self._processing_metrics_tx.name})"

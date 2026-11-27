@@ -6534,7 +6534,7 @@ requires-dist = [
     { name = "sarvamai", marker = "extra == 'sarvam'", specifier = "==0.1.28" },
     { name = "segno", marker = "extra == 'runner'", specifier = ">=1.6.0,<2" },
     { name = "sentencex", specifier = "==1.0.34" },
-    { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = ">=2.28.0,<3" },
+    { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = ">=2.28.0,<4" },
     { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=2.1.0" },
     { name = "soundfile", specifier = "~=0.13.1" },
     { name = "soxr", marker = "extra == 'soxr'", specifier = "~=1.0.0" },
