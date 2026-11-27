@@ -241,6 +241,42 @@ async def test_conflicting_jitter_buffers_raise(env):
         await second.connect()
 
 
+@pytest.mark.asyncio
+async def test_sip_port_renders_into_config(env):
+    connection = make_connection(reg_interval=0, sip_port=5060)
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert config.extra_config_text == (
+        "sip_listen 0.0.0.0:5060\naudio_jitter_buffer_type fixed\naudio_jitter_buffer_ms 40-60\n"
+    )
+
+
+@pytest.mark.parametrize("port", [1, 5060, 65535])
+def test_sip_port_accepts_valid_ports(port):
+    connection = make_connection(sip_port=port)
+
+    assert connection._settings.sip_port == port
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536, "5060", 5060.0, True])
+def test_sip_port_rejects_invalid_values(port):
+    with pytest.raises(ValueError):
+        make_connection(sip_port=port)
+
+
+@pytest.mark.asyncio
+async def test_conflicting_sip_port_raise(env):
+    # One stack per process owns the listen socket.
+    first = make_connection(reg_interval=0, sip_port=5060)
+    second = make_connection(user="1002", reg_interval=0, sip_port=5070)
+
+    await first.connect()
+    with pytest.raises(ValueError):
+        await second.connect()
+
+
 def test_extra_params_render_into_the_account_aor():
     connection = make_connection(
         extra_params=("medianat=ice", "stunserver=stun:stun.example.com:3478")

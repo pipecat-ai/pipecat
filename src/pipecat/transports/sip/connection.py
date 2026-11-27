@@ -162,6 +162,15 @@ def _normalize_jitter_buffer(mode: str | None, ms: tuple | None) -> tuple[str | 
     return mode or "fixed", (lo, hi)
 
 
+def _validate_sip_port(port: int | None) -> int | None:
+    """Check a ``sip_port``: an integer from 1 to 65535, or None."""
+    if port is None:
+        return None
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
+        raise ValueError(f"sip_port must be an integer in 1-65535, got {port!r}")
+    return port
+
+
 @dataclass(frozen=True)
 class _RuntimeSettings:
     """Runtime-wide baresip settings, fixed by the first connection.
@@ -172,6 +181,7 @@ class _RuntimeSettings:
     """
 
     net_interface: str | None = None
+    sip_port: int | None = None
     expose_headers: tuple = ()
     max_concurrent_calls: int | None = 2
     rtp_timeout: int = 0
@@ -202,8 +212,20 @@ class _RuntimeSettings:
             video_bitrate=self.video_bitrate,
             native_log_level=self.native_log_level,
             sip_trace=self.sip_trace,
-            extra_config_text=self._jitter_buffer_config(),
+            extra_config_text=self._sip_listen_config() + self._jitter_buffer_config(),
         )
+
+    def _sip_listen_config(self) -> str:
+        """The SIP port as the stack's own ``sip_listen`` config line.
+
+        ``Config`` has no typed field for it. The stack requires an address
+        in the line but binds the port on each interface it uses (see
+        ``net_interface``), so the address is always ``0.0.0.0``. Unset
+        renders nothing, and the stack binds an ephemeral port.
+        """
+        if self.sip_port is None:
+            return ""
+        return f"sip_listen 0.0.0.0:{self.sip_port}\n"
 
     def _jitter_buffer_config(self) -> str:
         """The receive jitter buffer as the stack's own config lines.
@@ -282,7 +304,7 @@ class _SharedRuntime:
                 raise ValueError(
                     "the SIP runtime is already up with different runtime-wide "
                     f"settings ({self._settings!r}); all SIPConnections in a process "
-                    "must agree on net_interface, expose_headers, "
+                    "must agree on net_interface, sip_port, expose_headers, "
                     "max_concurrent_calls, rtp_timeout, instance_id, "
                     "native_log_level, sip_trace, the jitter buffer, and the "
                     "video parameters"
@@ -397,7 +419,7 @@ class SIPConnection(BaseObject):
     arguments are plain types only — the binding never appears in
     application signatures.
 
-    Runtime-wide arguments (``net_interface``, ``expose_headers``,
+    Runtime-wide arguments (``net_interface``, ``sip_port``, ``expose_headers``,
     ``max_concurrent_calls``, the jitter buffer, the logging parameters,
     and the video parameters) configure the process-wide SIP stack and are
     fixed by the first connection to connect; every later connection must
@@ -496,6 +518,7 @@ class SIPConnection(BaseObject):
         jitter_buffer_mode: str | None = None,
         jitter_buffer_ms: tuple | None = None,
         net_interface: str | None = None,
+        sip_port: int | None = None,
         expose_headers: tuple = (),
         max_concurrent_calls: int | None = 2,
         rtp_timeout: int = 0,
@@ -573,6 +596,20 @@ class SIPConnection(BaseObject):
                 host. This is a restriction filter, not a listen address:
                 a value like ``"0.0.0.0"`` matches no real interface and
                 breaks all address selection. Runtime-wide.
+            sip_port: The local SIP port, e.g. ``5060``. The stack binds it
+                on each interface it uses, so ``net_interface`` decides
+                the addresses. UDP and TCP listen on this port and TLS on
+                the next one (``5060`` gives TLS on ``5061``). None (the
+                default) binds an ephemeral port, which is correct for a
+                registering connection: the registration tells the server
+                where the bot is. Set it for trunk mode (``reg_interval=0``)
+                behind a carrier that routes INVITEs to a fixed
+                ``host:port``. Interface discovery skips loopback, so a
+                test with both ends on one machine also needs
+                ``net_interface="127.0.0.1"``. A fixed port does not cross
+                NAT: the host still needs a public address or a port
+                forward. One process holds the port, so bots that share a
+                host need distinct ports. Runtime-wide.
             expose_headers: SIP header names whose values ride on call
                 events. Runtime-wide.
             max_concurrent_calls: Stack-wide simultaneous-call cap;
@@ -644,6 +681,7 @@ class SIPConnection(BaseObject):
         )
         self._settings = _RuntimeSettings(
             net_interface=net_interface,
+            sip_port=_validate_sip_port(sip_port),
             rtp_timeout=rtp_timeout,
             instance_id=instance_id,
             expose_headers=tuple(expose_headers),

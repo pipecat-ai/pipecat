@@ -76,6 +76,9 @@ Environment variables:
 - SIP_NET_INTERFACE (optional) - Restrict the stack to one local interface, by
   name or address: "127.0.0.1" for a registrar on loopback, or one address of
   a multi-homed host. Unset lets the OS pick the source address.
+- SIP_PORT (optional) - A fixed local SIP port for UDP and TCP, TLS on the next
+  one. Unset binds an ephemeral port, which suits a registering bot; set it for
+  trunk mode (SIP_REG_INTERVAL=0) behind a carrier that routes to host:port.
 - SIP_JITTER_BUFFER (optional) - The receive jitter buffer: "off",
   "fixed:MIN-MAX" or "adaptive:MIN-MAX" in milliseconds (a bare "MIN-MAX"
   means fixed). Unset selects the transport's default, a fixed 40–60 ms;
@@ -366,9 +369,9 @@ def sip_runner_arguments(
     ``SIP_AUTH_USER``, ``SIP_EXTRA_PARAMS``/``SIP_STUN_SERVER``,
     ``SIP_REG_INTERVAL``, ``SIP_RTP_TIMEOUT``, ``SIP_INSTANCE_ID``,
     ``SIP_NATIVE_LOG_LEVEL``, ``SIP_TRACE``, ``SIP_NET_INTERFACE``,
-    ``SIP_JITTER_BUFFER``) on top of the account, and carries the session's
-    ``body``, ``session_id``, signal flags and ``cli_args`` over from
-    ``runner_args`` when given. The development runner, its routes and
+    ``SIP_PORT``, ``SIP_JITTER_BUFFER``) on top of the account, and carries
+    the session's ``body``, ``session_id``, signal flags and ``cli_args``
+    over from ``runner_args`` when given. The development runner, its routes and
     :func:`~pipecat.runner.utils.create_transport` all build their SIP
     arguments here, so a bot that calls it gets exactly what they would.
 
@@ -380,8 +383,8 @@ def sip_runner_arguments(
         The SIP runner arguments.
 
     Raises:
-        ValueError: ``SIP_REG_INTERVAL`` or ``SIP_RTP_TIMEOUT`` is not an
-            integer, or ``SIP_JITTER_BUFFER`` is malformed.
+        ValueError: ``SIP_REG_INTERVAL``, ``SIP_RTP_TIMEOUT`` or ``SIP_PORT`` is
+            not an integer, or ``SIP_JITTER_BUFFER`` is malformed.
     """
     try:
         reg_interval = int(os.getenv("SIP_REG_INTERVAL", "240"))
@@ -390,6 +393,12 @@ def sip_runner_arguments(
         raise ValueError(
             "SIP_REG_INTERVAL and SIP_RTP_TIMEOUT must be integers (seconds)"
         ) from None
+    sip_port = os.getenv("SIP_PORT") or None
+    if sip_port is not None:
+        try:
+            sip_port = int(sip_port)
+        except ValueError:
+            raise ValueError(f"SIP_PORT must be an integer, got {sip_port!r}") from None
     try:
         jitter_buffer_mode, jitter_buffer_ms = parse_jitter_buffer(os.getenv("SIP_JITTER_BUFFER"))
     except ValueError as e:
@@ -410,6 +419,7 @@ def sip_runner_arguments(
         native_log_level=os.getenv("SIP_NATIVE_LOG_LEVEL", "warning"),
         sip_trace=os.getenv("SIP_TRACE", "").lower() in ("1", "true", "yes"),
         net_interface=os.getenv("SIP_NET_INTERFACE") or None,
+        sip_port=sip_port,
         jitter_buffer_mode=jitter_buffer_mode,
         jitter_buffer_ms=jitter_buffer_ms,
         body=runner_args.body if runner_args is not None else {},
