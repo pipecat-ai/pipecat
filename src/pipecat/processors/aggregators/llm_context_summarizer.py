@@ -134,6 +134,10 @@ class LLMContextSummarizer(BaseObject):
         # still at the head of the context.
         self._summary_message: LLMContextMessage | None = None
 
+        # The context messages when the pending summary was requested. A result
+        # is only applied if the messages it summarized are still the same ones.
+        self._pending_summary_messages: list[LLMContextMessage] = []
+
         self._register_event_handler("on_request_summarization", sync=True)
         self._register_event_handler("on_summary_applied")
 
@@ -335,6 +339,8 @@ class LLMContextSummarizer(BaseObject):
 
         logger.debug(f"{self}: Sending summarization request (request_id={request_id})")
 
+        self._pending_summary_messages = list(self._context.messages)
+
         # Create the request frame
         request_frame = LLMContextSummaryRequestFrame(
             request_id=request_id,
@@ -419,6 +425,8 @@ class LLMContextSummarizer(BaseObject):
             return
 
         # Clear pending state
+        summarized_messages = self._pending_summary_messages
+        self._pending_summary_messages = []
         await self._clear_summarization_state()
 
         # Check for errors
@@ -427,18 +435,22 @@ class LLMContextSummarizer(BaseObject):
             return
 
         # Validate context state
-        if not self._validate_summary_context(frame.last_summarized_index):
+        if not self._validate_summary_context(frame.last_summarized_index, summarized_messages):
             logger.warning(f"{self}: Context state changed, skipping summary application")
             return
 
         # Apply summary
         await self._apply_summary(frame.summary, frame.last_summarized_index)
 
-    def _validate_summary_context(self, last_summarized_index: int) -> bool:
+    def _validate_summary_context(
+        self, last_summarized_index: int, summarized_messages: list[LLMContextMessage]
+    ) -> bool:
         """Validate that context state is still valid for applying summary.
 
         Args:
             last_summarized_index: The index of the last summarized message.
+            summarized_messages: The context messages when the summary was
+                requested.
 
         Returns:
             True if the context state is still consistent with the summary.
@@ -453,6 +465,23 @@ class LLMContextSummarizer(BaseObject):
         min_keep = self._auto_config.summary_config.min_messages_after_summary
         remaining = len(self._context.messages) - 1 - last_summarized_index
         if remaining < min_keep:
+            return False
+
+        # The summary describes messages[0..last_summarized_index] as they were
+        # when it was requested. Messages appended since then are kept as
+        # recent messages, but if any message in that range was replaced,
+        # removed or shifted (e.g. by LLMMessagesUpdateFrame or set_messages()),
+        # the summary no longer matches the context and would overwrite it.
+        # A leading system message is not part of the summary (_apply_summary
+        # keeps the current one), so replacing only the system prompt is fine.
+        messages = self._context.messages
+        start = min(
+            self._leading_system_message_count(messages),
+            self._leading_system_message_count(summarized_messages),
+        )
+        current = messages[start : last_summarized_index + 1]
+        requested = summarized_messages[start : last_summarized_index + 1]
+        if len(current) != len(requested) or any(a is not b for a, b in zip(current, requested)):
             return False
 
         return True

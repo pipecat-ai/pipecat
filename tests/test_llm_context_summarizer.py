@@ -890,6 +890,143 @@ class TestLLMContextSummarizer(unittest.IsolatedAsyncioTestCase):
 
         await summarizer.cleanup()
 
+    async def test_summary_discarded_when_context_replaced(self):
+        """A summary of the old history is not applied after the history is replaced."""
+        config = LLMAutoContextSummarizationConfig(
+            summary_config=LLMContextSummaryConfig(min_messages_after_summary=2),
+        )
+
+        summarizer = LLMContextSummarizer(context=self.context, config=config, auto_trigger=False)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_frame = None
+        applied_event = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        @summarizer.event_handler("on_summary_applied")
+        async def on_summary_applied(summarizer, event):
+            nonlocal applied_event
+            applied_event = event
+
+        for i in range(5):
+            self.context.add_message({"role": "user", "content": f"Old message {i}"})
+        await summarizer.process_frame(LLMSummarizeContextFrame())
+        self.assertIsNotNone(request_frame)
+
+        # While the summary is being generated, the history is replaced with
+        # one of the same length (e.g. by an LLMMessagesUpdateFrame).
+        new_messages = [{"role": "system", "content": "You are a helpful assistant."}] + [
+            {"role": "user", "content": f"New message {i}"} for i in range(5)
+        ]
+        self.context.set_messages(new_messages)
+
+        await summarizer.process_frame(
+            LLMContextSummaryResultFrame(
+                request_id=request_frame.request_id,
+                summary="Summary of the old messages.",
+                last_summarized_index=3,
+            )
+        )
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(self.context.messages, new_messages)
+        self.assertIsNone(applied_event)
+
+        await summarizer.cleanup()
+
+    async def test_summary_applied_when_messages_appended(self):
+        """Messages appended while a summary is generated are kept after it."""
+        config = LLMAutoContextSummarizationConfig(
+            summary_config=LLMContextSummaryConfig(min_messages_after_summary=2),
+        )
+
+        summarizer = LLMContextSummarizer(context=self.context, config=config, auto_trigger=False)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        for i in range(5):
+            self.context.add_message({"role": "user", "content": f"Message {i}"})
+        await summarizer.process_frame(LLMSummarizeContextFrame())
+        self.assertIsNotNone(request_frame)
+
+        appended = {"role": "user", "content": "Appended message"}
+        self.context.add_message(appended)
+
+        await summarizer.process_frame(
+            LLMContextSummaryResultFrame(
+                request_id=request_frame.request_id,
+                summary="Summary.",
+                last_summarized_index=3,
+            )
+        )
+
+        self.assertEqual(
+            self.context.messages,
+            [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Conversation summary: Summary."},
+                {"role": "user", "content": "Message 3"},
+                {"role": "user", "content": "Message 4"},
+                appended,
+            ],
+        )
+
+        await summarizer.cleanup()
+
+    async def test_summary_applied_when_only_system_prompt_replaced(self):
+        """Replacing the leading system message does not invalidate a pending summary."""
+        config = LLMAutoContextSummarizationConfig(
+            summary_config=LLMContextSummaryConfig(min_messages_after_summary=2),
+        )
+
+        summarizer = LLMContextSummarizer(context=self.context, config=config, auto_trigger=False)
+        await summarizer.setup(frame_processor_setup(self.task_manager))
+
+        request_frame = None
+
+        @summarizer.event_handler("on_request_summarization")
+        async def on_request_summarization(summarizer, frame):
+            nonlocal request_frame
+            request_frame = frame
+
+        for i in range(5):
+            self.context.add_message({"role": "user", "content": f"Message {i}"})
+        await summarizer.process_frame(LLMSummarizeContextFrame())
+        self.assertIsNotNone(request_frame)
+
+        new_system = {"role": "system", "content": "You are a terse assistant."}
+        self.context.set_messages([new_system, *self.context.messages[1:]])
+
+        await summarizer.process_frame(
+            LLMContextSummaryResultFrame(
+                request_id=request_frame.request_id,
+                summary="Summary.",
+                last_summarized_index=3,
+            )
+        )
+
+        self.assertEqual(
+            self.context.messages,
+            [
+                new_system,
+                {"role": "user", "content": "Conversation summary: Summary."},
+                {"role": "user", "content": "Message 3"},
+                {"role": "user", "content": "Message 4"},
+            ],
+        )
+
+        await summarizer.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()
