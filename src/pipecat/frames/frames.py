@@ -2673,6 +2673,27 @@ class OutputTransportReadyFrame(ControlFrame):
 
 
 @dataclass
+class OutputAudioDrainFrame(ControlFrame):
+    """Flush a destination's buffered output audio before forwarding this frame.
+
+    Send this frame downstream after the last audio frame at an audio boundary.
+    The output transport queues any buffered samples, padding the final chunk
+    with silence as needed, then forwards this frame in audio queue order.
+    Set `transport_destination` to match the audio when using a named output.
+    The frame's presentation timestamp is ignored.
+
+    Seeing this frame downstream means preceding output audio has been
+    processed, including any asynchronous transport write attempts. It does
+    not acknowledge delivery or playback by a client, and it does not flush
+    buffers owned by output filters or transport implementations.
+
+    This frame follows normal interruption rules. Set its `interruptible`
+    flag to False to retain the marker across an interruption. The marker
+    does not change the interruption behavior of earlier audio.
+    """
+
+
+@dataclass
 class InputTransportStartAudioStreamingFrame(ControlFrame):
     """Frame asking the input transport to start audio input streaming.
 
