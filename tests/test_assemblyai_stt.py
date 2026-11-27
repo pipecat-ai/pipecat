@@ -19,9 +19,12 @@ from websockets.protocol import State
 from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     ProposedUserStartedSpeakingFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     TranscriptionSpeaker,
+    VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.assemblyai.models import (
     AssemblyAIConnectionParams,
     TerminationMessage,
@@ -1495,3 +1498,299 @@ def test_disconnect_terminates_an_open_session_before_closing():
     ]
     assert service._receive_task is None
     assert service._websocket is None
+
+
+# --- mode="manual" ---
+#
+# Manual mode turns AssemblyAI's turn detection off so Pipecat ends every turn:
+# each VAD stop sends the buffered audio and a ForceEndpoint, which AssemblyAI
+# answers with exactly one final (empty if nothing was said). Only
+# assemblyai-stt-3-7-realtime-agent supports it; the server rejects other
+# models with error 3006.
+
+_MANUAL_MODEL = "assemblyai-stt-3-7-realtime-agent"
+_FORCE_ENDPOINT = json.dumps({"type": "ForceEndpoint"})
+_TERMINATE = json.dumps({"type": "Terminate"})
+
+
+def _manual_service(**settings) -> AssemblyAISTTService:
+    return AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(model=_MANUAL_MODEL, mode="manual", **settings),
+    )
+
+
+def test_mode_manual_sent_with_turn_silence_left_to_the_server():
+    """No 100 ms defaults: max_turn_silence is manual mode's fallback turn end
+    (10000 ms by default), and 100 ms would end turns on every short pause."""
+    query = _query(_manual_service())
+
+    assert query["mode"] == ["manual"]
+    assert "min_turn_silence" not in query
+    assert "max_turn_silence" not in query
+
+
+def test_mode_manual_does_not_copy_min_turn_silence_into_max():
+    query = _query(_manual_service(min_turn_silence=400))
+
+    assert query["min_turn_silence"] == ["400"]
+    assert "max_turn_silence" not in query
+
+
+def test_mode_manual_sends_explicit_max_turn_silence():
+    query = _query(_manual_service(max_turn_silence=5000))
+
+    assert query["max_turn_silence"] == ["5000"]
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "u3-rt-pro",
+        "universal-3-5-pro",
+        "universal-3-6-pro",
+        "universal-streaming-english",
+        "universal-streaming-multilingual",
+    ],
+)
+def test_mode_manual_rejected_on_other_models(model):
+    with pytest.raises(ValueError, match="manual"):
+        AssemblyAISTTService(
+            api_key="test-key",
+            settings=AssemblyAISTTService.Settings(model=model, mode="manual"),
+        )
+
+
+def test_mode_manual_requires_vad_force_turn_endpoint():
+    """With AssemblyAI's turn detection mode nothing sends ForceEndpoint, so turns
+    would only end after max_turn_silence."""
+    with pytest.raises(ValueError, match="vad_force_turn_endpoint"):
+        AssemblyAISTTService(
+            api_key="test-key",
+            vad_force_turn_endpoint=False,
+            settings=AssemblyAISTTService.Settings(model=_MANUAL_MODEL, mode="manual"),
+        )
+
+
+def test_mode_manual_rejects_speaker_labels():
+    """With speaker labels on, the server uses its speaker-label turn defaults
+    instead of manual mode and would end turns Pipecat hasn't ended."""
+    with pytest.raises(ValueError, match="speaker_labels"):
+        _manual_service(speaker_labels=True)
+
+
+def test_speaker_labels_still_allowed_outside_manual_mode():
+    service = AssemblyAISTTService(
+        api_key="test-key",
+        settings=AssemblyAISTTService.Settings(mode="balanced", speaker_labels=True),
+    )
+
+    assert _query(service)["speaker_labels"] == ["true"]
+
+
+@pytest.mark.parametrize("mode", [None, "min_latency", "balanced", "max_accuracy"])
+def test_other_modes_keep_pipecat_turn_silence(mode):
+    service = AssemblyAISTTService(
+        api_key="test-key", settings=AssemblyAISTTService.Settings(mode=mode)
+    )
+
+    query = _query(service)
+    assert query["min_turn_silence"] == ["100"]
+    assert query["max_turn_silence"] == ["100"]
+
+
+def test_update_settings_ignores_switching_into_manual_mode():
+    """Pipecat mode sent 100 ms turn silences at construction; manual mode with
+    those would end turns on every short pause."""
+    service = AssemblyAISTTService(api_key="test-key")
+    _, reconnects = _stub_connection(service)
+
+    changed = asyncio.run(service._update_settings(AssemblyAISTTService.Settings(mode="manual")))
+
+    assert changed == {}
+    assert service._settings.mode is None
+    assert reconnects == []
+
+
+def test_update_settings_ignores_switching_out_of_manual_mode():
+    service = _manual_service()
+    _, reconnects = _stub_connection(service)
+
+    changed = asyncio.run(service._update_settings(AssemblyAISTTService.Settings(mode="balanced")))
+
+    assert changed == {}
+    assert service._settings.mode == "manual"
+    assert reconnects == []
+
+
+def test_update_settings_still_switches_between_other_modes():
+    service = AssemblyAISTTService(
+        api_key="test-key", settings=AssemblyAISTTService.Settings(mode="balanced")
+    )
+    _, reconnects = _stub_connection(service)
+
+    asyncio.run(service._update_settings(AssemblyAISTTService.Settings(mode="max_accuracy")))
+
+    assert service._settings.mode == "max_accuracy"
+    assert reconnects == ["disconnect", "connect"]
+
+
+def test_update_settings_ignores_speaker_labels_in_manual_mode():
+    service = _manual_service()
+    _, reconnects = _stub_connection(service)
+
+    changed = asyncio.run(
+        service._update_settings(AssemblyAISTTService.Settings(speaker_labels=True))
+    )
+
+    assert changed == {}
+    assert service._settings.speaker_labels is None
+    assert reconnects == []
+
+
+class _RecordingWebsocket:
+    state = State.OPEN
+
+    def __init__(self):
+        self.sent: list = []
+
+    async def send(self, message):
+        self.sent.append(message)
+
+
+def _pcm(ms: int, sample: bytes = b"\1\0") -> bytes:
+    """16-bit mono audio at 16 kHz."""
+    return sample * (16 * ms)
+
+
+def _live_service(monkeypatch, *, manual: bool = True) -> tuple[AssemblyAISTTService, list]:
+    """A service set up at 16 kHz with a recording websocket, and what it sends."""
+    service = _manual_service() if manual else AssemblyAISTTService(api_key="test-key")
+    _setup_service(service, monkeypatch, 16000)
+    websocket = _RecordingWebsocket()
+    service._websocket = websocket
+
+    async def fake_push_frame(frame, direction=None):
+        pass
+
+    service.push_frame = fake_push_frame
+    return service, websocket.sent
+
+
+async def _send_audio(service: AssemblyAISTTService, audio: bytes):
+    async for _ in service.run_stt(audio):
+        pass
+
+
+async def _vad_stop(service: AssemblyAISTTService):
+    # stop_secs=0 skips the TTFB measurement, which would start a task.
+    await service.process_frame(
+        VADUserStoppedSpeakingFrame(stop_secs=0.0), FrameDirection.DOWNSTREAM
+    )
+
+
+@pytest.mark.parametrize("manual", [True, False])
+def test_vad_stop_sends_force_endpoint_after_the_buffered_audio(monkeypatch, manual):
+    """The tail of the turn reaches AssemblyAI before the ForceEndpoint, so the
+    final covers all of it."""
+    service, sent = _live_service(monkeypatch, manual=manual)
+
+    async def run():
+        await _send_audio(service, _pcm(130))  # two full 50 ms chunks and a 30 ms tail
+        await _vad_stop(service)
+
+    asyncio.run(run())
+
+    assert [len(m) // 32 for m in sent[:3]] == [50, 50, 30]
+    assert sent[3] == _FORCE_ENDPOINT
+    assert service._finalize_requested
+
+
+def test_vad_stop_sends_force_endpoint_when_no_audio_is_left(monkeypatch):
+    service, sent = _live_service(monkeypatch)
+
+    async def run():
+        await _send_audio(service, _pcm(100))
+        await _vad_stop(service)
+
+    asyncio.run(run())
+
+    assert [len(m) // 32 for m in sent[:2]] == [50, 50]
+    assert sent[2:] == [_FORCE_ENDPOINT]
+
+
+def test_vad_stop_holds_a_tail_under_20ms_for_the_next_chunk(monkeypatch):
+    """AssemblyAI rejects audio chunks under 20 ms (error 3007), and a VAD stop can
+    leave a shorter tail. It goes out at the start of the next chunk: padding it
+    would insert audio and shift every later word timestamp."""
+    service, sent = _live_service(monkeypatch)
+
+    async def run():
+        await _send_audio(service, _pcm(10, b"\1\0"))
+        await _vad_stop(service)
+        await _send_audio(service, _pcm(40, b"\2\0"))
+
+    asyncio.run(run())
+
+    # One full chunk: the held 10 ms, then the next 40 ms, with nothing inserted.
+    assert sent == [_FORCE_ENDPOINT, _pcm(10, b"\1\0") + _pcm(40, b"\2\0")]
+
+
+def test_disconnect_pads_a_tail_under_20ms(monkeypatch):
+    """No audio follows the last tail, so it's padded with silence instead."""
+    service, sent = _live_service(monkeypatch)
+    service._websocket.close = lambda: asyncio.sleep(0)
+
+    async def fake_send(message):
+        sent.append(message)
+        if message == _TERMINATE:
+            service._termination_event.set()
+
+    service._websocket.send = fake_send
+
+    async def run():
+        await _send_audio(service, _pcm(10))
+        await service._disconnect()
+
+    asyncio.run(run())
+
+    assert sent == [_pcm(10) + b"\0" * 320, _TERMINATE]  # 10 ms, padded to 20 ms
+
+
+def _empty_final() -> TurnMessage:
+    return _turn("", end_of_turn=True)
+
+
+def _handled_frames(service: AssemblyAISTTService, message: TurnMessage) -> list:
+    pushed = []
+
+    async def fake_push_frame(frame, direction=None):
+        pushed.append(frame)
+
+    service.push_frame = fake_push_frame
+    asyncio.run(service._handle_transcription(message))
+    return pushed
+
+
+def test_empty_final_after_force_endpoint_finalizes_the_turn():
+    """A ForceEndpoint with nothing to end gets an empty final. It still confirms
+    the finalize, so the user turn doesn't wait out the STT timeout."""
+    service = _manual_service()
+    service.request_finalize()
+
+    frames = _handled_frames(service, _empty_final())
+
+    assert [type(f) for f in frames] == [TranscriptionFinalizedFrame]
+
+
+def test_empty_final_without_force_endpoint_pushes_nothing():
+    service = _manual_service()
+
+    assert _handled_frames(service, _empty_final()) == []
+
+
+def test_empty_final_in_assemblyai_turn_detection_mode_pushes_nothing():
+    service = AssemblyAISTTService(api_key="test-key", vad_force_turn_endpoint=False)
+    service.request_finalize()
+
+    assert _handled_frames(service, _empty_final()) == []

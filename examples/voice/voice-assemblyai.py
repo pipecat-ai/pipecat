@@ -65,8 +65,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = AssemblyAISTTService(
         api_key=os.environ["ASSEMBLYAI_API_KEY"],
+        vad_force_turn_endpoint=True,  # Use Pipecat's turn detection
         settings=AssemblyAISTTService.Settings(
-            prompt="Transcribe this.",
+            mode="manual"  # Disable AssemblyAI's turn detection and use ForceEndpoint on Pipecat's turn detection
         ),
     )
 

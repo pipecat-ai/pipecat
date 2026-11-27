@@ -103,8 +103,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         vad_force_turn_endpoint=False,  # Use AssemblyAI's built-in turn detection
         settings=AssemblyAISTTService.Settings(
             # Optional: Tune turn detection timing (defaults shown below)
-            # min_turn_silence=100,  # Default
-            # max_turn_silence=1000,  # Default
+            # mode="balanced", # Default instead of tuning min/max_turn_silence
+            # min_turn_silence=128,  # Default
+            # max_turn_silence=1560,  # Default
             # Optional: Boost accuracy for specific names/terms
             # keyterms_prompt=["Xiomara", "Saoirse", "Krzystof", "API", "OAuth"],
             # Optional: Enable speaker diarization
