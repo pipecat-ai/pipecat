@@ -12,15 +12,22 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from google.genai.types import Modality
 
-from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
+from pipecat.frames.frames import (
+    InterimTranscriptionFrame,
+    TranscriptionFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.gemini_live.stt import GeminiSTTService
+from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 
 
-def make_service(**settings_kwargs):
+def make_service(*, vad_force_finalize: bool = True, **settings_kwargs):
     service = object.__new__(GeminiSTTService)
     service._name = "GeminiSTTService#0"
     service._user_id = "user"
+    service._vad_force_finalize = vad_force_finalize
     service._settings = GeminiSTTService.Settings(
         model="gemini-3.5-transcribe-live",
         language=None,
@@ -247,6 +254,30 @@ def make_failing_session(service):
 
     service._session = SimpleNamespace(send_realtime_input=send_realtime_input)
     return attempts
+
+
+@pytest.mark.asyncio
+async def test_vad_stop_flushes_the_utterance_by_default():
+    service, _, _ = make_service()
+    calls = make_session(service)
+
+    with patch.object(STTService, "process_frame", AsyncMock()):
+        await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert calls == [{"audio_stream_end": True}]
+
+
+@pytest.mark.asyncio
+async def test_vad_stop_does_not_flush_when_force_finalize_disabled():
+    """With the flush off the model owns endpointing, so a mid-utterance pause
+    no longer finalizes the utterance early."""
+    service, _, _ = make_service(vad_force_finalize=False)
+    calls = make_session(service)
+
+    with patch.object(STTService, "process_frame", AsyncMock()):
+        await service.process_frame(VADUserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    assert calls == []
 
 
 @pytest.mark.asyncio
