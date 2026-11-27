@@ -6,9 +6,13 @@
 
 """Tests for how an LLM service runs its LLM extensions."""
 
+import asyncio
 import unittest
 from collections.abc import Callable
+from dataclasses import dataclass
 from unittest.mock import AsyncMock
+
+from loguru import logger
 
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.frames.frames import (
@@ -16,10 +20,14 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallFromLLM,
     FunctionCallsStartedFrame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMServiceMetadataFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
+    SystemFrame,
     TextFrame,
     UserTurnInferenceCompletedFrame,
 )
@@ -28,7 +36,8 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.services.base_llm_extension import BaseLLMExtension, LLMExtensionTool
 from pipecat.services.llm_service import LLMService
 from pipecat.services.settings import LLMSettings
-from pipecat.tests.utils import run_test
+from pipecat.tests.utils import SleepFrame, run_test
+from pipecat.turns.user_stop.llm_turn_completion.llm_extension import LLMTurnCompletionLLMExtension
 from pipecat.utils.asyncio.task_manager import TaskManager
 from tests.frame_processor_helpers import frame_processor_setup
 
@@ -125,6 +134,74 @@ def _texts(frames: list[Frame]) -> list[str]:
     return [frame.text for frame in frames if isinstance(frame, LLMTextFrame)]
 
 
+def _function_calls(names: list[str]) -> list[FunctionCallFromLLM]:
+    """A call of each named function."""
+    return [
+        FunctionCallFromLLM(
+            function_name=name, tool_call_id=name, arguments={}, context=LLMContext()
+        )
+        for name in names
+    ]
+
+
+def _record_function_runs(service: LLMService, names: list[str]) -> list[str]:
+    """Register the named functions; the list the service adds a name to when it runs one."""
+
+    async def handler(params):
+        await params.result_callback("ok")
+
+    for name in names:
+        if not service.has_function(name):
+            service.register_function(name, handler)
+    run: list[str] = []
+
+    async def record_run(runner_items):
+        run.extend(runner_item.function_name for runner_item in runner_items)
+
+    service._run_parallel_function_calls = record_run
+    service._run_sequential_function_calls = record_run
+    return run
+
+
+async def _run_function_calls(service: LLMService, names: list[str]) -> list[str]:
+    """Have the service run a call of each named function; the names of the ones it ran."""
+    run = _record_function_runs(service, names)
+    await service.run_function_calls(_function_calls(names))
+    return run
+
+
+class _SlowInferenceService(_MockLLMService):
+    """A service whose inference takes 0.3s, then answers with one text frame."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if not isinstance(frame, LLMContextFrame):
+            await super().process_frame(frame, direction)
+            return
+        await LLMService.process_frame(self, frame, direction)
+        try:
+            await self.push_frame(LLMFullResponseStartFrame())
+            await asyncio.sleep(0.3)
+            await self.push_frame(LLMTextFrame("answer"))
+        finally:
+            await self.push_frame(LLMFullResponseEndFrame())
+
+
+@dataclass
+class _CancelInferenceFrame(SystemFrame):
+    """Asks the canceller to cancel the inference for ``context_frame``."""
+
+    context_frame: LLMContextFrame | None = None
+
+
+class _Canceller(BaseLLMExtension):
+    """Cancels the inference a ``_CancelInferenceFrame`` names."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, _CancelInferenceFrame):
+            assert frame.context_frame is not None
+            await self.cancel_inference_in_progress(frame.context_frame)
+
+
 class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
     async def test_extensions_see_every_frame_the_service_processes(self):
         extension = _Recorder()
@@ -155,6 +232,21 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(_texts(received_down), ["x-earlier-later"])
+
+    async def test_an_innermost_extension_filters_before_turn_completions_order(self):
+        at_turn_completions_order = _Beta(
+            order=LLMTurnCompletionLLMExtension.order, filter=_append("-second")
+        )
+        innermost = _Alpha(order=BaseLLMExtension.ORDER_INNERMOST, filter=_append("-first"))
+        service = _MockLLMService(extensions=[at_turn_completions_order, innermost])
+
+        received_down, _ = await run_test(
+            service,
+            frames_to_send=[LLMTextFrame("x")],
+            expected_down_frames=[LLMServiceMetadataFrame, LLMTextFrame],
+        )
+
+        self.assertEqual(_texts(received_down), ["x-first-second"])
 
     async def test_frames_an_extension_adds_continue_through_the_ones_after_it(self):
         def add_one(frame: Frame) -> list[Frame]:
@@ -311,34 +403,6 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertEqual(_texts(received_down), ["from C", "from B", "from A"])
-
-    async def test_what_an_extension_pushes_is_past_the_output_gate(self):
-        class ClosedGate:
-            """Stands in for the gate predictive delegation installs: lets no text out."""
-
-            async def process_frame(self, service, frame):
-                pass
-
-            def allow_push(self, frame):
-                return not isinstance(frame, LLMTextFrame)
-
-            def allow_function_calls(self):
-                return True
-
-        class Speaker(BaseLLMExtension):
-            async def process_frame(self, frame: Frame, direction: FrameDirection):
-                if isinstance(frame, UserTurnInferenceCompletedFrame):
-                    await self.push_frame(LLMTextFrame("from the extension"))
-
-        service = _MockLLMService(extensions=[Speaker()])
-        service._output_gate = ClosedGate()  # type: ignore[assignment]
-
-        received_down, _ = await run_test(
-            service,
-            frames_to_send=[UserTurnInferenceCompletedFrame(), LLMTextFrame("from the service")],
-        )
-
-        self.assertEqual(_texts(received_down), ["from the extension"])
 
     async def test_extensions_are_set_up_and_cleaned_up_with_the_service(self):
         extension = _Recorder()
@@ -507,6 +571,201 @@ class TestLLMExtensions(unittest.IsolatedAsyncioTestCase):
         for name in ("quiet", "announced"):
             with self.assertRaises(ValueError):
                 service.register_function(name, handler)
+
+    async def test_function_calls_run_as_given_when_no_extension_filters_them(self):
+        service = _MockLLMService(extensions=[_Recorder()])
+
+        self.assertEqual(
+            await _run_function_calls(service, ["first", "second"]), ["first", "second"]
+        )
+
+    async def test_an_extension_can_drop_a_function_call(self):
+        class Dropper(BaseLLMExtension):
+            async def filter_function_calls(self, function_calls):
+                return [call for call in function_calls if call.function_name != "dropped"]
+
+        service = _MockLLMService(extensions=[Dropper()])
+
+        self.assertEqual(await _run_function_calls(service, ["kept", "dropped"]), ["kept"])
+        self.assertEqual(await _run_function_calls(service, ["dropped"]), [])
+
+    async def test_function_calls_go_through_the_extensions_closest_first(self):
+        seen: list[tuple[str, list[str]]] = []
+
+        class Closer(BaseLLMExtension):
+            order = 0
+
+            async def filter_function_calls(self, function_calls):
+                seen.append(("closer", [call.function_name for call in function_calls]))
+                return function_calls[:1]
+
+        class Farther(BaseLLMExtension):
+            order = 1
+
+            async def filter_function_calls(self, function_calls):
+                seen.append(("farther", [call.function_name for call in function_calls]))
+                return function_calls
+
+        # Attached in the other order: the order decides.
+        service = _MockLLMService(extensions=[Farther(), Closer()])
+
+        self.assertEqual(await _run_function_calls(service, ["first", "second"]), ["first"])
+        self.assertEqual(seen, [("closer", ["first", "second"]), ("farther", ["first"])])
+
+    async def test_an_extension_can_run_function_calls(self):
+        class Caller(BaseLLMExtension):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                if isinstance(frame, TextFrame):
+                    await self.run_function_calls(_function_calls(["from the extension"]))
+
+        service = _MockLLMService(extensions=[Caller()])
+        run = _record_function_runs(service, ["from the extension"])
+
+        await run_test(service, frames_to_send=[TextFrame("hi")])
+
+        self.assertEqual(run, ["from the extension"])
+
+    async def test_function_calls_an_extension_runs_pass_the_extensions_outside_it(self):
+        seen: list[tuple[str, list[str]]] = []
+
+        class Inside(BaseLLMExtension):
+            order = 0
+
+            # A filter that would drop the calls, were it handed them.
+            async def filter_function_calls(self, function_calls):
+                seen.append(("inside", [call.function_name for call in function_calls]))
+                return []
+
+        class Caller(BaseLLMExtension):
+            order = 1
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                if isinstance(frame, TextFrame):
+                    await self.run_function_calls(_function_calls(["first", "second"]))
+
+            async def filter_function_calls(self, function_calls):
+                seen.append(("caller", [call.function_name for call in function_calls]))
+                return []
+
+        class Outside(BaseLLMExtension):
+            order = 2
+
+            async def filter_function_calls(self, function_calls):
+                seen.append(("outside", [call.function_name for call in function_calls]))
+                return function_calls[:1]
+
+        service = _MockLLMService(extensions=[Inside(), Caller(), Outside()])
+        run = _record_function_runs(service, ["first", "second"])
+
+        await run_test(service, frames_to_send=[TextFrame("hi")])
+
+        self.assertEqual(seen, [("outside", ["first", "second"])])
+        self.assertEqual(run, ["first"])
+
+    async def test_a_frame_an_extension_queues_is_processed_as_one_from_the_pipeline(self):
+        class Queuer(_Recorder):
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame) and frame.text == "trigger":
+                    await self.queue_frame(TextFrame("queued"))
+
+        inside, queuer, outside = _Alpha(order=0), Queuer(order=1), _Beta(order=2)
+        service = _MockLLMService(extensions=[inside, queuer, outside])
+
+        received_down, _ = await run_test(service, frames_to_send=[TextFrame("trigger")])
+
+        def processed_texts(extension: _Recorder) -> list[str]:
+            return [frame.text for frame, _ in extension.processed if type(frame) is TextFrame]
+
+        # Every extension processes the queued frame, the one that queued it
+        # included, and the service handles it: here, by pushing it on.
+        for extension in (outside, queuer, inside):
+            self.assertEqual(processed_texts(extension), ["trigger", "queued"])
+        self.assertEqual(
+            [frame.text for frame in received_down if type(frame) is TextFrame],
+            ["trigger", "queued"],
+        )
+
+    async def test_an_extension_can_cancel_the_inference_in_progress(self):
+        service = _SlowInferenceService(extensions=[_Canceller()])
+        in_progress = LLMContextFrame(LLMContext())
+
+        received_down, _ = await run_test(
+            service,
+            frames_to_send=[
+                in_progress,
+                SleepFrame(sleep=0.1),
+                TextFrame("queued behind the inference"),
+                _CancelInferenceFrame(context_frame=in_progress),
+                SleepFrame(sleep=0.4),
+            ],
+        )
+
+        # The response ends without its answer, and the frame queued behind
+        # the inference is processed.
+        self.assertEqual(_texts(received_down), [])
+        self.assertEqual(
+            len([f for f in received_down if isinstance(f, LLMFullResponseEndFrame)]), 1
+        )
+        self.assertEqual(
+            [f.text for f in received_down if type(f) is TextFrame],
+            ["queued behind the inference"],
+        )
+
+    async def test_cancelling_leaves_an_inference_that_is_not_in_progress_alone(self):
+        service = _SlowInferenceService(extensions=[_Canceller()])
+        queued = LLMContextFrame(LLMContext())
+
+        received_down, _ = await run_test(
+            service,
+            frames_to_send=[
+                LLMContextFrame(LLMContext()),
+                SleepFrame(sleep=0.1),
+                queued,
+                _CancelInferenceFrame(context_frame=queued),
+                SleepFrame(sleep=0.8),
+            ],
+        )
+
+        self.assertEqual(_texts(received_down), ["answer", "answer"])
+
+    async def test_an_inference_cancelling_itself_is_refused(self):
+        class SelfCanceller(BaseLLMExtension):
+            """Asks to cancel the inference from the inference's own output."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                if isinstance(frame, LLMContextFrame):
+                    self._context_frame = frame
+
+            async def filter_push_frame(
+                self, frame: Frame, direction: FrameDirection
+            ) -> list[Frame]:
+                if isinstance(frame, LLMFullResponseStartFrame):
+                    await self.cancel_inference_in_progress(self._context_frame)
+                return [frame]
+
+        service = _SlowInferenceService(extensions=[SelfCanceller()])
+        errors: list[str] = []
+        sink = logger.add(lambda message: errors.append(str(message)), level="ERROR")
+        try:
+            received_down, _ = await run_test(
+                service,
+                frames_to_send=[
+                    LLMContextFrame(LLMContext()),
+                    TextFrame("queued behind the inference"),
+                    SleepFrame(sleep=0.5),
+                ],
+            )
+        finally:
+            logger.remove(sink)
+
+        # The inference runs on, and what is queued behind it is processed once.
+        self.assertEqual(_texts(received_down), ["answer"])
+        self.assertEqual(
+            [f.text for f in received_down if type(f) is TextFrame],
+            ["queued behind the inference"],
+        )
+        self.assertTrue(any("can't be cancelled from its own processing" in e for e in errors))
 
     async def test_a_settings_update_builds_and_adds_extensions(self):
         first = _Alpha(instruction="FIRST")

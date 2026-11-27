@@ -107,45 +107,6 @@ FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
 LLMWithBackendRole = Literal["frontend", "backend"]
 
 
-class _OutputGate(Protocol):
-    """Decides whether the service's output goes out: each frame it pushes, and its function calls.
-
-    It lets output through or drops it; it never changes it. It sees each
-    frame the service processes, to keep track of what the service is doing.
-    Used by predictive delegation (see
-    `pipecat.pipeline.llm_with_backend.predictive_delegation`) to drop what a
-    frontend's inference outputs once its turn is delegated early.
-    """
-
-    async def process_frame(self, service: LLMService[Any], frame: Frame) -> None:
-        """Called with each frame the service processes.
-
-        Args:
-            service: The service.
-            frame: The frame it is processing.
-        """
-        ...
-
-    def allow_push(self, frame: Frame) -> bool:
-        """Whether the service may push a frame.
-
-        Args:
-            frame: The frame the service is about to push.
-
-        Returns:
-            Whether the service may push it.
-        """
-        ...
-
-    def allow_function_calls(self) -> bool:
-        """Whether the service may run its inference's function calls.
-
-        Returns:
-            Whether the service may run them.
-        """
-        ...
-
-
 # Type alias for a callback function that handles the result of an LLM function call.
 class FunctionCallResultCallback(Protocol):
     """Protocol for function call result callbacks.
@@ -455,9 +416,6 @@ class LLMService(AIService, Generic[TAdapter]):
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.
         self._speculation_gate = SpeculationGate(name=f"{self}::SpeculationGate")
-        # Can drop what this service pushes or the function calls it runs.
-        # See `_OutputGate`.
-        self._output_gate: _OutputGate | None = None
         self._warn_turn_completion_settings_are_strategy_owned()
         # The extensions' built-in tools currently advertised, by name.
         self._extension_tool_names: set[str] = set()
@@ -980,12 +938,24 @@ class LLMService(AIService, Generic[TAdapter]):
         await extension.setup(self._setup)
         extension.add_event_handler("on_push_frame", self._on_extension_push_frame)
         extension.add_event_handler("on_broadcast_frame", self._on_extension_broadcast_frame)
+        extension.add_event_handler("on_run_function_calls", self._on_extension_run_function_calls)
+        extension.add_event_handler("on_queue_frame", self._on_extension_queue_frame)
+        extension.add_event_handler(
+            "on_cancel_inference_in_progress", self._on_extension_cancel_inference_in_progress
+        )
         for metadata in self._metadata_frames.values():
             await extension.process_frame(metadata, FrameDirection.DOWNSTREAM)
 
     async def _unwire_extension(self, extension: BaseLLMExtension):
         extension.remove_event_handler("on_push_frame", self._on_extension_push_frame)
         extension.remove_event_handler("on_broadcast_frame", self._on_extension_broadcast_frame)
+        extension.remove_event_handler(
+            "on_run_function_calls", self._on_extension_run_function_calls
+        )
+        extension.remove_event_handler("on_queue_frame", self._on_extension_queue_frame)
+        extension.remove_event_handler(
+            "on_cancel_inference_in_progress", self._on_extension_cancel_inference_in_progress
+        )
         await extension.cleanup()
 
     def _extensions_outside(self, extension: BaseLLMExtension) -> list[BaseLLMExtension]:
@@ -1010,6 +980,26 @@ class LLMService(AIService, Generic[TAdapter]):
         outside = self._extensions_outside(extension)
         await self._push_through_extensions(downstream_frame, FrameDirection.DOWNSTREAM, outside)
         await self._push_through_extensions(upstream_frame, FrameDirection.UPSTREAM, outside)
+
+    async def _on_extension_run_function_calls(
+        self, extension: BaseLLMExtension, function_calls: Sequence[FunctionCallFromLLM]
+    ):
+        await self._run_function_calls_through_extensions(
+            function_calls, self._extensions_outside(extension)
+        )
+
+    async def _on_extension_queue_frame(
+        self,
+        extension: BaseLLMExtension,
+        frame: Frame,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+    ):
+        await self.queue_frame(frame, direction)
+
+    async def _on_extension_cancel_inference_in_progress(
+        self, extension: BaseLLMExtension, context_frame: LLMContextFrame
+    ):
+        await self._cancel_frame_in_progress(context_frame)
 
     def _handle_tts_metadata(self, frame: TTSMetadataFrame):
         """Teach the expression the TTS service performs, replacing any before it."""
@@ -1168,9 +1158,6 @@ class LLMService(AIService, Generic[TAdapter]):
         for extension in reversed(self._extensions):
             await extension.process_frame(frame, direction)
 
-        if self._output_gate is not None:
-            await self._output_gate.process_frame(self, frame)
-
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
         elif isinstance(frame, UserTurnResponseCancelFrame):
@@ -1234,9 +1221,6 @@ class LLMService(AIService, Generic[TAdapter]):
             frame: The frame to push.
             direction: The direction of frame pushing.
         """
-        if self._output_gate is not None and not self._output_gate.allow_push(frame):
-            return
-
         await self._push_through_extensions(frame, direction, self._extensions)
 
     async def _push_through_extensions(
@@ -2052,14 +2036,36 @@ class LLMService(AIService, Generic[TAdapter]):
 
         Triggers the on_function_calls_started event and executes functions
         either in parallel or sequentially based on the run_in_parallel setting.
+        The service's extensions filter the calls first.
 
         Args:
             function_calls: The function calls to execute.
         """
-        if len(function_calls) == 0:
-            return
+        await self._run_function_calls_through_extensions(function_calls, self._extensions)
 
-        if self._output_gate is not None and not self._output_gate.allow_function_calls():
+    async def _run_function_calls_through_extensions(
+        self, function_calls: Sequence[FunctionCallFromLLM], extensions: list[BaseLLMExtension]
+    ):
+        """Run function calls through the given extensions and run the ones that come out.
+
+        The extensions filter them in the order given, as they do an outgoing
+        frame: the one "closest" to the service first.
+        """
+        for extension in extensions:
+            if not function_calls:
+                return
+            function_calls = await extension.filter_function_calls(function_calls)
+        await self._run_function_calls_past_extensions(function_calls)
+
+    async def _run_function_calls_past_extensions(
+        self, function_calls: Sequence[FunctionCallFromLLM]
+    ):
+        """Run function calls: the last step for every call the service runs.
+
+        No extension filters the calls from here. They have already gone
+        through any and all extensions that need to filter them.
+        """
+        if not function_calls:
             return
 
         if self._speculation_gate.is_speculating:

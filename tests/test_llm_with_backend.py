@@ -42,6 +42,7 @@ from pipecat.frames.frames import (
     LLMUpdateSettingsFrame,
     MetricsFrame,
     StartFrame,
+    SystemFrame,
     TextFrame,
 )
 from pipecat.pipeline.llm_with_backend import (
@@ -52,6 +53,7 @@ from pipecat.pipeline.llm_with_backend import (
     TranscriptBackendRequestStrategy,
 )
 from pipecat.pipeline.llm_with_backend.connector import ConnectorContext
+from pipecat.pipeline.llm_with_backend.llm_extension import PredictiveDelegationRaceLLMExtension
 from pipecat.pipeline.llm_with_backend.prompts import (
     BACKEND_MESSAGE_RELAY_INSTRUCTION,
     TRANSCRIPT_FRONTEND_INSTRUCTION,
@@ -59,10 +61,15 @@ from pipecat.pipeline.llm_with_backend.prompts import (
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext, LLMSpecificMessage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
+from pipecat.services.base_llm_extension import BaseLLMExtension
 from pipecat.services.llm_service import FunctionCallFromLLM, FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_stop.llm_turn_completion.llm_extension import LLMTurnCompletionLLMExtension
+from pipecat.turns.user_turn_completion import (
+    USER_TURN_COMPLETE_MARKER,
+    USER_TURN_INCOMPLETE_LONG_MARKER,
+)
 from pipecat.workers.base_worker import BaseWorker
 from pipecat.workers.llm import BackendLLMWorker, BackendOutput
 from pipecat.workers.llm.backend_llm_worker import BackendError, BackendIdle, BackendToolCall
@@ -1141,6 +1148,241 @@ async def test_an_early_delegation_is_settled_like_the_models_own(respond_on_del
     (result,) = [f for f in down if isinstance(f, FunctionCallResultFrame)]
     assert result.result["status"] == "delegated"
     assert result.properties == FunctionCallResultProperties(run_llm=respond_on_delegate)
+
+
+# The race is an LLM extension on the frontend, the innermost one. The tests
+# below hold it beside the frontend's other extensions.
+
+
+@pytest.mark.asyncio
+async def test_what_another_extension_adds_is_no_part_of_the_race():
+    class Speaker(BaseLLMExtension):
+        """Adds text of its own at the start and the end of the frontend's response."""
+
+        async def filter_push_frame(self, frame: Frame, direction: FrameDirection) -> list[Frame]:
+            if isinstance(frame, LLMFullResponseStartFrame):
+                return [frame, LLMTextFrame("at the start")]
+            if isinstance(frame, LLMFullResponseEndFrame):
+                await self.push_frame(LLMTextFrame("at the end"))
+            return [frame]
+
+    frontend = _StreamingFrontend(first_output_after=0.4)
+    frontend.add_extension(Speaker())
+    classifier = _ScriptedClassifier(after=0.05, yes=("Fix the flaky test.",))
+    service, connector = _with_predictive_delegation(frontend, classifier)
+
+    down, _ = await run_test(service, frames_to_send=[_user_turn(), SleepFrame(sleep=0.6)])
+
+    # The extension's text at the start isn't the frontend's first output: the
+    # turn is still delegated early. Its text at the end, after that, isn't
+    # dropped with the cancelled inference's output.
+    assert len(_early_delegations(connector.delegated)) == 1
+    assert frontend.cancelled
+    assert _texts(down) == ["at the start", "at the end"]
+
+
+class _TextHolder(BaseLLMExtension):
+    """Holds the response's text back until the response ends, as turn completion can.
+
+    At turn completion's order, which was the innermost before the race took
+    that place.
+    """
+
+    order = LLMTurnCompletionLLMExtension.order
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._held: list[Frame] = []
+
+    async def filter_push_frame(self, frame: Frame, direction: FrameDirection) -> list[Frame]:
+        if isinstance(frame, LLMTextFrame):
+            self._held.append(frame)
+            return []
+        if isinstance(frame, LLMFullResponseEndFrame):
+            held, self._held = self._held, []
+            return [*held, frame]
+        return [frame]
+
+
+@pytest.mark.asyncio
+async def test_the_race_reads_the_frontends_output_before_an_extension_holds_it_back():
+    frontend = _StreamingFrontend(first_output_after=0.05, streaming=0.3)
+    classifier = _ScriptedClassifier(after=0.15, yes=("Fix the flaky test.",))
+    service, connector = _with_predictive_delegation(frontend, classifier)
+
+    down, _ = await run_test(
+        service,
+        frames_to_send=[
+            # Attached once the frontend runs, as turn completion is, after
+            # the race.
+            LLMUpdateSettingsFrame(delta=LLMSettings(extensions=[_TextHolder])),
+            SleepFrame(0.1),
+            _user_turn(),
+            SleepFrame(sleep=0.6),
+        ],
+    )
+
+    # The frontend's first text decided the race, though none had left the
+    # frontend when the classifier said "yes".
+    assert connector.delegated == []
+    assert _texts(down) == ["Hello", " there"]
+
+
+@pytest.mark.asyncio
+async def test_the_race_stays_innermost_when_turn_completion_is_attached_later():
+    frontend = _StreamingFrontend(first_output_after=0.0)
+    service, _ = _with_predictive_delegation(frontend, _ScriptedClassifier(after=0.0))
+    order: list[type] = []
+
+    async def record_order(*args, **kwargs):
+        order.extend(type(extension) for extension in frontend._extensions)
+
+    with patch.object(frontend, "_handle_interruptions", record_order):
+        await run_test(
+            service,
+            frames_to_send=[
+                LLMUpdateSettingsFrame(
+                    delta=LLMSettings(extensions=[LLMTurnCompletionLLMExtension])
+                ),
+                SleepFrame(0.1),
+                InterruptionFrame(),
+            ],
+        )
+
+    assert order.index(PredictiveDelegationRaceLLMExtension) == 0
+    assert order.index(LLMTurnCompletionLLMExtension) == 1
+
+
+class _ScriptedReplyFrontend(LLMService):
+    """A text frontend that answers each context with the next scripted reply.
+
+    A reply is the chunks of text the model streams, ``between`` seconds
+    apart; a chunk that is a tuple names a function to call instead.
+    """
+
+    def __init__(self, replies: list[list[str | tuple[str]]], *, between: float = 0.0):
+        super().__init__(settings=_settings("You are a voice assistant."))
+        self._replies = list(replies)
+        self._between = between
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if not isinstance(frame, LLMContextFrame):
+            await self.push_frame(frame, direction)
+            return
+        try:
+            await self.push_frame(LLMFullResponseStartFrame())
+            for chunk in self._replies.pop(0):
+                await asyncio.sleep(self._between)
+                if isinstance(chunk, tuple):
+                    await self.run_function_calls(
+                        [
+                            FunctionCallFromLLM(
+                                context=frame.context,
+                                tool_call_id="model_call",
+                                function_name=chunk[0],
+                                arguments={},
+                            )
+                        ]
+                    )
+                else:
+                    await self.push_frame(LLMTextFrame(chunk))
+        finally:
+            await self.push_frame(LLMFullResponseEndFrame())
+
+
+def _shape(frames) -> list[tuple]:
+    """What came out of a service, as each frame's type and what it says."""
+    return [
+        (
+            type(frame).__name__,
+            getattr(frame, "text", None),
+            getattr(frame, "marker", None),
+            getattr(frame, "kind", None),
+            getattr(frame, "function_name", None),
+        )
+        for frame in frames
+    ]
+
+
+_INSTALL_TURN_COMPLETION = LLMUpdateSettingsFrame(
+    delta=LLMSettings(extensions=[LLMTurnCompletionLLMExtension])
+)
+
+
+@pytest.mark.parametrize(
+    "reply, interrupted",
+    [
+        pytest.param([f"{USER_TURN_COMPLETE_MARKER} Hello", " there."], False, id="complete"),
+        pytest.param([USER_TURN_INCOMPLETE_LONG_MARKER], False, id="incomplete"),
+        pytest.param(["Hello", " there."], False, id="no marker"),
+        pytest.param([USER_TURN_COMPLETE_MARKER, ("delegate",)], False, id="tool call"),
+        pytest.param(["Hello", " there.", " And more."], True, id="interrupted while held"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_turn_completion_is_the_same_with_the_race_attached(reply, interrupted):
+    """No turn is raced beside turn completion, and the race lets everything through."""
+
+    async def run(*, predictive_delegation: bool):
+        frontend = _ScriptedReplyFrontend([reply], between=0.1 if interrupted else 0.0)
+        connector = _RecordingConnector()
+        service = LLMWithBackend(
+            frontend=frontend,
+            backend="backend",
+            connector=connector,
+            predictive_delegation=PredictiveDelegation(
+                _ScriptedClassifier(after=0.0, yes=("Fix the flaky test.",))
+            )
+            if predictive_delegation
+            else None,
+        )
+        frames: list[Frame] = [_INSTALL_TURN_COMPLETION, SleepFrame(0.1), _user_turn()]
+        if interrupted:
+            frames += [SleepFrame(0.25), InterruptionFrame()]
+        frames.append(SleepFrame(0.3))
+        down, up = await run_test(service, frames_to_send=frames)
+        # Upstream frames leave through predictive delegation's processor,
+        # where a system frame overtakes the frames queued ahead of it: the
+        # order holds within system frames and within the rest.
+        up_system = [frame for frame in up if isinstance(frame, SystemFrame)]
+        up_rest = [frame for frame in up if not isinstance(frame, SystemFrame)]
+        return _shape(down), _shape(up_system), _shape(up_rest), connector.delegated
+
+    with_race = await run(predictive_delegation=True)
+    alone = await run(predictive_delegation=False)
+
+    assert with_race == alone
+    # The comparison is of a reply that came out, not of two empty runs.
+    assert any(name == "LLMFullResponseEndFrame" for name, *_ in alone[0])
+
+
+@pytest.mark.asyncio
+async def test_turn_completion_turned_on_after_an_early_delegation_is_left_alone():
+    frontend = _ScriptedReplyFrontend(
+        [["Hello", " there."], [f"{USER_TURN_COMPLETE_MARKER} You're", " welcome."]], between=0.3
+    )
+    classifier = _ScriptedClassifier(after=0.05, yes=("Fix the flaky test.", "Thanks."))
+    service, connector = _with_predictive_delegation(frontend, classifier)
+
+    down, _ = await run_test(
+        service,
+        frames_to_send=[
+            _user_turn(),
+            SleepFrame(0.5),
+            _INSTALL_TURN_COMPLETION,
+            SleepFrame(0.1),
+            _user_turn("Thanks."),
+            SleepFrame(1.0),
+        ],
+    )
+
+    # The first turn was delegated early, its reply dropped. The second, with
+    # turn completion on, isn't raced, and its reply comes out without its
+    # marker, as turn completion puts it.
+    assert len(_early_delegations(connector.delegated)) == 1
+    assert len(classifier.states) == 1
+    assert "".join(_texts(down)).strip() == "You're welcome."
 
 
 def test_predictive_delegation_needs_a_text_frontend():

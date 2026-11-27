@@ -271,6 +271,32 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(processor.cancelled, [True])
 
+    async def test_cancel_frame_in_progress_refuses_a_frame_cancelling_itself(self):
+        class SelfCancellingProcessor(FrameProcessor):
+            def __init__(self):
+                super().__init__()
+                self.errors: list[RuntimeError] = []
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if isinstance(frame, TextFrame):
+                    try:
+                        await self._cancel_frame_in_progress(frame)
+                    except RuntimeError as e:
+                        self.errors.append(e)
+                await self.push_frame(frame, direction)
+
+        processor = SelfCancellingProcessor()
+        down, _ = await run_test(
+            processor,
+            frames_to_send=[TextFrame(text="first"), TextFrame(text="second")],
+            expected_down_frames=[TextFrame, TextFrame],
+        )
+
+        # Each frame is refused and goes on being processed.
+        self.assertEqual(len(processor.errors), 2)
+        self.assertEqual([f.text for f in down], ["first", "second"])
+
     async def test_interruptible_flag_decides_for_a_frame(self):
         """A plain frame marked uninterruptible survives, a marker frame marked interruptible does not."""
 
