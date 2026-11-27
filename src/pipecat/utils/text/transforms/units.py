@@ -9,6 +9,7 @@
 import re
 
 from pipecat.frames.frames import TextType
+from pipecat.utils.text.transforms._minus import minus_before, say_minus
 
 # Maps unit abbreviation to (singular, plural) spoken forms.
 _UNIT_MAP: dict[str, tuple[str, str]] = {
@@ -92,6 +93,35 @@ _AMBIGUOUS_UNIT_RE = re.compile(
 _DEGREE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*°(?:\s*([CF])(?![a-zA-Z])|(?![a-zA-Z\d]))")
 _DEGREE_SCALES = {"C": " Celsius", "F": " Fahrenheit"}
 
+# A quantity that expand_units will rewrite: a degree, a rate, an unambiguous
+# unit, or an ambiguous unit written tight against the number.
+_UNAMB_ALT = "|".join(re.escape(u) for u in _sorted_unambiguous)
+_AMB_ALT = "|".join(re.escape(u) for u in _sorted_ambiguous)
+_ALL_UNIT_ALT = "|".join(re.escape(u) for u in sorted(_UNIT_MAP, key=len, reverse=True))
+_PER_ALT = "|".join(re.escape(u) for u in sorted(_PER_UNIT_MAP, key=len, reverse=True))
+_DEGREE_UNIT = r"°(?:\s*[CF](?![a-zA-Z])|(?![a-zA-Z\d]))"
+_ATTACHED_UNIT = (
+    r"(?:"
+    r"\s*" + _DEGREE_UNIT + r"|"
+    r"\s*(?:" + _ALL_UNIT_ALT + r")/(?:" + _PER_ALT + r")\b|"
+    r"\s*(?:" + _UNAMB_ALT + r")\b|"
+    r"(?:" + _AMB_ALT + r")\b"
+    r")"
+)
+_UNIT_QUANTITY = r"\d[\d,]*(?:\.\d+)?" + _ATTACHED_UNIT
+
+# A range such as "5-10km" or "20 – 25°C": the dash becomes "to". The first
+# number must not be glued to a word or another dash ("Q3-5km", "1-2-3km"), and
+# the dash is spaced on both sides or neither, so "5km -2km" keeps its minus sign.
+_UNIT_RANGE_RE = re.compile(
+    r"(?<![\w.,\-–])(\d[\d,]*(?:\.\d+)?" + _ATTACHED_UNIT + r"?)"
+    r"(?:[-–]|\s[-–]\s)(?=" + _UNIT_QUANTITY + r")"
+)
+
+# A minus sign in front of a unit quantity, not a hyphen joined to a preceding
+# word or number.
+_NEGATIVE_UNIT_RE = minus_before(_UNIT_QUANTITY)
+
 
 async def expand_units(text: str, text_type: str | TextType) -> str:
     """Expand unit abbreviations to their full spoken form.
@@ -129,6 +159,8 @@ async def expand_units(text: str, text_type: str | TextType) -> str:
     def _replace_rate(match: re.Match) -> str:
         return f"{_replace(match)} per {_PER_UNIT_MAP[match.group(3).lower()]}"
 
+    text = _UNIT_RANGE_RE.sub(lambda m: f"{m.group(1).rstrip()} to ", text)
+    text = say_minus(_NEGATIVE_UNIT_RE, text)
     text = _DEGREE_RE.sub(_replace_degrees, text)
     text = _RATE_RE.sub(_replace_rate, text)
     text = _UNIT_RE.sub(_replace, text)

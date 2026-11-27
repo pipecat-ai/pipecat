@@ -405,13 +405,64 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_units("1°C warmer", "*"), "1 degree Celsius warmer")
         self.assertEqual(await expand_units("a 90° turn", "*"), "a 90 degrees turn")
         self.assertEqual(await expand_units("1.0°C", "*"), "1.0 degrees Celsius")
-        self.assertEqual(await expand_units("-1°C", "*"), "-1 degree Celsius")
-        self.assertEqual(await expand_units("-5°C", "*"), "-5 degrees Celsius")
         self.assertEqual(await expand_units("72 ° F", "*"), "72 degrees Fahrenheit")
         # A degree sign directly followed by another word is left alone.
         self.assertEqual(await expand_units("40°N", "*"), "40°N")
         # Degrees-minutes coordinates are left alone.
         self.assertEqual(await expand_units("40°30′N", "*"), "40°30′N")
+
+    async def test_range(self):
+        # The dash of a range is read as "to", not left between a digit and the unit.
+        self.assertEqual(await expand_units("a 5-10km run", "*"), "a 5 to 10 kilometers run")
+        self.assertEqual(await expand_units("a 5–10km run", "*"), "a 5 to 10 kilometers run")
+        self.assertEqual(await expand_units("20-25°C", "*"), "20 to 25 degrees Celsius")
+        self.assertEqual(await expand_units("20–25°C", "*"), "20 to 25 degrees Celsius")
+        self.assertEqual(
+            await expand_units("2.5 - 3°C overnight", "*"), "2.5 to 3 degrees Celsius overnight"
+        )
+        self.assertEqual(await expand_units("5 - 10 km", "*"), "5 to 10 kilometers")
+        self.assertEqual(await expand_units("5km-10km", "*"), "5 kilometers to 10 kilometers")
+        self.assertEqual(
+            await expand_units("5°C-10°C", "*"), "5 degrees Celsius to 10 degrees Celsius"
+        )
+        self.assertEqual(await expand_units("5-10 m/s", "*"), "5 to 10 meters per second")
+
+    async def test_range_lookalikes_unchanged(self):
+        # A dash that is not a range between two standalone unit quantities is left alone.
+        self.assertEqual(await expand_units("Q3-5km", "*"), "Q3-5 kilometers")
+        self.assertEqual(await expand_units("1-2-3km", "*"), "1-2-3 kilometers")
+        self.assertEqual(await expand_units("2025-2026", "*"), "2025-2026")
+        self.assertEqual(await expand_units("5-10%", "*"), "5-10%")
+        self.assertEqual(await expand_units("5-10 people", "*"), "5-10 people")
+        # Uneven spacing is a minus sign, not a range, matching expand_percentages.
+        self.assertEqual(await expand_units("5km -2km", "*"), "5 kilometers minus 2 kilometers")
+
+    async def test_negative(self):
+        # A leading minus sign is spoken, not left as a hyphen in front of the unit.
+        self.assertEqual(await expand_units("-1°C", "*"), "minus 1 degree Celsius")
+        self.assertEqual(await expand_units("-5°C", "*"), "minus 5 degrees Celsius")
+        self.assertEqual(await expand_units("−5°C", "*"), "minus 5 degrees Celsius")
+        self.assertEqual(
+            await expand_units("down -5°C today", "*"), "down minus 5 degrees Celsius today"
+        )
+        self.assertEqual(await expand_units("(-5°C)", "*"), "(minus 5 degrees Celsius)")
+        self.assertEqual(await expand_units("-5km", "*"), "minus 5 kilometers")
+        self.assertEqual(await expand_units("-5m", "*"), "minus 5 meters")
+        self.assertEqual(await expand_units("-9.8 m/s", "*"), "minus 9.8 meters per second")
+        self.assertEqual(await expand_units("-100 km/h", "*"), "minus 100 kilometers per hour")
+        # An evenly spaced dash between a number and a unit is a range, as with percentages.
+        self.assertEqual(await expand_units("10 - 5km", "*"), "10 to 5 kilometers")
+        # A spaced dash after a non-number is a separator, not a minus.
+        self.assertEqual(
+            await expand_units("Distance - 5km left", "*"), "Distance - 5 kilometers left"
+        )
+        # A hyphen joined to a preceding word is not a minus.
+        self.assertEqual(await expand_units("COVID-19", "*"), "COVID-19")
+        # The default VoiceFormatter enables expand_units but not expand_numbers.
+        self.assertEqual(
+            await VoiceFormatter()("down -5°C today", "*"),
+            "down minus 5 degrees Celsius today",
+        )
 
     async def test_rate_written_with_a_slash(self):
         # A unit over time expands as a whole, not just the part before the slash.
