@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.assemblyai.models import (
     AssemblyAIConnectionParams,
+    HeartbeatMessage,
     TerminationMessage,
     TurnMessage,
     Word,
@@ -1495,3 +1496,67 @@ def test_disconnect_terminates_an_open_session_before_closing():
     ]
     assert service._receive_task is None
     assert service._websocket is None
+
+
+@pytest.mark.parametrize(
+    "setting_val,expected_query_val",
+    [
+        (None, None),
+        (True, "true"),
+        (False, "false"),
+    ],
+)
+def test_session_heartbeat_in_url_query(setting_val, expected_query_val):
+    kwargs = {}
+    if setting_val is not None:
+        kwargs["settings"] = AssemblyAISTTService.Settings(session_heartbeat=setting_val)
+    service = AssemblyAISTTService(api_key="test-key", **kwargs)
+    q = _query(service)
+    if expected_query_val is None:
+        assert "session_heartbeat" not in q
+    else:
+        assert q["session_heartbeat"] == [expected_query_val]
+
+
+def test_deprecated_connection_params_session_heartbeat():
+    with pytest.warns(DeprecationWarning):
+        service = AssemblyAISTTService(
+            api_key="test-key", connection_params=AssemblyAIConnectionParams(session_heartbeat=True)
+        )
+    assert _query(service)["session_heartbeat"] == ["true"]
+
+
+def test_heartbeat_message_is_not_an_error():
+    service = AssemblyAISTTService(api_key="test-key")
+    errors = []
+
+    async def fake_push_error(*args, **kwargs):
+        errors.append((args, kwargs))
+
+    service.push_error = fake_push_error
+    message = {
+        "type": "Heartbeat",
+        "total_audio_received_ms": 12500,
+        "total_duration_ms": 12600,
+        "realtime_factor": 0.99,
+        "max_speech_probability": 0.85,
+    }
+
+    parsed = service._parse_message(message)
+    assert isinstance(parsed, HeartbeatMessage)
+    assert parsed.total_audio_received_ms == 12500
+    assert parsed.realtime_factor == 0.99
+
+    asyncio.run(service._handle_message(message))
+    assert errors == []
+
+
+def test_update_settings_session_heartbeat_sends_without_reconnect():
+    service = AssemblyAISTTService(api_key="test-key")
+    sent, reconnects = _stub_connection(service)
+
+    delta = AssemblyAISTTService.Settings(session_heartbeat=True)
+    asyncio.run(service._update_settings(delta))
+
+    assert sent == [{"session_heartbeat": True}]
+    assert reconnects == []
