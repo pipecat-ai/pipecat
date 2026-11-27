@@ -373,6 +373,14 @@ class TestExpandPercentages(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_percentages()("1.0%", "*"), "one percent")
         self.assertEqual(await expand_percentages()("0.25%", "*"), "zero point two five percent")
 
+    async def test_deprecated_direct_call_keeps_default_output(self):
+        from pipecat.utils import deprecation
+
+        deprecation._warned_sites.clear()
+        with self.assertWarnsRegex(DeprecationWarning, r"Use `expand_percentages\(\)` instead"):
+            result = await expand_percentages("Up 1.0% and 1.10%", "*")
+        self.assertEqual(result, "Up one percent and one point one percent")
+
     async def test_fraction_read_digit_by_digit_with_trailing_zeros(self):
         # Opting in reads every written fraction digit, as expand_numbers does.
         transform = expand_percentages(read_trailing_zeros=True)

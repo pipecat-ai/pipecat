@@ -5712,6 +5712,28 @@
       "location": "pipecat/utils/text/markdown_text_filter.py"
     },
     {
+      "subject": "expand_percentages.text",
+      "module": "pipecat.utils.text.transforms.percentages",
+      "kind": "parameter",
+      "deprecated_in": "1.18.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "expand_percentages()",
+      "message": "Use ``expand_percentages()`` instead, which returns the transform. Will be removed in 2.0.0.",
+      "location": "pipecat/utils/text/transforms/percentages.py"
+    },
+    {
+      "subject": "expand_percentages.text_type",
+      "module": "pipecat.utils.text.transforms.percentages",
+      "kind": "parameter",
+      "deprecated_in": "1.18.0",
+      "removed_in": "2.0.0",
+      "relation": "use_existing",
+      "replacement": "expand_percentages()",
+      "message": "Use ``expand_percentages()`` instead, which returns the transform. Will be removed in 2.0.0.",
+      "location": "pipecat/utils/text/transforms/percentages.py"
+    },
+    {
       "subject": "BaseUIWorker",
       "module": "pipecat.workers.base_ui_worker",
       "kind": "class",

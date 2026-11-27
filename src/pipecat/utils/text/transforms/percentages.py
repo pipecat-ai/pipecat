@@ -7,17 +7,33 @@
 """Expand percentage expressions into spoken form for TTS."""
 
 import re
+from collections.abc import Awaitable
+from typing import overload
 
 from num2words import num2words
 
 from pipecat.frames.frames import TextType
+from pipecat.utils.deprecation import warn_deprecated
 from pipecat.utils.text.transforms.text_transform import TextTransform
 
 # Matches integers and decimals, with optional thousand separators.
 _PERCENT_RE = re.compile(r"(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\s*%")
 
 
-def expand_percentages(read_trailing_zeros: bool = False) -> TextTransform:
+@overload
+def expand_percentages(*, read_trailing_zeros: bool = False) -> TextTransform: ...
+
+
+@overload
+def expand_percentages(text: str, text_type: str | TextType) -> Awaitable[str]: ...
+
+
+def expand_percentages(
+    text: str | None = None,
+    text_type: str | TextType | None = None,
+    *,
+    read_trailing_zeros: bool = False,
+) -> TextTransform | Awaitable[str]:
     """Return a transform that expands percentage expressions to their spoken form.
 
     By default a decimal is read as a quantity, so trailing zeros are dropped
@@ -26,6 +42,19 @@ def expand_percentages(read_trailing_zeros: bool = False) -> TextTransform:
     written digit is spoken (``"1.10%"`` becomes ``"one point one zero percent"``).
 
     Args:
+        text: Text to transform directly, when ``expand_percentages`` itself is
+            used as the transform.
+
+            .. deprecated:: 1.18.0
+                Use ``expand_percentages()`` instead, which returns the transform.
+                Will be removed in 2.0.0.
+
+        text_type: Text type of the text frame, with *text*.
+
+            .. deprecated:: 1.18.0
+                Use ``expand_percentages()`` instead, which returns the transform.
+                Will be removed in 2.0.0.
+
         read_trailing_zeros: Read every written fraction digit, including
             trailing zeros. Defaults to ``False``.
 
@@ -38,7 +67,17 @@ def expand_percentages(read_trailing_zeros: bool = False) -> TextTransform:
         result = await transform("50% off today", "*")
         # "fifty percent off today"
     """
+    if text is not None:
+        warn_deprecated(
+            "`expand_percentages(text, text_type)` is deprecated since 1.18.0 and will be "
+            "removed in 2.0.0. Use `expand_percentages()` instead.",
+            stacklevel=2,
+        )
+        return _percent_transform(read_trailing_zeros=False)(text, text_type or "")
+    return _percent_transform(read_trailing_zeros=read_trailing_zeros)
 
+
+def _percent_transform(read_trailing_zeros: bool) -> TextTransform:
     def _percent_to_words(match: re.Match) -> str:
         whole_str = match.group(1).replace(",", "")
         frac_str = match.group(2)
