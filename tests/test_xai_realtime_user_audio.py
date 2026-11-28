@@ -86,18 +86,16 @@ async def test_user_audio_flows_after_session_ready_without_conversation_setup()
 
 
 @pytest.mark.asyncio
-async def test_server_vad_interruption_cancels_without_clearing_input():
+async def test_server_vad_interruption_neither_cancels_nor_clears_input():
+    """With server VAD the API interrupts its own response, and a cancel would
+    land on the response it starts for the interrupting turn."""
     service, recorder = _make_service(server_vad=True)
     service._api_session_ready = True
 
     await service._send_user_audio(_audio_frame())
     await service._handle_interruption()
 
-    assert recorder.kinds() == [
-        "InputAudioBufferAppendEvent",
-        "ResponseCancelEvent",
-    ]
-    assert "InputAudioBufferClearEvent" not in recorder.kinds()
+    assert recorder.kinds() == ["InputAudioBufferAppendEvent"]
 
 
 @pytest.mark.asyncio
@@ -136,7 +134,7 @@ async def test_interruption_truncates_in_flight_audio_on_the_wire():
 
     await service._handle_interruption()
 
-    assert "ResponseCancelEvent" in recorder.kinds()
+    assert "ResponseCancelEvent" not in recorder.kinds()
     assert "ConversationItemTruncateEvent" in recorder.kinds()
     truncate = next(
         e for e in recorder.events if isinstance(e, events.ConversationItemTruncateEvent)
