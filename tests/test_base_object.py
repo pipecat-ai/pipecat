@@ -4,7 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import unittest
+
+import pytest
 
 from pipecat.utils.base_object import BaseObject
 
@@ -13,6 +16,7 @@ class _Events(BaseObject):
     def __init__(self):
         super().__init__()
         self._register_event_handler("on_sync_event", sync=True)
+        self._register_event_handler("on_background_event")
 
 
 class TestBaseObjectEventHandlers(unittest.IsolatedAsyncioTestCase):
@@ -50,3 +54,46 @@ class TestBaseObjectEventHandlers(unittest.IsolatedAsyncioTestCase):
 
         await events._call_event_handler("on_sync_event")
         self.assertEqual(calls, ["adder"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_name", ["on_sync_event", "on_background_event"])
+@pytest.mark.parametrize("wrapped", [False, True], ids=["callable-instance", "sync-wrapper"])
+async def test_event_handler_awaits_returned_coroutine(event_name, wrapped):
+    events = _Events()
+    calls = []
+
+    class Handler:
+        async def __call__(self, obj, value, *, suffix):
+            await asyncio.sleep(0)
+            calls.append((obj, value + suffix))
+
+    handler = Handler()
+
+    def wrapper(*args, **kwargs):
+        return handler(*args, **kwargs)
+
+    events.add_event_handler(event_name, wrapper if wrapped else handler)
+
+    await events._call_event_handler(event_name, "hello", suffix="!")
+    await events.cleanup()
+
+    assert calls == [(events, "hello!")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_name", ["on_sync_event", "on_background_event"])
+async def test_event_handler_runs_synchronous_handlers(event_name):
+    events = _Events()
+    calls = []
+
+    def handler(obj):
+        calls.append(obj)
+        return "finished"
+
+    events.add_event_handler(event_name, handler)
+
+    await events._call_event_handler(event_name)
+    await events.cleanup()
+
+    assert calls == [events]

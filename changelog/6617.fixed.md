@@ -1,0 +1,1 @@
+- Fixed event handlers implemented as async callable instances or synchronous wrappers returning awaitables being skipped instead of awaited.
