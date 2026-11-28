@@ -127,11 +127,12 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         for sentence in tamil_sentences:
             assert match_endofsentence(sentence), f"Failed for Tamil: {sentence}"
 
-        # Armenian
+        # Armenian: the full stop ends the sentence, and the question and
+        # exclamation marks sit over a vowel inside a word.
         armenian_sentences = [
             "Բարև։",  # Armenian full stop
-            "Ինչպես եք՞",  # Armenian question mark
-            "Շնորհակալություն՜",  # Armenian exclamation
+            "Ինչպե՞ս եք։",  # Armenian question mark
+            "Ի՜նչ գեղեցիկ է։",  # Armenian exclamation mark
         ]
         for sentence in armenian_sentences:
             assert match_endofsentence(sentence), f"Failed for Armenian: {sentence}"
@@ -156,6 +157,22 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         ]
         for sentence in latin_script_sentences:
             assert match_endofsentence(sentence), f"Failed for Latin script: {sentence}"
+
+    async def test_endofsentence_ignores_marks_inside_words(self):
+        """A mark written inside a word doesn't end a sentence there."""
+        # Armenian question and exclamation marks sit over the stressed vowel.
+        for language in (None, "hy"):
+            with self.subTest(language=language):
+                assert match_endofsentence("Ո՞վ", language=language) == 0
+                assert match_endofsentence("Ինչո՞", language=language) == 0
+                assert match_endofsentence("Ի՜նչ", language=language) == 0
+                assert match_endofsentence("Ո՞վ է նա։ Նա", language=language) == 9
+                assert match_endofsentence("Ի՜նչ գեղեցիկ է։ Նա", language=language) == 15
+
+        # The Lao cancellation mark silences the consonant it sits on.
+        for language in (None, "lo"):
+            with self.subTest(language=language):
+                assert match_endofsentence("ໃຊ້ໄຟລ໌ນີ້", language=language) == 0
 
     async def test_endofsentence_cjk_with_lookahead(self):
         """Test sentence detection for CJK text with lookahead characters.
