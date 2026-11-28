@@ -42,6 +42,11 @@ class SpeechSegmentBuffer:
         self._buffer = bytearray()
         self._speaking = False
 
+    @property
+    def speaking(self) -> bool:
+        """Whether a segment is under way, between :meth:`start` and :meth:`stop`."""
+        return self._speaking
+
     def set_sample_rate(self, sample_rate: int):
         """Set the sample rate of the audio to come.
 

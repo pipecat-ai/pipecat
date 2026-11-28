@@ -65,3 +65,14 @@ def test_a_segment_without_max_secs_keeps_everything():
     buffer.append(_seconds(2, 60))
 
     assert buffer.stop() == _seconds(1, 0.5) + _seconds(2, 60)
+
+
+def test_speaking_is_true_between_start_and_stop():
+    buffer = _buffer()
+    assert not buffer.speaking
+
+    buffer.start()
+    assert buffer.speaking
+
+    buffer.stop()
+    assert not buffer.speaking
