@@ -269,6 +269,12 @@ async def test_auto_answer_disabled_leaves_call_ringing():
     connection.answer.assert_not_awaited()
 
 
+def test_connection_property_returns_the_connection_given():
+    transport, connection = make_transport()
+
+    assert transport.connection is connection
+
+
 @pytest.mark.asyncio
 async def test_video_params_answer_with_video():
     transport, connection = make_transport(video_in_enabled=True)

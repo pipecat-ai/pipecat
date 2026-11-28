@@ -204,10 +204,15 @@ class SIPParams(TransportParams):
         auto_answer: Answer inbound calls as soon as they arrive. Video
             is accepted when the params enable a video direction. With
             ``auto_answer=False`` the transport leaves the call ringing:
-            answer or decline it on the application's own
-            :class:`~pipecat.transports.sip.connection.SIPConnection`
-            (``connection.answer()`` / ``connection.reject()``) from an
-            ``incoming`` event handler.
+            answer or decline it on :attr:`SIPTransport.connection` from
+            an ``incoming`` event handler::
+
+                @transport.connection.event_handler("incoming")
+                async def on_incoming(connection, call):
+                    if call["sipFrom"] in blocked:
+                        await connection.reject(603)
+                    else:
+                        await connection.answer()
         trunk: Domain (or host:port) that turns a ``phoneNumber``
             dial-out into ``sip:+E164@trunk``. Without it, dial-out
             requires a full ``sipUri``.
@@ -594,6 +599,18 @@ class SIPTransport(BaseTransport):
         connection.add_event_handler("remote_hold", self._on_remote_hold)
         connection.add_event_handler("renegotiated", self._on_renegotiated)
         connection.add_event_handler("audio_warning", self._on_audio_warning)
+
+    @property
+    def connection(self) -> SIPConnection:
+        """The SIP connection the call runs over.
+
+        The same object whether the application built it or
+        :func:`pipecat.runner.utils.create_transport` did. It gives what
+        the transport does not wrap: the ``incoming`` event with
+        ``answer()`` and ``reject()`` for a transport that does not
+        answer by itself, and call facts such as ``media_encrypted``.
+        """
+        return self._connection
 
     def input(self) -> FrameProcessor:
         """The input frame processor, created on first use."""
