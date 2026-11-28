@@ -730,6 +730,43 @@ class TestBaseOutputTransportResampling(unittest.IsolatedAsyncioTestCase):
         finally:
             await transport.cancel(CancelFrame())
 
+    async def test_audio_at_another_rate_is_resampled(self):
+        """Audio arriving at a second rate reaches the transport too.
+
+        A bot can send audio at more than one rate, such as a 16 kHz sound file
+        and then a 24 kHz speech-to-speech reply. Each rate gets its own
+        resampler, and the first one's held audio still plays.
+        """
+        transport = await _make_transport(audio_out_sample_rate=self.OUT_RATE)
+        try:
+            sender = transport._media_senders[None]
+            sound = OutputAudioRawFrame(
+                audio=(8000).to_bytes(2, "little", signed=True) * 16000,
+                sample_rate=16000,
+                num_channels=1,
+            )
+            speech = TTSAudioRawFrame(
+                audio=(-8000).to_bytes(2, "little", signed=True) * 24000,
+                sample_rate=24000,
+                num_channels=1,
+                context_id="ctx1",
+            )
+
+            await transport.process_frame(sound, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(speech, FrameDirection.DOWNSTREAM)
+            await transport.process_frame(
+                TTSStoppedFrame(context_id="ctx1"), FrameDirection.DOWNSTREAM
+            )
+            await asyncio.sleep(0.2)
+
+            # One second of each, at the output rate.
+            samples = np.frombuffer(self._written(transport), dtype=np.int16)
+            self.assertGreaterEqual(int((samples > 4000).sum()), self.OUT_RATE)
+            self.assertGreaterEqual(int((samples < -4000).sum()), self.OUT_RATE)
+            self.assertLessEqual(len(samples), 2 * self.OUT_RATE + sender.audio_chunk_size // 2)
+        finally:
+            await transport.cancel(CancelFrame())
+
     async def test_resampling_is_logged_once(self):
         """The resample log line shows up once, never for a match."""
         sink = io.StringIO()
