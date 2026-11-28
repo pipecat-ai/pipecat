@@ -1542,6 +1542,27 @@ class TestWordCompletionTrackerRemainingText(unittest.TestCase):
         self.assertTrue(tracker.is_complete)
         self.assertIsNone(tracker.get_remaining_llm_text())
 
+    def test_unattributed_llm_text_skips_punctuation_already_emitted(self):
+        """Force-complete resumes after punctuation attributed to an earlier word."""
+        text = "Yeah, I can help"
+        tracker = WordCompletionTracker(text, llm_text=text, user_facing_text=text)
+        tracker.add_word_and_check_complete("Yeah")
+
+        self.assertEqual(tracker.get_remaining_llm_text(), ", I can help")
+        self.assertEqual(tracker.get_unattributed_llm_text(), "I can help")
+
+    def test_unattributed_llm_text_keeps_an_unfinished_transform(self):
+        """A transformed span stays unattributed until its final spoken word arrives."""
+        tracker = WordCompletionTracker(
+            "Your balance is five dollars",
+            llm_text="Your balance is $5",
+            user_facing_text="Your balance is $5",
+        )
+        for word in ("Your", "balance", "is", "five"):
+            tracker.add_word_and_check_complete(word)
+
+        self.assertEqual(tracker.get_unattributed_llm_text(), "$5")
+
 
 class TestWordCompletionTrackerAccumulatedText(unittest.TestCase):
     """Tests for get_accumulated_tts_text() and get_accumulated_llm_text().

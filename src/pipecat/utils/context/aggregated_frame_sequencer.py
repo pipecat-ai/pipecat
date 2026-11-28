@@ -691,8 +691,10 @@ class AggregatedFrameSequencer:
                     # Words that carry their own spacing get no space put before
                     # them, so the rest of the text brings the one it starts with.
                     strip = not slot.includes_inter_frame_spaces
-                    remaining_text = slot.tracker.get_remaining_tts_text(strip=strip).rstrip()
-                    raw_remaining = slot.tracker.get_remaining_llm_text(strip=strip)
+                    remaining_text = slot.tracker.get_remaining_user_facing_text(
+                        strip=strip
+                    ).rstrip()
+                    raw_remaining = slot.tracker.get_unattributed_llm_text(strip=strip)
                     if raw_remaining is not None:
                         raw_remaining = raw_remaining.rstrip()
                     if not remaining_text.strip():
