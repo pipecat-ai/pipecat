@@ -192,13 +192,16 @@ class TestJobGroupContext(unittest.IsolatedAsyncioTestCase):
         worker = StubTask("worker")
         await setup_task(self.bus, self.registry, worker)
 
-        with self.assertRaises(JobGroupError) as ctx:
-            async with parent.job_group("worker") as tg:
-                asyncio.ensure_future(parent.cancel_job_group(tg.job_id, reason="manual cancel"))
-
-        # Let the event loop schedule handler tasks spawned by the bus
-        await asyncio.sleep(0)
-        self.assertIn("manual cancel", str(ctx.exception))
+        for kwargs, expected in (
+            ({"reason": "manual cancel"}, "manual cancel"),
+            ({}, "cancelled"),
+            ({"reason": ""}, "cancelled"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(JobGroupError) as ctx:
+                    async with parent.job_group("worker") as tg:
+                        await parent.cancel_job_group(tg.job_id, **kwargs)
+                self.assertEqual(str(ctx.exception), expected)
 
     async def test_job_group_raises_on_timeout(self):
         """job_group() raises JobGroupError on timeout."""
@@ -652,6 +655,18 @@ class TestJobContext(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(JobError):
             async with parent.job("worker"):
                 pass
+
+    async def test_job_raises_on_cancel_without_reason(self):
+        """job() raises JobError when a requested cancellation has no reason."""
+        parent = StubTask("parent")
+        await setup_task(self.bus, self.registry, parent)
+
+        worker = StubTask("worker")
+        await setup_task(self.bus, self.registry, worker)
+
+        with self.assertRaisesRegex(JobError, "^cancelled$"):
+            async with parent.job("worker") as job:
+                self.assertTrue(await parent.request_cancel_job_group(job.job_id))
 
     async def test_job_exposes_job_id(self):
         """job() exposes the job_id inside the context."""

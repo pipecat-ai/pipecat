@@ -807,7 +807,8 @@ class BaseWorker(BaseObject, BusSubscriber):
         data) from the worker while waiting.
 
         On normal completion, the result is available via ``response``.
-        On worker error or timeout, raises ``JobError``.
+        If the job is cancelled, including on worker error or timeout,
+        raises ``JobError``.
 
         Args:
             worker_name: Name of the worker to send the job to.
@@ -928,8 +929,8 @@ class BaseWorker(BaseObject, BusSubscriber):
         data) from workers while waiting.
 
         On normal completion, results are available via ``responses``.
-        On worker error (with ``cancel_on_error=True``) or timeout,
-        raises ``JobGroupError``.
+        If the group is cancelled, including on timeout or on worker error with
+        ``cancel_on_error=True``, raises ``JobGroupError``.
 
         Args:
             *worker_names: Names of the workers to send the job to.
