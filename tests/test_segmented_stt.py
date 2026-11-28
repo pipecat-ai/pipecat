@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     MetricsFrame,
+    STTMuteFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -331,3 +332,56 @@ async def test_usage_includes_trailing_silence():
     audio_seconds = await _drive_one_segment_with_usage(service)
 
     assert audio_seconds == pytest.approx((len(PCM) + len(DEFAULT_SILENCE)) / (SAMPLE_RATE * 2))
+
+
+@pytest.mark.asyncio
+async def test_muted_audio_is_not_buffered_or_transcribed():
+    service = _make_capturing_service(wants_wav=False, trailing_silence_secs=0)
+    before_mute = bytes([1]) * 640
+    speech_before_mute = bytes([2]) * 640
+    muted_speech = bytes([3]) * 640
+    after_unmute = bytes([4]) * 640
+
+    await run_test(
+        service,
+        frames_to_send=[
+            InputAudioRawFrame(audio=before_mute, sample_rate=SAMPLE_RATE, num_channels=1),
+            VADUserStartedSpeakingFrame(),
+            InputAudioRawFrame(audio=speech_before_mute, sample_rate=SAMPLE_RATE, num_channels=1),
+            STTMuteFrame(mute=True),
+            InputAudioRawFrame(audio=muted_speech, sample_rate=SAMPLE_RATE, num_channels=1),
+            STTMuteFrame(mute=False),
+            InputAudioRawFrame(audio=after_unmute, sample_rate=SAMPLE_RATE, num_channels=1),
+            VADUserStoppedSpeakingFrame(),
+        ],
+    )
+
+    assert service.captured == [before_mute + speech_before_mute + after_unmute]
+
+
+@pytest.mark.asyncio
+async def test_fully_muted_segment_skips_transcription_and_usage():
+    service = _make_capturing_service(wants_wav=False, trailing_silence_secs=0.5)
+    muted_speech = bytes([3]) * 640
+
+    received_down, _ = await run_test(
+        service,
+        frames_to_send=[
+            STTMuteFrame(mute=True),
+            VADUserStartedSpeakingFrame(),
+            InputAudioRawFrame(audio=muted_speech, sample_rate=SAMPLE_RATE, num_channels=1),
+            VADUserStoppedSpeakingFrame(),
+            STTMuteFrame(mute=False),
+        ],
+        pipeline_params=PipelineParams(enable_usage_metrics=True),
+    )
+
+    assert service.captured == []
+    usage_data = [
+        d
+        for f in received_down
+        if isinstance(f, MetricsFrame)
+        for d in f.data
+        if isinstance(d, STTUsageMetricsData)
+    ]
+    assert usage_data == []
