@@ -38,6 +38,7 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
     Handles:
 
     - Converting LLMContext messages to Responses API input items
+    - Preserving supplied phases on assistant text messages
     - Converting Pipecat's standardized tools schema to Responses API function tool format
     - Extracting and sanitizing messages from the LLM context for logging
     """
@@ -221,9 +222,10 @@ class OpenAIResponsesLLMAdapter(BaseLLMAdapter[OpenAIResponsesLLMInvocationParam
                     content = message.get("content", "")
                     if isinstance(content, list):
                         content = self._convert_multimodal_content(content)
-                    result.append(
-                        cast(ResponseInputItemParam, {"role": "assistant", "content": content})
-                    )
+                    item: dict[str, Any] = {"role": "assistant", "content": content}
+                    if (phase := message.get("phase")) is not None:
+                        item["phase"] = phase
+                    result.append(cast(ResponseInputItemParam, item))
 
             elif role == "tool":
                 content = message.get("content", "")
