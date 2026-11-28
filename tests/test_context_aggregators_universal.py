@@ -3819,3 +3819,84 @@ class TestLLMAssistantAggregatorDeferredClose(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self._contents(), ["Hello"])
         self.assertEqual([m.interrupted for m in self.stop_messages], [False])
+
+
+class TestParallelToolGroupAsyncSibling(unittest.IsolatedAsyncioTestCase):
+    async def test_sync_tool_result_does_not_wait_for_async_sibling_in_same_group(self):
+        """A sync tool's result triggers inference even while an async sibling in the same group is still running."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        sync_in_progress = FunctionCallInProgressFrame(
+            function_name="get_weather",
+            tool_call_id="sync_1",
+            arguments={},
+            cancel_on_interruption=True,
+            group_id="grp_1",
+        )
+        async_in_progress = FunctionCallInProgressFrame(
+            function_name="slow_job",
+            tool_call_id="async_1",
+            arguments={},
+            cancel_on_interruption=False,
+            group_id="grp_1",
+        )
+        sync_result = FunctionCallResultFrame(
+            function_name="get_weather",
+            tool_call_id="sync_1",
+            arguments={},
+            result={"temp": 72},
+        )
+
+        _, received_up = await run_test(
+            aggregator,
+            frames_to_send=[
+                sync_in_progress,
+                async_in_progress,
+                SleepFrame(sleep=0.05),
+                sync_result,
+                SleepFrame(sleep=0.05),
+            ],
+        )
+
+        context_frames = [f for f in received_up if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)
+
+    async def test_sync_tool_cancel_with_run_llm_does_not_wait_for_async_sibling(self):
+        """A cancelled sync tool with run_llm=True triggers inference even while an async sibling is still running."""
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        sync_in_progress = FunctionCallInProgressFrame(
+            function_name="get_weather",
+            tool_call_id="sync_1",
+            arguments={},
+            cancel_on_interruption=True,
+            group_id="grp_1",
+        )
+        async_in_progress = FunctionCallInProgressFrame(
+            function_name="slow_job",
+            tool_call_id="async_1",
+            arguments={},
+            cancel_on_interruption=False,
+            group_id="grp_1",
+        )
+        sync_cancel = FunctionCallCancelFrame(
+            function_name="get_weather",
+            tool_call_id="sync_1",
+            run_llm=True,
+        )
+
+        _, received_up = await run_test(
+            aggregator,
+            frames_to_send=[
+                sync_in_progress,
+                async_in_progress,
+                SleepFrame(sleep=0.05),
+                sync_cancel,
+                SleepFrame(sleep=0.05),
+            ],
+        )
+
+        context_frames = [f for f in received_up if isinstance(f, LLMContextFrame)]
+        self.assertEqual(len(context_frames), 1)

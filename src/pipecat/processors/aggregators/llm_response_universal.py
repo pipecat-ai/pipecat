@@ -2398,6 +2398,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                     run_llm = not any(
                         f is not None
                         and f.group_id == group_id
+                        and f.cancel_on_interruption
                         # We are now able to receive "updates", so the current
                         # frame can still be in the in progress list, and we need to
                         # ignore it.
@@ -2525,11 +2526,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if not frame.run_llm or self._user_speaking:
             return
 
-        # Hold off while siblings from the same LLM response are still running:
-        # whichever of them settles last runs inference, with this cancellation
-        # already in the context.
+        # Hold off while synchronous siblings from the same LLM response are
+        # still running: whichever of them settles last runs inference, with
+        # this cancellation already in the context. Async siblings run in the
+        # background with a placeholder already in context and must not block.
         if group_id and any(
-            f is not None and f.group_id == group_id
+            f is not None and f.group_id == group_id and f.cancel_on_interruption
             for f in self._function_calls_in_progress.values()
         ):
             return
