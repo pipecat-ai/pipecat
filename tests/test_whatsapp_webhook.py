@@ -225,6 +225,47 @@ class TestWhatsAppWebhook(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result)
         existing.disconnect.assert_awaited_once()
 
+    async def test_failed_connect_does_not_block_later_events(self):
+        """A connect that fails is reported only after the other events ran."""
+        client = self._client()
+        existing = _fake_connection()
+        client._ongoing_calls_map["wacid.OLD"] = existing
+
+        async def answer(call_id, action, sdp, from_):
+            return {"success": not (call_id == "wacid.B" and action == "accept")}
+
+        self.api.answer_call_to_whatsapp = AsyncMock(side_effect=answer)
+
+        body = _body(
+            [
+                _connect_change(
+                    _connect_call("wacid.A", "15551110001"),
+                    _connect_call("wacid.B", "15551110002"),
+                ),
+                _call_change(_terminate_call("wacid.OLD", "15551110003")),
+            ]
+        )
+        with self.assertRaisesRegex(Exception, "Failed to accept call"):
+            await self._handle(client, body)
+
+        self.assertEqual(self._callback_call_ids(), ["wacid.A"])
+        existing.disconnect.assert_awaited_once()
+        self.assertEqual(list(client._ongoing_calls_map), ["wacid.A"])
+
+    async def test_redelivered_connect_is_not_handled_twice(self):
+        """A redelivery of a connected call does not create a second connection."""
+        client = self._client()
+        body = _body([_connect_change(_connect_call("wacid.A", "15551110001"))])
+
+        self.assertTrue(await self._handle(client, body))
+        first = client._ongoing_calls_map["wacid.A"]
+        self.assertTrue(await self._handle(client, body))
+
+        self.assertEqual(self._callback_call_ids(), ["wacid.A"])
+        self.assertEqual(self.connection_cls.call_count, 1)
+        self.assertIs(client._ongoing_calls_map["wacid.A"], first)
+        first.disconnect.assert_not_awaited()
+
     async def test_valid_signature_is_accepted(self):
         client = self._client(secret=APP_SECRET)
         body = _body([_connect_change(_connect_call("wacid.A", "15551110001"))])

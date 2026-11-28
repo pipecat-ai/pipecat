@@ -218,7 +218,8 @@ class WhatsAppClient:
         Every connect and terminate event in the request is processed, including
         requests that batch several entries, changes or calls. Unsupported
         events (for example call status updates) are logged and ignored, so
-        WhatsApp does not retry the delivery.
+        WhatsApp does not retry the delivery. A connect event for a call that
+        is already connected (a redelivery) is skipped.
 
         Returns:
             bool: True if at least one connect or terminate event was handled and
@@ -226,8 +227,9 @@ class WhatsAppClient:
             or a terminate event could not be cleaned up.
 
         Raises:
-            Exception: If signature validation, connection establishment or API
-                calls fail
+            Exception: If signature validation fails, or if a connect event fails.
+                A failed connect does not stop the other events in the request;
+                the first connect error is raised after all of them are processed.
         """
         try:
             if self._whatsapp_secret:
@@ -237,12 +239,21 @@ class WhatsAppClient:
             # every event is processed before returning.
             handled_any = False
             all_succeeded = True
+            connect_errors: list[Exception] = []
             for entry in request.entry:
                 for change in entry.changes:
                     # Handle connect events
                     if isinstance(change.value, WhatsAppConnectCallValue):
                         for call in change.value.calls:
                             if call.event == "connect":
+                                if call.id in self._ongoing_calls_map:
+                                    # Redelivered event for a call that is already connected.
+                                    logger.debug(
+                                        f"Ignoring connect event for connected call {call.id}"
+                                    )
+                                    handled_any = True
+                                    continue
+
                                 logger.debug(f"Processing connect event for call {call.id}")
                                 try:
                                     connection = await self._handle_connect_event(call)
@@ -282,7 +293,8 @@ class WhatsAppClient:
                                     logger.error(
                                         f"Failed to handle connect event for call {call.id}: {connect_error}"
                                     )
-                                    raise
+                                    # Keep processing the rest of the delivery.
+                                    connect_errors.append(connect_error)
                             else:
                                 self._log_unsupported_event(call.event, call.id)
 
@@ -302,6 +314,11 @@ class WhatsAppClient:
                                 all_succeeded = all_succeeded and terminated
                             else:
                                 self._log_unsupported_event(call.event, call.id)
+
+            if connect_errors:
+                # Raised only after every event was processed, so WhatsApp can
+                # redeliver. Calls that did connect are skipped on redelivery.
+                raise connect_errors[0]
 
             if not handled_any:
                 logger.warning(f"No supported event found in webhook request: {request}")
