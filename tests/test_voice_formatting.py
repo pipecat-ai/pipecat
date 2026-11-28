@@ -460,9 +460,7 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         # A +/- tolerance is not a minus sign, matching expand_percentages.
         self.assertEqual(await expand_units("+/-0.5°C", "*"), "+/-0.5 degrees Celsius")
         # Negative ranges speak both signs and still read the dash as "to".
-        self.assertEqual(
-            await expand_units("-10–-5°C", "*"), "minus 10 to minus 5 degrees Celsius"
-        )
+        self.assertEqual(await expand_units("-10–-5°C", "*"), "minus 10 to minus 5 degrees Celsius")
         self.assertEqual(await expand_units("−5–10°C", "*"), "minus 5 to 10 degrees Celsius")
         self.assertEqual(
             await expand_units("-5km–-2km", "*"),
