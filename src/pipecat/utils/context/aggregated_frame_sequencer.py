@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.utils.context.word_completion_tracker import WordCompletionTracker
 from pipecat.utils.string import match_endofsentence
+from pipecat.utils.text.alnum_utils import alnum_only
 from pipecat.utils.text.markup_utils import strip_complete_markup
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
@@ -697,15 +698,21 @@ class AggregatedFrameSequencer:
                         raw_remaining = raw_remaining.rstrip()
                     if not remaining_text.strip():
                         remaining_text = ""
-                    # The words left, not the markup the service was sent for its
-                    # tags, are what the LLM's text has to hold, read without its
-                    # own tags.
-                    remaining_words = " ".join(strip_complete_markup(remaining_text).split())
+                    # Compare letters and digits rather than exact text: punctuation
+                    # at the cursor can already be attributed to the word before it.
+                    # A rewritten segment can say the same content with different
+                    # words, so no containment check is meaningful across one.
+                    remaining_words = alnum_only(strip_complete_markup(remaining_text))
                     llm_words = raw_remaining or ""
                     if self.llm_markup:
                         llm_words = self.llm_markup.sub("", llm_words)
-                    llm_words = " ".join(llm_words.split())
-                    if raw_remaining and remaining_words and remaining_words not in llm_words:
+                    llm_words = alnum_only(llm_words)
+                    if (
+                        raw_remaining
+                        and remaining_words
+                        and not slot.tracker.remaining_has_transformed_segment
+                        and remaining_words not in llm_words
+                    ):
                         logger.warning(
                             f"{self._name} force-complete: raw_remaining {repr(raw_remaining)} "
                             f"does not contain remaining_text {repr(remaining_text)}, discarding"
