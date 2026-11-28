@@ -1281,8 +1281,10 @@ class SegmentedSTTService(STTService):
     async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         segment = self._speech_buffer.stop()
 
-        # A service that can no longer work can't transcribe this segment.
-        if not self.is_usable:
+        # A service that can no longer work can't transcribe this segment, and
+        # an empty segment (e.g. when STT was muted for the whole utterance) has
+        # no audio to transcribe or bill.
+        if not self.is_usable or not segment:
             return
 
         pcm = segment + self._trailing_silence()
@@ -1375,6 +1377,9 @@ class SegmentedSTTService(STTService):
         # InputAudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
         else:
             self._user_id = ""
+
+        if self._muted:
+            return
 
         self._speech_buffer.append(frame.audio)
 
