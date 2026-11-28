@@ -44,6 +44,10 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 from pipecat.utils.types import NOT_GIVEN, NotGiven, assert_given
 
+# Seconds to wait for a pong before the websocket is treated as dead and the service
+# reconnects (the websockets default is 20).
+KEEPALIVE_PING_TIMEOUT = 60
+
 
 @dataclass
 class AWSTranscribeSTTSettings(STTSettings):
@@ -451,8 +455,10 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 presigned_url,
                 additional_headers=additional_headers,
                 subprotocols=[Subprotocol("mqtt")],
-                ping_interval=None,
-                ping_timeout=None,
+                # Keep the library's default ping_interval; bound the wait for a pong
+                # explicitly so a half-open socket is detected without depending on how
+                # quickly AWS answers pings.
+                ping_timeout=KEEPALIVE_PING_TIMEOUT,
                 compression=None,
             )
 
