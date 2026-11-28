@@ -1572,6 +1572,27 @@ class TestVoiceFormattingTransforms(unittest.IsolatedAsyncioTestCase):
         self.assertIn("3/15.", wf[0].text)
         self.assertIn("555-1234.", wf[0].text)
 
+    async def test_force_complete_with_untransformed_punctuation_records_frame_text(self):
+        """Document the display gap while preserving punctuation in context."""
+        seq = _seq()
+        text = "Yeah, I can help."
+        await seq.register_spoken(
+            _spoken_frame(text, raw_text=text),
+            "ctx1",
+            text,
+            append_to_context=True,
+        )
+
+        frames = seq.process_word("Yeah", pts=10, context_id="ctx1")
+        frames.extend(seq.force_complete("ctx1", last_word_pts=20))
+        word_frames = self._word_frames(frames)
+
+        self.assertEqual(" ".join(frame.text for frame in word_frames), "Yeah I can help.")
+        self.assertEqual(
+            " ".join(frame.raw_text or frame.text for frame in word_frames),
+            text,
+        )
+
 
 # ---------------------------------------------------------------------------
 # register_spoken — streaming (TOKEN mode): token-by-token sentence accumulation
