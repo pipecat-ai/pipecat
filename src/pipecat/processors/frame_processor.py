@@ -875,6 +875,23 @@ class FrameProcessor(BaseObject):
         elif isinstance(frame, (FrameProcessorResumeFrame, FrameProcessorResumeUrgentFrame)):
             await self.__resume(frame)
 
+    def _is_stale_frame(self, frame: Frame) -> bool:
+        """Tell whether a queued frame is stale and must be dropped unprocessed.
+
+        Checked for each non-system frame just before it is processed. An
+        interruption clears the frames waiting to be processed, but it is a
+        system frame and can overtake a frame that was pushed just before it
+        and is still in the input queue. Override this to drop such a frame
+        when it arrives after the interruption that should have cleared it.
+
+        Args:
+            frame: The frame about to be processed.
+
+        Returns:
+            True to drop the frame without processing it.
+        """
+        return False
+
     def _classify_error(self, exception: Exception) -> ErrorCategory | None:
         """Classify an exception this processor knows the shape of.
 
@@ -1393,6 +1410,9 @@ class FrameProcessor(BaseObject):
                 self.__should_block_frames = False
                 logger.trace(f"{self}: frame processing resumed")
 
-            await self.__process_frame(frame, direction, callback)
+            if self._is_stale_frame(frame):
+                logger.debug(f"{self}: dropping stale {frame}")
+            else:
+                await self.__process_frame(frame, direction, callback)
 
             self.__process_queue.task_done()

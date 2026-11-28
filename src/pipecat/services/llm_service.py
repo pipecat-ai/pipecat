@@ -455,6 +455,9 @@ class LLMService(AIService, Generic[TAdapter]):
         # Holds a speculative response until its turn is confirmed. Frames are
         # routed through it on the way out, in `push_frame`.
         self._speculation_gate = SpeculationGate(name=f"{self}::SpeculationGate")
+        # Id of the last interruption seen. A context frame created before it
+        # answers a turn the interruption voided. See `_is_stale_frame`.
+        self._last_interruption_frame_id = 0
         # Can drop what this service pushes or the function calls it runs.
         # See `_OutputGate`.
         self._output_gate: _OutputGate | None = None
@@ -1172,6 +1175,7 @@ class LLMService(AIService, Generic[TAdapter]):
             await self._output_gate.process_frame(self, frame)
 
         if isinstance(frame, InterruptionFrame):
+            self._last_interruption_frame_id = max(self._last_interruption_frame_id, frame.id)
             await self._handle_interruptions(frame)
         elif isinstance(frame, UserTurnResponseCancelFrame):
             await self._handle_user_turn_response_cancel(frame)
@@ -1285,6 +1289,20 @@ class LLMService(AIService, Generic[TAdapter]):
             await self.stop_ttfat_metrics()
 
         await self.push_frame(LLMTextFrame(text))
+
+    def _is_stale_frame(self, frame: Frame) -> bool:
+        """Drop a context frame created before the last interruption.
+
+        The user aggregator can push a context frame and broadcast an
+        interruption back to back, for example when the user resumes speaking
+        right after a turn's inference was triggered. The interruption is a
+        system frame and can overtake the context frame while both wait in
+        this service's input queue (or one upstream of it), so the
+        interruption finds nothing to cancel and the context frame then starts
+        a run for the voided turn. Frame ids increase in creation order, so a
+        context frame with a lower id than the last interruption is stale.
+        """
+        return isinstance(frame, LLMContextFrame) and frame.id < self._last_interruption_frame_id
 
     async def _handle_interruptions(self, _: InterruptionFrame):
         for function_name, entry in self._functions.items():
