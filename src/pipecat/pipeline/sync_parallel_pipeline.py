@@ -18,6 +18,7 @@ regular data frames.
 
 import asyncio
 import weakref
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from enum import Enum
 from itertools import chain
@@ -66,16 +67,24 @@ class SyncParallelPipelineSource(FrameProcessor):
 
     Forwards downstream frames into the pipeline and captures upstream frames
     into a queue so the parent SyncParallelPipeline can release them later.
+    Upstream system frames are handed to ``push_system_frame`` instead, when given.
     """
 
-    def __init__(self, upstream_queue: asyncio.Queue):
+    def __init__(
+        self,
+        upstream_queue: asyncio.Queue,
+        push_system_frame: Callable[[Frame, FrameDirection], Coroutine] | None = None,
+    ):
         """Initialize the sync parallel pipeline source.
 
         Args:
             upstream_queue: Queue for collecting upstream frames from the pipeline.
+            push_system_frame: Coroutine function that pushes an upstream system
+                frame out of the parent pipeline.
         """
         super().__init__(enable_direct_mode=True)
         self._up_queue = upstream_queue
+        self._push_system_frame = push_system_frame
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and route them based on direction.
@@ -88,7 +97,11 @@ class SyncParallelPipelineSource(FrameProcessor):
 
         match direction:
             case FrameDirection.UPSTREAM:
-                await self._up_queue.put(frame)
+                # Only system frames skip the queue: wait_for_sync() reads it up to each SyncFrame.
+                if self._push_system_frame and isinstance(frame, SystemFrame):
+                    await self._push_system_frame(frame, direction)
+                else:
+                    await self._up_queue.put(frame)
             case FrameDirection.DOWNSTREAM:
                 await self.push_frame(frame, direction)
 
@@ -190,7 +203,7 @@ class SyncParallelPipeline(BasePipeline):
             # We add a source at the beginning of the pipeline and a sink at the end.
             up_queue = asyncio.Queue()
             down_queue = asyncio.Queue()
-            source = SyncParallelPipelineSource(up_queue)
+            source = SyncParallelPipelineSource(up_queue, self._push_frame_once)
             sink = SyncParallelPipelineSink(down_queue)
 
             # Keep track of sources and sinks. We also keep the output queue of
