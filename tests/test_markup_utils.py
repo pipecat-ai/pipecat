@@ -84,6 +84,7 @@ class TestStripCompleteMarkupHelper(unittest.TestCase):
     def test_strip_complete_markup_strips_numeric_pause_tag(self):
         self.assertEqual(strip_complete_markup("Hello <500.0> world"), "Hello  world")
         self.assertEqual(strip_complete_markup("Hello <500> world"), "Hello  world")
+        self.assertEqual(strip_complete_markup("<400ms> <cheerful> Bye!"), "  Bye!")
 
     def test_strip_complete_markup_strips_closing_tag_and_comment(self):
         self.assertEqual(strip_complete_markup("a <!-- note --> b </spell>"), "a  b ")
