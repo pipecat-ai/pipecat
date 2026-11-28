@@ -348,6 +348,38 @@ class TestToolCallTracking(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(delivered), 1)
         self.assertIs(delivered[0][0], frame)
 
+    async def test_task_spawned_by_tool_queues_frames_after_tool_returns(self):
+        """Frames queued by a background task spawned in a @tool are delivered after the tool returns."""
+        worker = self._track(_create_worker())
+        release_bg = asyncio.Event()
+        bg_task: asyncio.Task | None = None
+        bg_frame = _make_frame("background result")
+
+        @tool
+        async def start_lookup(self, params):
+            """Starts a background lookup task and returns immediately."""
+            nonlocal bg_task
+
+            async def _background():
+                await release_bg.wait()
+                await self.queue_frame(bg_frame)
+
+            bg_task = asyncio.create_task(_background())
+
+        wrapped = worker._track_tool_call(start_lookup.__get__(worker))
+        await wrapped(MagicMock())
+
+        self.assertFalse(worker.tool_call_active)
+        self.assertIsNotNone(bg_task)
+
+        release_bg.set()
+        await bg_task
+
+        delivered = _get_delivered_frames(worker)
+        self.assertEqual(len(delivered), 1)
+        self.assertIs(delivered[0][0], bg_frame)
+        self.assertEqual(len(worker._deferred_frames), 0)
+
 
 class TestPipelineWorkerArguments(unittest.TestCase):
     def _llm(self):
