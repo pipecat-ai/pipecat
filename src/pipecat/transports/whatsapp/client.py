@@ -215,22 +215,45 @@ class WhatsAppClient:
             raw_body: Optional bytes containing the raw request body.
             sha256_signature: Optional X-Hub-Signature-256 header value from the request.
 
+        Every connect and terminate event in the request is processed, including
+        requests that batch several entries, changes or calls. Unsupported
+        events (for example call status updates) are logged and ignored, so
+        WhatsApp does not retry the delivery. A connect event for a call that
+        is already connected (a redelivery) is skipped.
+
         Returns:
-            bool: True if the webhook request was handled successfully, False otherwise
+            bool: True if at least one connect or terminate event was handled and
+            all terminate events succeeded. False if no supported event was found
+            or a terminate event could not be cleaned up.
 
         Raises:
-            ValueError: If the webhook request contains no supported events
-            Exception: If connection establishment or API calls fail
+            Exception: If signature validation fails, or if a connect event fails.
+                A failed connect does not stop the other events in the request;
+                the first connect error is raised after all of them are processed.
         """
         try:
             if self._whatsapp_secret:
                 await self._validate_whatsapp_webhook_request(raw_body, sha256_signature)
+
+            # A single delivery may batch several entries, changes and calls, so
+            # every event is processed before returning.
+            handled_any = False
+            all_succeeded = True
+            connect_errors: list[Exception] = []
             for entry in request.entry:
                 for change in entry.changes:
                     # Handle connect events
                     if isinstance(change.value, WhatsAppConnectCallValue):
                         for call in change.value.calls:
                             if call.event == "connect":
+                                if call.id in self._ongoing_calls_map:
+                                    # Redelivered event for a call that is already connected.
+                                    logger.debug(
+                                        f"Ignoring connect event for connected call {call.id}"
+                                    )
+                                    handled_any = True
+                                    continue
+
                                 logger.debug(f"Processing connect event for call {call.id}")
                                 try:
                                     connection = await self._handle_connect_event(call)
@@ -265,12 +288,15 @@ class WhatsAppClient:
                                             )
                                             # Continue execution despite callback failure
 
-                                    return True
+                                    handled_any = True
                                 except Exception as connect_error:
                                     logger.error(
                                         f"Failed to handle connect event for call {call.id}: {connect_error}"
                                     )
-                                    raise
+                                    # Keep processing the rest of the delivery.
+                                    connect_errors.append(connect_error)
+                            else:
+                                self._log_unsupported_event(call.event, call.id)
 
                     # Handle terminate events
                     elif isinstance(change.value, WhatsAppTerminateCallValue):
@@ -278,22 +304,36 @@ class WhatsAppClient:
                             if call.event == "terminate":
                                 logger.debug(f"Processing terminate event for call {call.id}")
                                 try:
-                                    return await self._handle_terminate_event(call)
+                                    terminated = await self._handle_terminate_event(call)
                                 except Exception as terminate_error:
                                     logger.error(
                                         f"Failed to handle terminate event for call {call.id}: {terminate_error}"
                                     )
                                     raise
+                                handled_any = True
+                                all_succeeded = all_succeeded and terminated
+                            else:
+                                self._log_unsupported_event(call.event, call.id)
 
-            # No supported events found
-            error_msg = "No supported event found in webhook request"
-            logger.warning(f"{error_msg}: {request}")
-            raise ValueError(error_msg)
+            if connect_errors:
+                # Raised only after every event was processed, so WhatsApp can
+                # redeliver. Calls that did connect are skipped on redelivery.
+                raise connect_errors[0]
+
+            if not handled_any:
+                logger.warning(f"No supported event found in webhook request: {request}")
+                return False
+
+            return all_succeeded
 
         except Exception as e:
             logger.error(f"Error processing webhook request: {e}")
             logger.debug(f"Webhook request details: {request}")
             raise
+
+    def _log_unsupported_event(self, event: str, call_id: str) -> None:
+        """Log a call event that this client does not act on (e.g. status updates)."""
+        logger.debug(f"Ignoring unsupported WhatsApp call event '{event}' for call {call_id}")
 
     def _filter_sdp_for_whatsapp(self, sdp: str) -> str:
         """Filter SDP to be compatible with WhatsApp requirements.
