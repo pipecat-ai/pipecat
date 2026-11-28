@@ -883,6 +883,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         return settings.model_copy(update={"reasoning": None})
 
     async def _send_session_update(self):
+        """Send the session configuration, and return it for the ``llm_setup`` span."""
         # Mutate a copy: the stored session_properties is read elsewhere (e.g.
         # _service_tools) and must stay intact.
         settings = assert_given(self._settings.session_properties).model_copy()
@@ -910,6 +911,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
         outgoing = self._strip_unsupported_reasoning(settings)
 
         await self.send_client_event(events.SessionUpdateEvent(session=outgoing))
+        return outgoing
 
     #
     # inbound server event handling
@@ -969,7 +971,7 @@ class OpenAIRealtimeLLMService(LLMService[OpenAIRealtimeLLMAdapter]):
     async def _handle_evt_session_created(self, evt):
         # session.created is received right after connecting. Send a message
         # to configure the session properties.
-        await self._send_session_update()
+        return await self._send_session_update()
 
     async def _handle_evt_session_updated(self, evt):
         # If this is our first context frame, run the LLM
