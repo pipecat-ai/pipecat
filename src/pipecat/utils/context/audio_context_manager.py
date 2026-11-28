@@ -80,6 +80,7 @@ class AudioContextManager:
             interruptible: Whether :meth:`reset` drops the context while it waits to play.
         """
         self._contexts[context_id] = asyncio.Queue()
+        self._remainders.pop(context_id, None)
         frame = AudioContextFrame(context_id)
         frame.interruptible = interruptible
         await self._queue.put(frame)

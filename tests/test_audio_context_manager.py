@@ -154,3 +154,17 @@ async def test_remove_forgets_the_context_and_its_split_sample():
     await manager.create("a")
     await manager.append("a", _audio(2))
     assert (await manager.get("a", timeout=1)).audio == b"\x01\x01"
+
+
+@pytest.mark.asyncio
+async def test_recreating_context_discards_held_back_split_sample():
+    """Recreating a context starts it with no sample held from the old one."""
+    manager = AudioContextManager()
+    await manager.create("a")
+    await manager.append("a", _audio(3))
+    await manager.create("a")
+    await manager.append("a", TTSAudioRawFrame(b"\x02\x02", 16000, 1))
+
+    assert (await manager.get("a", timeout=1)).audio == b"\x02\x02"
+    with pytest.raises(TimeoutError):
+        await manager.get("a", timeout=0.05)
