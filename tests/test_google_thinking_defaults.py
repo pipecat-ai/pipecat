@@ -93,9 +93,12 @@ def test_gemini_38_flash_uses_the_lowest_level_it_accepts():
     assert _applied_thinking_config("gemini-3.8-flash") == {"thinking_level": "low"}
 
 
-def test_gemini_4_argon_uses_the_lowest_level_it_accepts():
-    """4 Argon rejects minimal outright, so it gets low instead."""
-    assert _applied_thinking_config("gemini-4-argon") == {"thinking_level": "low"}
+@pytest.mark.parametrize(
+    "model", ["gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon"]
+)
+def test_gemini_4_models_use_the_lowest_level_they_accept(model):
+    """Gemini 4 models reject minimal outright, so they get low instead."""
+    assert _applied_thinking_config(model) == {"thinking_level": "low"}
 
 
 def test_every_id_form_of_a_listed_model_is_recognized():

@@ -27,9 +27,10 @@ T = TypeVar("T")
 # The lowest thinking setting Google documents for each model, sent when the
 # caller doesn't configure ``thinking``, keyed by model name. The 2.5 models
 # take a budget, where 0 turns thinking off and 2.5 Pro's minimum is 128; later
-# models take a level. 3.7 Flash, 3.8 Flash, 3.1 Pro and 4 Argon reject
-# "minimal", and the Flash-Lite models already default to it. Aliases such as
-# ``gemini-flash-latest`` are left out, since the model they name changes.
+# models take a level. 3.7 Flash, 3.8 Flash, 3.1 Pro and the Gemini 4 models
+# reject "minimal", and the Flash-Lite models already default to it. Aliases
+# such as ``gemini-flash-latest`` are left out, since the model they name
+# changes.
 _THINKING_DEFAULTS: dict[str, dict[str, Any]] = {
     "gemini-2.5-flash": {"thinking_budget": 0},
     "gemini-2.5-flash-lite": {"thinking_budget": 0},
@@ -44,6 +45,9 @@ _THINKING_DEFAULTS: dict[str, dict[str, Any]] = {
     "gemini-3.7-flash": {"thinking_level": "low"},
     "gemini-3.8-flash": {"thinking_level": "low"},
     "gemini-4-argon": {"thinking_level": "low"},
+    "gemini-4-carbon": {"thinking_level": "low"},
+    "gemini-4-hydrogen": {"thinking_level": "low"},
+    "gemini-4-neon": {"thinking_level": "low"},
     "gemma-4-26b-a4b-it": {"thinking_level": "minimal"},
     "gemma-4-31b-it": {"thinking_level": "minimal"},
 }
