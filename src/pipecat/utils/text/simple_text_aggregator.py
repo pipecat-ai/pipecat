@@ -11,6 +11,7 @@ until it finds an end-of-sentence marker, making it suitable for basic TTS
 text processing scenarios.
 """
 
+import re
 from collections.abc import AsyncIterator
 from enum import Enum, auto
 
@@ -165,8 +166,9 @@ class SimpleTextAggregator(BaseTextAggregator):
     def _advance_lookahead(self, char: str, *, is_punctuation: bool) -> bool:
         """Advance the pending candidate and decide whether to check its boundary.
 
-        Check once at the first non-whitespace character, then once more when
-        the following word ends. Opening quotes or symbols do not start a word.
+        Check once at the first non-whitespace character after any closing
+        Markdown marker, then once more when the following word ends. Opening
+        quotes or symbols do not start a word.
 
         If the first tokenizer check finds no boundary::
 
@@ -190,6 +192,13 @@ class SimpleTextAggregator(BaseTextAggregator):
 
             case _LookaheadState.AWAITING_CHARACTER:
                 if char.isspace() or is_punctuation:
+                    return False
+                # Wait for the rest of a closing marker ("**Hi!**") while a span may be open.
+                if (
+                    char in "*_"
+                    and not self._text[-2:-1].isspace()
+                    and re.search(r"(?:^|\s)[*_]", self._text[:-1])
+                ):
                     return False
                 self._lookahead_state = (
                     _LookaheadState.IN_WORD if char.isalnum() else _LookaheadState.AWAITING_WORD
