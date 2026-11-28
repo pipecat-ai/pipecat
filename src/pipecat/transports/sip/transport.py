@@ -33,9 +33,12 @@ errors and warnings carry ``errorMsg``. Daily's ``provider`` and
 ``on_connected``, ``on_left``, ``on_before_leave``, ``on_error``,
 ``on_call_state_updated``. Methods: ``start_dialout``, ``stop_dialout``,
 ``send_dtmf``, ``sip_call_transfer``, ``sip_refer``, and the SIP-only
-``sip_attended_transfer`` — all return ``str | None`` errors and never raise.
+``sip_attended_transfer`` and ``set_hangup_headers`` — all return
+``str | None`` errors and never raise. ``on_sip_info`` is a SIP-only event:
+a SIP INFO request the far end sent on the call.
 
-**Equivalent with deltas:** ``sip_refer`` sends a true SIP REFER;
+**Equivalent with deltas:** ``sip_refer`` sends a true SIP REFER, and
+takes Daily's ``sipHeaders`` to carry call context to the destination;
 ``sip_call_transfer`` is **rejected with an error for now** — Daily's
 version re-anchors the call in its cloud, and substituting a REFER
 would silently change the semantics (mediated transfer, with the bot
@@ -201,10 +204,15 @@ class SIPParams(TransportParams):
         auto_answer: Answer inbound calls as soon as they arrive. Video
             is accepted when the params enable a video direction. With
             ``auto_answer=False`` the transport leaves the call ringing:
-            answer or decline it on the application's own
-            :class:`~pipecat.transports.sip.connection.SIPConnection`
-            (``connection.answer()`` / ``connection.reject()``) from an
-            ``incoming`` event handler.
+            answer or decline it on :attr:`SIPTransport.connection` from
+            an ``incoming`` event handler::
+
+                @transport.connection.event_handler("incoming")
+                async def on_incoming(connection, call):
+                    if call["sipFrom"] in blocked:
+                        await connection.reject(603)
+                    else:
+                        await connection.answer()
         trunk: Domain (or host:port) that turns a ``phoneNumber``
             dial-out into ``sip:+E164@trunk``. Without it, dial-out
             requires a full ``sipUri``.
@@ -571,6 +579,7 @@ class SIPTransport(BaseTransport):
         self._register_event_handler("on_dialout_error")
         self._register_event_handler("on_dialout_warning")
         self._register_event_handler("on_dtmf_event")
+        self._register_event_handler("on_sip_info")
         self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_joined")
         self._register_event_handler("on_participant_left")
@@ -586,9 +595,22 @@ class SIPTransport(BaseTransport):
         connection.add_event_handler("call_closed", self._on_call_closed)
         connection.add_event_handler("call_failed", self._on_call_failed)
         connection.add_event_handler("dtmf", self._on_dtmf)
+        connection.add_event_handler("info", self._on_info)
         connection.add_event_handler("remote_hold", self._on_remote_hold)
         connection.add_event_handler("renegotiated", self._on_renegotiated)
         connection.add_event_handler("audio_warning", self._on_audio_warning)
+
+    @property
+    def connection(self) -> SIPConnection:
+        """The SIP connection the call runs over.
+
+        The same object whether the application built it or
+        :func:`pipecat.runner.utils.create_transport` did. It gives what
+        the transport does not wrap: the ``incoming`` event with
+        ``answer()`` and ``reject()`` for a transport that does not
+        answer by itself, and call facts such as ``media_encrypted``.
+        """
+        return self._connection
 
     def input(self) -> FrameProcessor:
         """The input frame processor, created on first use."""
@@ -660,6 +682,35 @@ class SIPTransport(BaseTransport):
             return "no such dial-out session"
         try:
             await self._connection.hangup()
+        except Exception as e:
+            return str(e)
+        return None
+
+    async def set_hangup_headers(self, headers: dict | None) -> str | None:
+        """Set the custom headers for the BYE that ends the active call.
+
+        A contact-center platform reads from the bot's BYE where to route
+        the caller next. The headers are sent whenever this side ends the
+        call: on an ``EndFrame``, on :meth:`stop_dialout`, or when the
+        pipeline is cancelled. Call it at any time once the call is
+        connected; each call replaces the headers set before, and None
+        clears them. A SIP-only addition; see
+        :meth:`SIPConnection.set_hangup_headers
+        <pipecat.transports.sip.connection.SIPConnection.set_hangup_headers>`.
+
+        Example::
+
+            await transport.set_hangup_headers({"X-RouteType": "queue", "X-RouteValue": "billing"})
+            await task.queue_frames([TTSSpeakFrame("Connecting you now."), EndFrame()])
+
+        Args:
+            headers: Header names to values, or None to send none.
+
+        Returns:
+            An error description, or None on success.
+        """
+        try:
+            self._connection.set_hangup_headers(headers)
         except Exception as e:
             return str(e)
         return None
@@ -741,9 +792,25 @@ class SIPTransport(BaseTransport):
         registrar, not a carrier PSTN trunk. For a transfer that confirms the
         target answered first, see :meth:`sip_attended_transfer`.
 
+        ``sipHeaders`` carries call context to the destination, so the
+        caller does not have to repeat it: a contact center's
+        ``User-to-User`` data, or a case number in an ``X-`` header. The
+        headers travel attached to the destination URI, and the far end
+        sets them on the call it places. Put them all in ``sipHeaders``:
+        a ``toEndPoint`` that already carries headers (after a ``?``) is
+        refused when ``sipHeaders`` is given too.
+
+        Example::
+
+            await transport.sip_refer({
+                "toEndPoint": "sip:agents@pbx.example.com",
+                "sipHeaders": {"User-to-User": "56a390f3;encoding=hex", "X-Case": "1234"},
+            })
+
         Args:
             settings: ``toEndPoint`` (the destination URI); optional
-                ``sessionId``.
+                ``sessionId`` and ``sipHeaders`` (header names to string
+                values).
 
         Returns:
             An error description, or None on success.
@@ -770,11 +837,15 @@ class SIPTransport(BaseTransport):
         Args:
             settings: ``toEndPoint`` (the target URI); optional ``sessionId``
                 (the leg to transfer; defaults to the active call).
+                ``sipHeaders`` is refused: an attended transfer carries no
+                context to the target.
 
         Returns:
             An error description, or None on success.
         """
         settings = settings or {}
+        if settings.get("sipHeaders"):
+            return "sipHeaders is not supported on an attended transfer; use sip_refer"
         session_id = (
             settings.get("sessionId") or self._dial_out_session_id or self._dial_in_session_id
         )
@@ -887,8 +958,22 @@ class SIPTransport(BaseTransport):
         to_end_point = settings.get("toEndPoint")
         if not to_end_point:
             return "Can't transfer SIP call if 'toEndPoint' is not set"
+        sip_headers = settings.get("sipHeaders")
+        if sip_headers is not None:
+            if not isinstance(sip_headers, dict) or not all(
+                isinstance(value, str) for value in sip_headers.values()
+            ):
+                return "sipHeaders must be a dict of header names to string values"
+            if sip_headers and "?" in to_end_point:
+                return (
+                    "SIP headers were given in both toEndPoint and sipHeaders: "
+                    "put them all in sipHeaders"
+                )
         try:
-            await self._connection.transfer(to_end_point)
+            if sip_headers:
+                await self._connection.transfer(to_end_point, headers=sip_headers)
+            else:
+                await self._connection.transfer(to_end_point)
         except Exception as e:
             return str(e)
         return None
@@ -1002,6 +1087,12 @@ class SIPTransport(BaseTransport):
             "error": data.get("error"),
         }
         await self._call_event_handler("on_dialout_error", error)
+
+    async def _on_info(self, connection, data: dict):
+        # A received SIP INFO request, passed on as it arrived: sessionId,
+        # contentType and the raw body. DTMF sent as INFO is not one of
+        # these; it arrives through _on_dtmf.
+        await self._call_event_handler("on_sip_info", data)
 
     async def _on_dtmf(self, connection, digit_event, session_id):
         # No "method" key: the binding's DigitEvent does not say how the

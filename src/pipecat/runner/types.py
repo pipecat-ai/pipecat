@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
+from pipecat.transports.sip.media_encryption import SIPMediaEncryption
 from pipecat.utils.deprecation import deprecated, warn_deprecated
 from pipecat.utils.file_storage import FileStorage
 
@@ -318,6 +319,10 @@ class SIPRunnerArguments(RunnerArguments):
             ``("opus/48000/2", "PCMU/8000/1")``); None uses the stack default.
         auth_user: Digest username when the credential store keys it
             differently from ``user`` (credential-list trunks).
+        media_encryption: Whether call media is encrypted, a
+            :class:`~pipecat.transports.sip.media_encryption.SIPMediaEncryption`.
+            ``NONE`` accepts a received call either way; ``SRTP`` encrypts
+            every call and refuses a received one that offers none.
         extra_params: Extra baresip account parameters, each a
             ``"key=value"`` string, appended verbatim to the SIP
             address-of-record — e.g. ``("medianat=stun",
@@ -331,6 +336,7 @@ class SIPRunnerArguments(RunnerArguments):
             registration entirely (trunk mode).
         rtp_timeout: Seconds without received RTP after which a call is
             declared dead and closed; 0 disables detection.
+            Defaults to 30.
         instance_id: A canonical lowercase UUID identifying this endpoint
             across restarts (RFC 5626 ``+sip.instance``); None sends no
             instance parameter.
@@ -343,7 +349,8 @@ class SIPRunnerArguments(RunnerArguments):
             address per destination. Set it for a registrar on loopback
             ("127.0.0.1") or one address of a multi-homed host. See
             :class:`~pipecat.transports.sip.connection.SIPConnection`.
-        sip_port: A fixed local SIP port (TLS on the next one); None binds an
+        sip_port: A fixed local SIP port, for inbound calls over UDP and TCP
+            (the stack cannot accept TLS connections); None binds an
             ephemeral port. Set it for trunk mode behind a carrier that
             routes to a fixed host:port.
         jitter_buffer_mode: The receive jitter buffer: "off", "fixed", or
@@ -353,6 +360,10 @@ class SIPRunnerArguments(RunnerArguments):
             what each mode costs.
         jitter_buffer_ms: ``(min, max)`` in milliseconds for a fixed or
             adaptive buffer; None with no mode selects the default.
+        extra_config: Extra lines for the SIP stack's configuration, each a
+            ``"key value"`` string in baresip's own syntax, appended
+            verbatim; None adds nothing. See
+            :class:`~pipecat.transports.sip.connection.SIPConnection`.
     """
 
     user: str
@@ -363,7 +374,7 @@ class SIPRunnerArguments(RunnerArguments):
     auth_user: str | None = None
     extra_params: tuple | None = None
     reg_interval: int = 240
-    rtp_timeout: int = 0
+    rtp_timeout: int = 30
     instance_id: str | None = None
     native_log_level: str = "warning"
     sip_trace: bool = False
@@ -371,6 +382,8 @@ class SIPRunnerArguments(RunnerArguments):
     sip_port: int | None = None
     jitter_buffer_mode: str | None = None
     jitter_buffer_ms: tuple | None = None
+    media_encryption: SIPMediaEncryption = SIPMediaEncryption.NONE
+    extra_config: tuple | None = None
 
 
 @dataclass

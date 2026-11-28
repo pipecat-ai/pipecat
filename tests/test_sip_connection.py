@@ -8,6 +8,7 @@
 
 import asyncio
 import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -21,6 +22,7 @@ from baresip.events import Event, StackEvent  # noqa: E402
 
 import pipecat.transports.sip.connection as sip_connection  # noqa: E402
 from pipecat.transports.sip.connection import SIPConnection, _SharedRuntime  # noqa: E402
+from pipecat.transports.sip.media_encryption import SIPMediaEncryption  # noqa: E402
 
 EVENT_TIMEOUT = 2.0
 
@@ -47,6 +49,8 @@ def make_fake_call(handle=0x1, peer="sip:2002@example.com", headers=None):
     call.off = Mock()
     call.on_dtmf = Mock()
     call.off_dtmf = Mock()
+    call.on_info = Mock()
+    call.off_info = Mock()
     call.on_audio_warning = Mock()
     call.off_audio_warning = Mock()
     return call
@@ -120,6 +124,16 @@ async def test_connect_registers_and_emits_registered(env):
     await asyncio.wait_for(arrived.wait(), EVENT_TIMEOUT)
     assert payloads == ["sip:1001@example.com"]
     assert connection.is_connected
+
+
+@pytest.mark.asyncio
+async def test_rtp_timeout_defaults_to_thirty_seconds(env):
+    connection = make_connection()
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert config.rtp_timeout == 30
 
 
 @pytest.mark.asyncio
@@ -277,6 +291,51 @@ async def test_conflicting_sip_port_raise(env):
         await second.connect()
 
 
+@pytest.mark.asyncio
+async def test_extra_config_unset_leaves_the_config_text_as_before(env):
+    connection = make_connection(sip_port=5060)
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert config.extra_config_text == (
+        "sip_listen 0.0.0.0:5060\naudio_jitter_buffer_type fixed\naudio_jitter_buffer_ms 40-60\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_extra_config_lines_follow_the_transports_own(env):
+    connection = make_connection(
+        sip_port=5060, extra_config=("sip_verify_server no", "rtp_ports 20000-20100")
+    )
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert config.extra_config_text == (
+        "sip_listen 0.0.0.0:5060\naudio_jitter_buffer_type fixed\naudio_jitter_buffer_ms 40-60\n"
+        "sip_verify_server no\nrtp_ports 20000-20100\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "extra_config", ["sip_verify_server no", ("",), ("a b\nc d",), ("a\x00b",), (5,)]
+)
+def test_extra_config_rejects_malformed_values(extra_config):
+    with pytest.raises(ValueError, match="extra_config"):
+        make_connection(extra_config=extra_config)
+
+
+@pytest.mark.asyncio
+async def test_conflicting_extra_config_raises(env):
+    first = make_connection()
+    await first.connect()
+
+    second = make_connection(user="1002", extra_config=("sip_verify_server no",))
+    with pytest.raises(ValueError, match="extra_config"):
+        await second.connect()
+
+
 def test_extra_params_render_into_the_account_aor():
     connection = make_connection(
         extra_params=("medianat=ice", "stunserver=stun:stun.example.com:3478")
@@ -289,6 +348,55 @@ def test_extra_params_render_into_the_account_aor():
     aor = connection._account.aor()
     assert "medianat=ice" in aor
     assert "stunserver=stun:stun.example.com:3478" in aor
+
+
+def test_media_encryption_defaults_to_none_and_leaves_the_account_as_before():
+    connection = make_connection()
+
+    assert connection._account.media_encryption == "none"
+    assert connection._account.requires_srtp is False
+    assert "mediaenc" not in connection._account.aor()
+    assert connection._account_kwargs["media_encryption"] is SIPMediaEncryption.NONE
+
+
+@pytest.mark.parametrize("value", [SIPMediaEncryption.SRTP, "srtp", "SRTP"])
+def test_media_encryption_srtp_reaches_the_account(value):
+    connection = make_connection(media_encryption=value)
+
+    assert connection._account.media_encryption == "srtp"
+    assert connection._account.requires_srtp is True
+    assert connection._account_kwargs["media_encryption"] is SIPMediaEncryption.SRTP
+    # The consult leg of a transfer is on the same account, so it encrypts too.
+    assert connection.consult_connection()._account.media_encryption == "srtp"
+
+
+@pytest.mark.parametrize("value", ["dtls", "", None, 0, True])
+def test_media_encryption_rejects_an_unknown_value(value):
+    with pytest.raises(ValueError, match="media encryption must be one of 'none', 'srtp'"):
+        make_connection(media_encryption=value)
+
+
+@pytest.mark.asyncio
+async def test_conflicting_media_encryption_on_one_account_raises(env):
+    first = make_connection()
+    await first.connect()
+
+    second = make_connection(media_encryption=SIPMediaEncryption.SRTP)
+    with pytest.raises(ValueError, match="media_encryption"):
+        await second.connect()
+
+
+@pytest.mark.asyncio
+async def test_media_encrypted_follows_the_active_call(env):
+    connection = make_connection()
+    await connection.connect()
+    assert connection.media_encrypted is False  # no call
+
+    call = await _answered_outbound_call(env, connection)
+    call.media_encrypted = False
+    assert connection.media_encrypted is False
+    call.media_encrypted = True
+    assert connection.media_encrypted is True
 
 
 @pytest.mark.asyncio
@@ -531,6 +639,23 @@ async def test_call_events_relay_established_and_closed(env):
 
 
 @pytest.mark.asyncio
+async def test_call_closed_by_the_audio_timeout_reports_rtp_timeout(env):
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    env.ua.dial.return_value = call
+    closed_payloads, closed = capture(connection, "call_closed")
+
+    await connection.dial("sip:9196@example.com")
+    listener = call.listeners[0]
+
+    listener(StackEvent(event=Event.CALL_CLOSED, call=call.handle, text="rtp stream error"))
+    await asyncio.wait_for(closed.wait(), EVENT_TIMEOUT)
+    assert closed_payloads[0]["reason"] == "rtp timeout"
+    assert closed_payloads[0]["transferred"] is False
+
+
+@pytest.mark.asyncio
 async def test_call_closed_flags_transfer_from_reason(env):
     # The connection derives a `transferred` flag from the stack's exact
     # transfer-success close reason, so a completed transfer (blind or Replaces)
@@ -711,6 +836,233 @@ async def test_disconnect_hangs_up_active_call(env):
     env.runtime.close.assert_awaited_once()
     assert not connection.has_active_call
     assert not connection.is_connected
+
+
+async def _answered_outbound_call(env, connection):
+    """Dial and report the far end's answer; returns the fake call."""
+    call = make_fake_call()
+    env.ua.dial.return_value = call
+    await connection.dial("sip:9196@example.com")
+    call.listeners[0](StackEvent(event=Event.CALL_ANSWERED, call=call.handle))
+    return call
+
+
+@pytest.mark.asyncio
+async def test_hangup_without_headers_calls_the_binding_bare(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+
+    await connection.hangup()
+
+    call.hangup.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_hangup_sends_the_headers_set_for_it(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+
+    connection.set_hangup_headers({"X-RouteType": "queue", "X-RouteValue": 7})
+    await connection.hangup()
+
+    call.hangup.assert_awaited_once_with(headers={"X-RouteType": "queue", "X-RouteValue": "7"})
+
+
+@pytest.mark.asyncio
+async def test_disconnect_sends_the_headers_set_for_hangup(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+
+    connection.set_hangup_headers({"X-RouteType": "queue"})
+    await connection.disconnect()
+
+    call.hangup.assert_awaited_once_with(headers={"X-RouteType": "queue"})
+
+
+@pytest.mark.asyncio
+async def test_hangup_headers_are_replaced_and_cleared(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+
+    connection.set_hangup_headers({"X-RouteType": "queue"})
+    connection.set_hangup_headers({"X-RouteType": "agent"})
+    assert connection._hangup_headers == {"X-RouteType": "agent"}
+
+    connection.set_hangup_headers(None)
+    await connection.hangup()
+
+    call.hangup.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_hangup_headers_need_an_answered_call(env):
+    connection = make_connection()
+    await connection.connect()
+    with pytest.raises(RuntimeError, match="no active call"):
+        connection.set_hangup_headers({"X-RouteType": "queue"})
+
+    env.ua.dial.return_value = make_fake_call()
+    await connection.dial("sip:9196@example.com")
+    with pytest.raises(RuntimeError, match="answered"):
+        connection.set_hangup_headers({"X-RouteType": "queue"})
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"": "v"},
+        {"X Bad": "v"},
+        {"X-Bad:": "v"},
+        {"X-Bad\n": "v"},
+        {"X-Ok": "a\r\nInjected: 1"},
+        {"X-Ok": None},
+    ],
+)
+@pytest.mark.asyncio
+async def test_hangup_headers_are_checked_when_set(env, headers):
+    connection = make_connection()
+    await connection.connect()
+    await _answered_outbound_call(env, connection)
+
+    with pytest.raises(ValueError):
+        connection.set_hangup_headers(headers)
+    assert connection._hangup_headers is None
+
+
+@pytest.mark.asyncio
+async def test_hangup_headers_too_long_for_the_stack_are_refused_when_set(env):
+    connection = make_connection()
+    await connection.connect()
+    await _answered_outbound_call(env, connection)
+
+    # "X-Fits: <value>\r\n" is the value plus ten bytes; 2048 is one too many.
+    with pytest.raises(ValueError, match="less than 2048 bytes, got 2048"):
+        connection.set_hangup_headers({"X-Fits": "a" * 2038})
+    assert connection._hangup_headers is None
+
+    connection.set_hangup_headers({"X-Fits": "a" * 2037})
+    assert connection._hangup_headers == {"X-Fits": "a" * 2037}
+
+
+@pytest.mark.asyncio
+async def test_disconnect_finishes_when_the_stack_refuses_the_hangup_headers(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+    connection.set_hangup_headers({"X-RouteType": "queue"})
+
+    async def hangup(headers=None):
+        if headers:
+            raise ValueError("headers must fit in 2048 bytes")
+
+    call.hangup = AsyncMock(side_effect=hangup)
+
+    await connection.disconnect()
+
+    # Refused with the headers, then ended without them; teardown completed.
+    assert [c.kwargs for c in call.hangup.await_args_list] == [
+        {"headers": {"X-RouteType": "queue"}},
+        {},
+    ]
+    env.ua.unregister.assert_awaited_once()
+    env.runtime.close.assert_awaited_once()
+    assert not connection.has_active_call
+
+
+@pytest.mark.asyncio
+async def test_hangup_headers_do_not_reach_the_next_call(env):
+    connection = make_connection()
+    await connection.connect()
+    first = await _answered_outbound_call(env, connection)
+    connection.set_hangup_headers({"X-RouteType": "queue"})
+    first.listeners[0](StackEvent(event=Event.CALL_CLOSED, call=first.handle, text="hangup"))
+
+    second = await _answered_outbound_call(env, connection)
+    await connection.hangup()
+
+    second.hangup.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_sip_info_is_emitted_with_its_content_type_and_body(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+    payloads, arrived = capture(connection, "info")
+
+    (on_info,) = call.on_info.call_args.args
+    on_info(SimpleNamespace(content_type="application/json", body=b'{"event":"hold"}'))
+
+    await asyncio.wait_for(arrived.wait(), EVENT_TIMEOUT)
+    assert payloads == [
+        {"sessionId": "1", "contentType": "application/json", "body": b'{"event":"hold"}'}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sip_info_listener_is_removed_when_the_call_closes(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+    (on_info,) = call.on_info.call_args.args
+
+    call.listeners[0](StackEvent(event=Event.CALL_CLOSED, call=call.handle, text="hangup"))
+
+    call.off_info.assert_called_once_with(on_info)
+
+
+@pytest.mark.asyncio
+async def test_transfer_without_headers_calls_the_binding_bare(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+
+    await connection.transfer("sip:9197@example.com")
+
+    call.transfer.assert_awaited_once_with("sip:9197@example.com")
+
+
+@pytest.mark.asyncio
+async def test_transfer_passes_headers_through(env):
+    connection = make_connection()
+    await connection.connect()
+    call = await _answered_outbound_call(env, connection)
+
+    await connection.transfer("sip:9197@example.com", headers={"User-to-User": "56a3;encoding=hex"})
+
+    call.transfer.assert_awaited_once_with(
+        "sip:9197@example.com", headers={"User-to-User": "56a3;encoding=hex"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_reject_defaults_to_busy_here(env):
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    env.ua.incoming_callbacks[0](call)
+
+    await connection.reject()
+
+    call.reject.assert_awaited_once_with(status=486, reason=None, headers=None)
+
+
+@pytest.mark.asyncio
+async def test_reject_passes_status_reason_and_headers_through(env):
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    env.ua.incoming_callbacks[0](call)
+
+    await connection.reject(503, reason="Try Elsewhere", headers={"Retry-After": "30"})
+
+    call.reject.assert_awaited_once_with(
+        status=503, reason="Try Elsewhere", headers={"Retry-After": "30"}
+    )
 
 
 @pytest.mark.asyncio

@@ -269,6 +269,12 @@ async def test_auto_answer_disabled_leaves_call_ringing():
     connection.answer.assert_not_awaited()
 
 
+def test_connection_property_returns_the_connection_given():
+    transport, connection = make_transport()
+
+    assert transport.connection is connection
+
+
 @pytest.mark.asyncio
 async def test_video_params_answer_with_video():
     transport, connection = make_transport(video_in_enabled=True)
@@ -292,6 +298,20 @@ async def test_dtmf_event_and_frame_push():
     frame = transport._input.push_frame.await_args.args[0]
     assert isinstance(frame, InputDTMFFrame)
     assert frame.button.value == "5"
+
+
+@pytest.mark.asyncio
+async def test_sip_info_reaches_the_on_sip_info_handler():
+    transport, connection = make_transport()
+    set_active_call(connection, handle=9, incoming=True)
+    recorded = record_events(transport, ["on_sip_info"])
+    data = {"sessionId": "9", "contentType": "application/json", "body": b'{"event":"hold"}'}
+
+    await connection._call_event_handler("info", data)
+    await settle()
+
+    assert recorded == [("on_sip_info", (data,))]
+    transport._input.push_frame.assert_not_awaited()  # an event only, no frame
 
 
 @pytest.mark.asyncio
@@ -348,6 +368,25 @@ async def test_send_dtmf_method_validated_against_connection_mode():
 
 
 @pytest.mark.asyncio
+async def test_set_hangup_headers_reaches_the_connection_and_reports_errors():
+    transport, connection = make_transport()
+
+    # No call yet: the connection refuses, and the transport reports it.
+    assert "no active call" in await transport.set_hangup_headers({"X-RouteType": "queue"})
+
+    set_active_call(connection, handle=7)
+    connection._answered = True
+    assert await transport.set_hangup_headers({"X-RouteType": "queue"}) is None
+    assert connection._hangup_headers == {"X-RouteType": "queue"}
+
+    assert "invalid SIP header name" in await transport.set_hangup_headers({"X Bad": "v"})
+    assert connection._hangup_headers == {"X-RouteType": "queue"}
+
+    assert await transport.set_hangup_headers(None) is None
+    assert connection._hangup_headers is None
+
+
+@pytest.mark.asyncio
 async def test_sip_refer_sends_refer_and_call_transfer_is_rejected():
     transport, connection = make_transport()
     set_active_call(connection, handle=7)
@@ -363,6 +402,69 @@ async def test_sip_refer_sends_refer_and_call_transfer_is_rejected():
     error = await transport.sip_call_transfer({"toEndPoint": "sip:9196@example.com"})
     assert "not supported" in error and "sip_refer" in error
     assert connection.transfer.await_count == 1  # the rejection never touched the call
+
+
+@pytest.mark.asyncio
+async def test_sip_refer_passes_sip_headers_to_the_transfer():
+    transport, connection = make_transport()
+    set_active_call(connection, handle=7)
+    transport._dial_in_session_id = "7"
+    headers = {"User-to-User": "56a390f3;encoding=hex", "X-Case": "1234"}
+
+    assert (
+        await transport.sip_refer({"toEndPoint": "sip:9197@x.com", "sipHeaders": headers}) is None
+    )
+    connection.transfer.assert_awaited_once_with("sip:9197@x.com", headers=headers)
+
+    # An empty dict is the same as none: the bare call, as without the key.
+    connection.transfer.reset_mock()
+    assert await transport.sip_refer({"toEndPoint": "sip:9197@x.com", "sipHeaders": {}}) is None
+    connection.transfer.assert_awaited_once_with("sip:9197@x.com")
+
+
+@pytest.mark.parametrize("sip_headers", ["X-Case: 1", ["X-Case"], {"X-Case": 1}, {"X-Case": None}])
+@pytest.mark.asyncio
+async def test_sip_refer_refuses_sip_headers_of_the_wrong_shape(sip_headers):
+    transport, connection = make_transport()
+    set_active_call(connection, handle=7)
+    transport._dial_in_session_id = "7"
+
+    error = await transport.sip_refer({"toEndPoint": "sip:9197@x.com", "sipHeaders": sip_headers})
+
+    assert error == "sipHeaders must be a dict of header names to string values"
+    connection.transfer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sip_refer_refuses_headers_in_both_places():
+    transport, connection = make_transport()
+    set_active_call(connection, handle=7)
+    transport._dial_in_session_id = "7"
+
+    error = await transport.sip_refer(
+        {"toEndPoint": "sip:9197@x.com?X-A=1", "sipHeaders": {"X-B": "2"}}
+    )
+    assert "both toEndPoint and sipHeaders" in error
+    connection.transfer.assert_not_awaited()
+
+    # Headers in the URI alone still go through untouched, as before.
+    assert await transport.sip_refer({"toEndPoint": "sip:9197@x.com?X-A=1"}) is None
+    connection.transfer.assert_awaited_once_with("sip:9197@x.com?X-A=1")
+
+
+@pytest.mark.asyncio
+async def test_attended_transfer_refuses_sip_headers():
+    transport, connection = make_transport()
+    set_active_call(connection, handle=7)
+    transport._dial_in_session_id = "7"
+    connection.consult_connection = Mock()
+
+    error = await transport.sip_attended_transfer(
+        {"toEndPoint": "sip:9197@x.com", "sipHeaders": {"X-Case": "1"}}
+    )
+
+    assert "not supported on an attended transfer" in error
+    connection.consult_connection.assert_not_called()
 
 
 def _fake_consult():

@@ -46,6 +46,7 @@ from typing import Optional
 
 from loguru import logger
 
+from pipecat.transports.sip.media_encryption import SIPMediaEncryption
 from pipecat.utils.base_object import BaseObject
 from pipecat.utils.shared import acquires, releases
 
@@ -120,6 +121,10 @@ _STDLIB_LOG_LEVELS = {
 # hangup on the close, so the flag that requests a transfer need not be trusted
 # across the close race.
 _TRANSFER_CLOSE_REASON = "Call transfered"
+# The stack's close reason when no audio arrived for ``rtp_timeout`` seconds,
+# and the reason the connection reports in its place.
+_STACK_RTP_TIMEOUT_REASON = "rtp stream error"
+RTP_TIMEOUT_CLOSE_REASON = "rtp timeout"
 
 # How long a closing connection waits for the registrar to confirm the
 # unregister before giving up on it: a dead registrar must not hold up
@@ -171,6 +176,64 @@ def _validate_sip_port(port: int | None) -> int | None:
     return port
 
 
+def _validate_extra_config(lines: tuple | None) -> tuple:
+    """Check ``extra_config`` lines and return them as a tuple.
+
+    Raises:
+        ValueError: ``lines`` is a bare string, or an entry is not a
+            non-empty single line.
+    """
+    if lines is None:
+        return ()
+    if isinstance(lines, str):
+        raise ValueError("extra_config must be a tuple of lines, not a single string")
+    checked = tuple(lines)
+    for line in checked:
+        if not isinstance(line, str) or not line.strip() or any(c in line for c in "\n\r\0"):
+            raise ValueError(f"extra_config entries must be non-empty single lines, got {line!r}")
+    return checked
+
+
+# The stack's buffer for the headers of the message that ends a call, in
+# bytes. The headers are held there as ``"Name: value\r\n"`` lines with a
+# terminator, so their lines must come to less than this.
+_HANGUP_HEADERS_MAX_BYTES = 2048
+
+
+def _validate_headers(headers: dict | None) -> dict | None:
+    """Check custom SIP headers and return a copy, or None for no headers.
+
+    The binding makes the same checks when the headers are sent. Headers
+    stored for later (see :meth:`SIPConnection.set_hangup_headers`) are
+    checked here instead, so a bad one is reported where it was given and
+    not while the call is being torn down.
+
+    Raises:
+        ValueError: A name that is empty or holds a colon, a space or a line
+            break; a value that is None or holds a line break; or headers
+            too long for the stack to carry.
+    """
+    if not headers:
+        return None
+    checked = {}
+    size = 0
+    for name, value in headers.items():
+        if not isinstance(name, str) or not name or any(c in name for c in "\r\n: "):
+            raise ValueError(f"invalid SIP header name {name!r}")
+        if value is None:
+            raise ValueError(f"SIP header {name}: the value is None")
+        value = str(value)
+        if "\r" in value or "\n" in value:
+            raise ValueError(f"SIP header {name}: the value must be a single line")
+        checked[name] = value
+        size += len(f"{name}: {value}\r\n".encode())
+    if size >= _HANGUP_HEADERS_MAX_BYTES:
+        raise ValueError(
+            f"SIP headers must come to less than {_HANGUP_HEADERS_MAX_BYTES} bytes, got {size}"
+        )
+    return checked
+
+
 @dataclass(frozen=True)
 class _RuntimeSettings:
     """Runtime-wide baresip settings, fixed by the first connection.
@@ -184,7 +247,7 @@ class _RuntimeSettings:
     sip_port: int | None = None
     expose_headers: tuple = ()
     max_concurrent_calls: int | None = 2
-    rtp_timeout: int = 0
+    rtp_timeout: int = 30
     instance_id: str | None = None
     video_size: tuple = (640, 480)
     video_fps: float = 30.0
@@ -193,6 +256,7 @@ class _RuntimeSettings:
     sip_trace: bool = False
     jitter_buffer_mode: str | None = None
     jitter_buffer_ms: tuple | None = None
+    extra_config: tuple = ()
 
     def to_config(self) -> Config:
         """These settings as the binding's ``Config`` object.
@@ -212,7 +276,9 @@ class _RuntimeSettings:
             video_bitrate=self.video_bitrate,
             native_log_level=self.native_log_level,
             sip_trace=self.sip_trace,
-            extra_config_text=self._sip_listen_config() + self._jitter_buffer_config(),
+            extra_config_text=(
+                self._sip_listen_config() + self._jitter_buffer_config() + self._extra_config_text()
+            ),
         )
 
     def _sip_listen_config(self) -> str:
@@ -243,6 +309,15 @@ class _RuntimeSettings:
             lo, hi = self.jitter_buffer_ms
             lines.append(f"audio_jitter_buffer_ms {lo}-{hi}")
         return "".join(f"{line}\n" for line in lines)
+
+    def _extra_config_text(self) -> str:
+        """The application's own ``extra_config`` lines, one per line.
+
+        They come after the lines this class renders, so the text a
+        connection produced before ``extra_config`` existed is unchanged at
+        its start. Nothing given renders nothing.
+        """
+        return "".join(f"{line}\n" for line in self.extra_config)
 
     @property
     def stdlib_log_level(self) -> int:
@@ -306,8 +381,8 @@ class _SharedRuntime:
                     f"settings ({self._settings!r}); all SIPConnections in a process "
                     "must agree on net_interface, sip_port, expose_headers, "
                     "max_concurrent_calls, rtp_timeout, instance_id, "
-                    "native_log_level, sip_trace, the jitter buffer, and the "
-                    "video parameters"
+                    "native_log_level, sip_trace, the jitter buffer, extra_config, "
+                    "and the video parameters"
                 )
             self._owners += 1
             return self._runtime
@@ -349,7 +424,8 @@ class _SharedRuntime:
                     f"a user agent for {aor} is already up with different account "
                     "parameters; connections sharing an address-of-record must agree "
                     "on transport, registrar, password, auth_user, audio_codecs, "
-                    "dtmf_mode, and extra_params (only reg_interval may differ)"
+                    "dtmf_mode, media_encryption, and extra_params (only "
+                    "reg_interval may differ)"
                 )
             if aor not in self._uas:
                 ua = await UserAgent.create(self._runtime, account)
@@ -421,7 +497,7 @@ class SIPConnection(BaseObject):
 
     Runtime-wide arguments (``net_interface``, ``sip_port``, ``expose_headers``,
     ``max_concurrent_calls``, the jitter buffer, the logging parameters,
-    and the video parameters) configure the process-wide SIP stack and are
+    ``extra_config``, and the video parameters) configure the process-wide SIP stack and are
     fixed by the first connection to connect; every later connection must
     pass the same values.
 
@@ -445,6 +521,12 @@ class SIPConnection(BaseObject):
       ``message``.
     - dtmf: the far end pressed a key; receives the binding's DigitEvent
       and the call's session id.
+    - info: the far end sent a SIP INFO request on the call; receives a
+      payload dict with ``sessionId``, ``contentType`` (empty when the
+      request had none) and ``body`` (the raw bytes, exactly as sent). A
+      PBX or contact-center platform uses INFO to pass an application
+      event inside a call; what the body means is between the two sides.
+      DTMF sent as INFO arrives as ``dtmf``, not here.
     - remote_hold: the far end put the call on hold or resumed it;
       receives a payload dict with ``on`` (bool).
     - renegotiated: an established call renegotiated (a mid-call
@@ -514,6 +596,7 @@ class SIPConnection(BaseObject):
         reg_interval: int = 240,
         audio_codecs: tuple | None = None,
         dtmf_mode: str = "rtpevent",
+        media_encryption: SIPMediaEncryption = SIPMediaEncryption.NONE,
         extra_params: tuple | None = None,
         jitter_buffer_mode: str | None = None,
         jitter_buffer_ms: tuple | None = None,
@@ -521,13 +604,14 @@ class SIPConnection(BaseObject):
         sip_port: int | None = None,
         expose_headers: tuple = (),
         max_concurrent_calls: int | None = 2,
-        rtp_timeout: int = 0,
+        rtp_timeout: int = 30,
         instance_id: str | None = None,
         video_size: tuple = (640, 480),
         video_fps: float = 30.0,
         video_bitrate: int = 1_000_000,
         native_log_level: str = "warning",
         sip_trace: bool = False,
+        extra_config: tuple | None = None,
         route_inbound: bool = True,
         **kwargs,
     ):
@@ -539,7 +623,13 @@ class SIPConnection(BaseObject):
             password: Authentication password; may be empty.
             auth_user: Digest username when the credential store keys it
                 differently from ``user`` (credential-list trunks).
-            transport: SIP transport: "udp", "tcp", or "tls".
+            transport: SIP transport: "udp", "tcp", or "tls". Over TLS the
+                server's certificate is verified: it has to chain to a
+                trusted CA and name the host connected to, or registration
+                and calls fail. For a server with a private or self-signed
+                certificate, point the ``SIP_CA_FILE`` environment variable
+                at its CA certificate; a server reached by IP address needs
+                a certificate that carries that address.
             registrar: Outbound proxy to register through, when that is
                 not the domain itself.
             reg_interval: Seconds between registration refreshes. The
@@ -558,6 +648,13 @@ class SIPConnection(BaseObject):
             audio_codecs: Codec preference order by stack name; None uses
                 the binding's default.
             dtmf_mode: How DTMF is sent: "rtpevent", "info", or "auto".
+            media_encryption: Whether call media is encrypted, a
+                :class:`~pipecat.transports.sip.media_encryption.SIPMediaEncryption`.
+                ``NONE`` (the default) places unencrypted calls and accepts
+                a received call either way, encrypting it when the caller
+                offers SRTP. ``SRTP`` encrypts every call and refuses a
+                received one that offers none. :attr:`media_encrypted`
+                reports what the active call ended up with.
             extra_params: Extra baresip account parameters, each a
                 ``"key=value"`` string, appended verbatim to the SIP
                 address-of-record — the escape hatch for account directives
@@ -598,8 +695,11 @@ class SIPConnection(BaseObject):
                 breaks all address selection. Runtime-wide.
             sip_port: The local SIP port, e.g. ``5060``. The stack binds it
                 on each interface it uses, so ``net_interface`` decides
-                the addresses. UDP and TCP listen on this port and TLS on
-                the next one (``5060`` gives TLS on ``5061``). None (the
+                the addresses. UDP and TCP listen on this port. The stack
+                also opens the next port for TLS (``5060`` gives
+                ``5061``), but it has no server certificate, so a TLS
+                connection from a peer fails its handshake there: a fixed
+                port cannot take inbound calls over TLS. None (the
                 default) binds an ephemeral port, which is correct for a
                 registering connection: the registration tells the server
                 where the bot is. Set it for trunk mode (``reg_interval=0``)
@@ -617,10 +717,12 @@ class SIPConnection(BaseObject):
                 unlimited. Runtime-wide.
             rtp_timeout: Seconds without received RTP after which a call
                 is declared dead and closed (close reason
-                ``"rtp stream error"``) — catches peers that vanish
-                without a BYE. Direction-aware: held and send-only
-                streams are not checked. 0 (the default) disables
-                detection. Runtime-wide.
+                ``"rtp timeout"``) — catches peers that vanish
+                without a BYE, and a BYE that never arrives because the
+                connection it would travel on has gone. Direction-aware:
+                held and send-only streams are not checked, and a call
+                that has received no RTP yet is not timed. Defaults to
+                30; 0 disables detection. Runtime-wide.
             instance_id: A canonical lowercase UUID identifying this
                 endpoint across restarts, carried on registration
                 Contacts as ``+sip.instance`` (RFC 5626): a supporting
@@ -639,6 +741,19 @@ class SIPConnection(BaseObject):
                 the tool for signaling and SDP/media-path debugging. The
                 trace contains call metadata and digest authentication
                 material, so keep it off in production. Runtime-wide.
+            extra_config: Extra lines for the SIP stack's configuration,
+                each a ``"key value"`` string in baresip's own config
+                syntax, appended verbatim after the lines the other
+                arguments produce — the escape hatch for stack settings
+                pipecat does not model. The stack reads the first line for
+                a setting, so a line for one that an argument here already
+                sets is ignored: use the argument. One use is a development server
+                whose TLS certificate cannot be verified:
+                ``("sip_verify_server no",)`` turns verification off for
+                every TLS connection, so never set it for production
+                traffic; a private or self-signed certificate is better
+                served by pointing ``SIP_CA_FILE`` at its CA. None (the
+                default) adds nothing. Runtime-wide.
             route_inbound: Whether the shared inbound dispatcher routes
                 incoming calls to this connection (per-connection, not
                 runtime-wide). A consult/transfer leg sets ``False`` so an
@@ -658,8 +773,11 @@ class SIPConnection(BaseObject):
             dtmf_mode=dtmf_mode,
             auth_user=auth_user,
         )
+        media_encryption = SIPMediaEncryption.parse(media_encryption)
         if audio_codecs is not None:
             account_args["audio_codecs"] = tuple(audio_codecs)
+        if media_encryption is not SIPMediaEncryption.NONE:
+            account_args["media_encryption"] = media_encryption.value
         if extra_params is not None:
             account_args["extra_params"] = tuple(extra_params)
         self._account = Account(**account_args)
@@ -674,6 +792,7 @@ class SIPConnection(BaseObject):
             registrar=registrar,
             audio_codecs=tuple(audio_codecs) if audio_codecs is not None else None,
             dtmf_mode=dtmf_mode,
+            media_encryption=media_encryption,
             extra_params=tuple(extra_params) if extra_params is not None else None,
         )
         jitter_buffer_mode, jitter_buffer_ms = _normalize_jitter_buffer(
@@ -693,6 +812,7 @@ class SIPConnection(BaseObject):
             sip_trace=sip_trace,
             jitter_buffer_mode=jitter_buffer_mode,
             jitter_buffer_ms=jitter_buffer_ms,
+            extra_config=_validate_extra_config(extra_config),
         )
         # Per-connection: a consult/transfer leg opts out of inbound routing so a
         # call never lands on it while it is briefly idle between connect and dial.
@@ -707,6 +827,9 @@ class SIPConnection(BaseObject):
         self._dialing = False
         # Set by hangup(); a close it caused is not a call failure.
         self._hangup_requested = False
+        # Headers for the BYE that ends the active call, set by
+        # set_hangup_headers(); per call (reset in _attach_call).
+        self._hangup_headers: dict | None = None
         # "Connect" for the transport means media is up — the call is answered
         # AND audio RTP flows — not merely the SIP handshake. These track that,
         # per call (reset in _attach_call).
@@ -717,6 +840,7 @@ class SIPConnection(BaseObject):
         self._establish_task: asyncio.Task | None = None
         self._call_listener = None
         self._dtmf_listener = None
+        self._info_listener = None
         self._warning_listener = None
         self._emit_tasks: set = set()
 
@@ -731,6 +855,7 @@ class SIPConnection(BaseObject):
         self._register_event_handler("call_closed")
         self._register_event_handler("call_failed")
         self._register_event_handler("dtmf")
+        self._register_event_handler("info")
         self._register_event_handler("audio_warning")
         self._register_event_handler("media_restarted")
 
@@ -847,7 +972,16 @@ class SIPConnection(BaseObject):
         call = self._call
         if call is not None:
             try:
-                await call.hangup()
+                await self._hangup_call(call)
+            except ValueError as e:
+                # The stack refused the hang-up headers. Teardown must still
+                # finish and the far end must still be released, so the call
+                # ends without them.
+                logger.warning(f"{self} hang-up headers were not sent: {e}")
+                try:
+                    await call.hangup()
+                except BaresipError as bare_error:
+                    logger.debug(f"{self} hangup on disconnect: {bare_error}")
             except BaresipError as e:
                 logger.debug(f"{self} hangup on disconnect: {e}")
             self._detach_call()
@@ -945,18 +1079,78 @@ class SIPConnection(BaseObject):
         call = self._require_call()
         await call.wait_established(timeout)
 
-    async def reject(self):
-        """Decline the active inbound call with 486 Busy Here."""
+    async def reject(
+        self, status: int = 486, reason: str | None = None, headers: dict | None = None
+    ):
+        """Refuse the active inbound call before it is answered.
+
+        The status tells the far end what to do next, and switches and
+        contact-center platforms act on it: 486 (the default) says this
+        endpoint is busy, 480 that it is unavailable for now, 503 that the
+        call should be tried elsewhere, 603 that it is declined. With no
+        arguments the call is refused with ``486 Busy Here``.
+
+        Example::
+
+            @connection.event_handler("incoming")
+            async def on_incoming(connection, data):
+                if overloaded():
+                    await connection.reject(503, headers={"Retry-After": "30"})
+
+        Args:
+            status: The SIP status of the refusal, 300 to 699.
+            reason: The reason phrase; None sends the standard phrase for
+                the status.
+            headers: Extra headers for the refusal, name to value.
+
+        Raises:
+            ValueError: A status outside 300-699, or a header name or
+                value that cannot go on the wire.
+        """
         call = self._require_call()
-        await call.reject()
+        await call.reject(status=status, reason=reason, headers=headers)
 
     async def hangup(self):
-        """Hang up the active call; valid in any state."""
+        """Hang up the active call; valid in any state.
+
+        The BYE carries the headers given to :meth:`set_hangup_headers`,
+        if any.
+        """
         call = self._require_call()
         # Local hangup of a still-ringing dial is a stop, not a failure;
         # the establishment watcher stays quiet on the close it causes.
         self._hangup_requested = True
-        await call.hangup()
+        await self._hangup_call(call)
+
+    def set_hangup_headers(self, headers: dict | None):
+        """Set the custom headers for the BYE that ends the active call.
+
+        A contact-center platform reads its routing instructions from the
+        BYE the bot sends: where the caller goes next, and why. The headers
+        are stored and sent whenever this side ends the call, by
+        :meth:`hangup` or by :meth:`disconnect` (which is how a pipeline's
+        ``EndFrame`` ends it). Call it at any time once the call is
+        answered; each call replaces the headers set before.
+
+        The headers belong to the active call only and are dropped when it
+        ends. When the far end hangs up first there is no BYE from this
+        side, and they are not sent.
+
+        Example::
+
+            connection.set_hangup_headers({"X-RouteType": "queue", "X-RouteValue": "billing"})
+
+        Args:
+            headers: Header names to values, or None to send none.
+
+        Raises:
+            RuntimeError: No call is active, or it is not answered yet.
+            ValueError: A header name or value that cannot go on the wire.
+        """
+        self._require_call()
+        if not self._answered:
+            raise RuntimeError("SIPConnection: hang-up headers need an answered call")
+        self._hangup_headers = _validate_headers(headers)
 
     async def send_dtmf(self, digits: str):
         """Send DTMF digits on the active call."""
@@ -973,16 +1167,31 @@ class SIPConnection(BaseObject):
         call = self._require_call()
         await call.resume()
 
-    async def transfer(self, uri: str):
+    async def transfer(self, uri: str, headers: dict | None = None):
         """Blind-transfer the active call (REFER).
 
         On success the call closes — that is the protocol, not an error.
 
+        Args:
+            uri: The SIP URI the far end should call.
+            headers: Context for the party the far end calls, such as
+                ``{"User-to-User": "56a390f3;encoding=hex"}`` or a case
+                number in an ``X-`` header. They travel attached to
+                ``uri``, escaped, and the far end sets them on the call it
+                places; whether it does is the far end's choice. None
+                sends the bare URI.
+
         Raises:
+            ValueError: A header with an invalid name or value, or one
+                that defines the call itself (From, To, Call-ID, Via,
+                Contact and the like).
             TransferFailed: The far end refused or the transfer failed.
         """
         call = self._require_call()
-        await call.transfer(uri)
+        if headers:
+            await call.transfer(uri, headers=headers)
+        else:
+            await call.transfer(uri)
 
     async def attended_transfer(self, consult: "SIPConnection"):
         """Splice the active call together with a consult call.
@@ -1159,6 +1368,13 @@ class SIPConnection(BaseObject):
             raise RuntimeError("SIPConnection has no active call")
         return self._call
 
+    async def _hangup_call(self, call: Call):
+        """Hang up ``call``, with the headers from :meth:`set_hangup_headers`."""
+        if self._hangup_headers:
+            await call.hangup(headers=self._hangup_headers)
+        else:
+            await call.hangup()
+
     @property
     def dtmf_mode(self) -> str:
         """How this connection sends DTMF: "rtpevent", "info", or "auto".
@@ -1167,6 +1383,16 @@ class SIPConnection(BaseObject):
         choice.
         """
         return self._account.dtmf_mode
+
+    @property
+    def media_encrypted(self) -> bool:
+        """Whether the active call's audio is encrypted with SRTP.
+
+        True once the stack reports the audio stream secured, which happens
+        as the call is established; False before that, on an unencrypted
+        call, and without a call.
+        """
+        return self._call is not None and bool(self._call.media_encrypted)
 
     @property
     def call_direction(self) -> str | None:
@@ -1199,6 +1425,7 @@ class SIPConnection(BaseObject):
         self._answered = False
         self._audio_rtp = False
         self._hangup_requested = False
+        self._hangup_headers = None
 
         def on_event(event: StackEvent):
             self._on_call_event(call, event)
@@ -1211,14 +1438,24 @@ class SIPConnection(BaseObject):
         def on_dtmf(digit_event):
             self._emit("dtmf", digit_event, session_id)
 
+        def on_info(info_event):
+            payload = {
+                "sessionId": session_id,
+                "contentType": info_event.content_type,
+                "body": info_event.body,
+            }
+            self._emit("info", payload)
+
         def on_warning(warning):
             self._emit("audio_warning", warning, direction, session_id)
 
         self._call_listener = on_event
         self._dtmf_listener = on_dtmf
+        self._info_listener = on_info
         self._warning_listener = on_warning
         call.on(on_event)
         call.on_dtmf(on_dtmf)
+        call.on_info(on_info)
         call.on_audio_warning(on_warning)
 
     def _detach_call(self):
@@ -1229,11 +1466,15 @@ class SIPConnection(BaseObject):
             call.off(self._call_listener)
         if self._dtmf_listener is not None:
             call.off_dtmf(self._dtmf_listener)
+        if self._info_listener is not None:
+            call.off_info(self._info_listener)
         if self._warning_listener is not None:
             call.off_audio_warning(self._warning_listener)
         self._call = None
+        self._hangup_headers = None
         self._call_listener = None
         self._dtmf_listener = None
+        self._info_listener = None
         self._warning_listener = None
 
     def _on_call_event(self, call: Call, event: StackEvent):
@@ -1273,6 +1514,12 @@ class SIPConnection(BaseObject):
         elif event.event is Event.CALL_CLOSED:
             self._final_stats = call.final_stats
             reason = event.text or ""
+            if reason == _STACK_RTP_TIMEOUT_REASON:
+                reason = RTP_TIMEOUT_CLOSE_REASON
+                logger.warning(
+                    f"SIP: closing the call: no audio received for {self._settings.rtp_timeout} s "
+                    "(rtp_timeout). The far end is gone, or its hang-up never arrived."
+                )
             payload = self._call_payload(
                 reason=reason,
                 established=self._call_established,

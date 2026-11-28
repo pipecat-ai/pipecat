@@ -56,18 +56,28 @@ Environment variables:
 - SIP_TRANSPORT (optional) - SIP transport protocol ("udp", "tcp", or "tls").
   Defaults to "udp" for an account from the environment and "tls" for a
   provisioned Daily SIP client or an account from the request body; a body
-  that names its own ``transport`` wins over this variable.
+  that names its own ``transport`` wins over this variable. Over TLS the
+  server's certificate is verified; SIP_CA_FILE names the CA certificate of a
+  server with a private or self-signed one.
 - SIP_REG_INTERVAL (optional) - Seconds between registration refreshes,
   default 240; 0 disables registration (trunk mode).
 - SIP_RTP_TIMEOUT (optional) - Seconds without received RTP after which a
-  call is closed as dead; default 0 (off).
+  call is closed as dead, so a hang-up that never arrives does not leave the
+  session running; default 30, 0 turns it off.
 - SIP_AUDIO_CODECS (optional) - Comma-separated codec preference list by
   stack name, e.g. "opus/48000/2,PCMU/8000/1".
 - SIP_AUTH_USER (optional) - Digest username when it differs from the user
   part of the address (credential-list trunks).
 - SIP_INSTANCE_ID (optional) - A stable UUID for RFC 5626 ``+sip.instance``.
+- SIP_MEDIA_ENCRYPTION (optional) - "none" (default) or "srtp". "srtp"
+  encrypts every call and refuses a received call that offers no SRTP; "none"
+  still encrypts a received call whose caller offers SRTP.
 - SIP_EXTRA_PARAMS (optional) - Comma-separated raw baresip account
   parameters (``key=value``), passed verbatim; wins over SIP_STUN_SERVER.
+- SIP_EXTRA_CONFIG (optional) - Semicolon-separated raw lines for the SIP
+  stack's configuration (``key value``), passed verbatim: the escape hatch for
+  stack settings with no variable of their own. "sip_verify_server no" turns
+  TLS verification off, for a development server only.
 - SIP_STUN_SERVER (optional) - STUN server for the default media-NAT traversal
   (medianat=stun, default stun.l.google.com); set to "off" to disable. Ignored
   when SIP_EXTRA_PARAMS is set. The address STUN reports does not reach the bot
@@ -76,9 +86,11 @@ Environment variables:
 - SIP_NET_INTERFACE (optional) - Restrict the stack to one local interface, by
   name or address: "127.0.0.1" for a registrar on loopback, or one address of
   a multi-homed host. Unset lets the OS pick the source address.
-- SIP_PORT (optional) - A fixed local SIP port for UDP and TCP, TLS on the next
-  one. Unset binds an ephemeral port, which suits a registering bot; set it for
-  trunk mode (SIP_REG_INTERVAL=0) behind a carrier that routes to host:port.
+- SIP_PORT (optional) - A fixed local SIP port, for inbound calls over UDP and
+  TCP. The stack opens the next port for TLS, but without a server certificate
+  a peer cannot connect to it. Unset binds an ephemeral port, which suits a
+  registering bot; set it for trunk mode (SIP_REG_INTERVAL=0) behind a carrier
+  that routes to host:port.
 - SIP_JITTER_BUFFER (optional) - The receive jitter buffer: "off",
   "fixed:MIN-MAX" or "adaptive:MIN-MAX" in milliseconds (a bare "MIN-MAX"
   means fixed). Unset selects the transport's default, a fixed 40–60 ms;
@@ -115,6 +127,7 @@ from pydantic import BaseModel
 
 from pipecat.runner.types import RunnerArguments, SIPRunnerArguments
 from pipecat.transports.daily.utils import DailyRESTHelper, DailySIPClientParams
+from pipecat.transports.sip.media_encryption import SIPMediaEncryption
 
 #: STUN server baresip uses to discover and advertise its public media address
 #: (``medianat=stun``) when the user has not supplied their own
@@ -369,7 +382,8 @@ def sip_runner_arguments(
     ``SIP_AUTH_USER``, ``SIP_EXTRA_PARAMS``/``SIP_STUN_SERVER``,
     ``SIP_REG_INTERVAL``, ``SIP_RTP_TIMEOUT``, ``SIP_INSTANCE_ID``,
     ``SIP_NATIVE_LOG_LEVEL``, ``SIP_TRACE``, ``SIP_NET_INTERFACE``,
-    ``SIP_PORT``, ``SIP_JITTER_BUFFER``) on top of the account, and carries
+    ``SIP_PORT``, ``SIP_JITTER_BUFFER``, ``SIP_MEDIA_ENCRYPTION``,
+    ``SIP_EXTRA_CONFIG``) on top of the account, and carries
     the session's ``body``, ``session_id``, signal flags and ``cli_args``
     over from ``runner_args`` when given. The development runner, its routes and
     :func:`~pipecat.runner.utils.create_transport` all build their SIP
@@ -384,11 +398,12 @@ def sip_runner_arguments(
 
     Raises:
         ValueError: ``SIP_REG_INTERVAL``, ``SIP_RTP_TIMEOUT`` or ``SIP_PORT`` is
-            not an integer, or ``SIP_JITTER_BUFFER`` is malformed.
+            not an integer, ``SIP_JITTER_BUFFER`` is malformed, or
+            ``SIP_MEDIA_ENCRYPTION`` names no known setting.
     """
     try:
         reg_interval = int(os.getenv("SIP_REG_INTERVAL", "240"))
-        rtp_timeout = int(os.getenv("SIP_RTP_TIMEOUT", "0"))
+        rtp_timeout = int(os.getenv("SIP_RTP_TIMEOUT", "30"))
     except ValueError:
         raise ValueError(
             "SIP_REG_INTERVAL and SIP_RTP_TIMEOUT must be integers (seconds)"
@@ -403,8 +418,15 @@ def sip_runner_arguments(
         jitter_buffer_mode, jitter_buffer_ms = parse_jitter_buffer(os.getenv("SIP_JITTER_BUFFER"))
     except ValueError as e:
         raise ValueError(f"SIP_JITTER_BUFFER: {e}") from None
+    try:
+        media_encryption = SIPMediaEncryption.parse(
+            os.getenv("SIP_MEDIA_ENCRYPTION") or SIPMediaEncryption.NONE
+        )
+    except ValueError as e:
+        raise ValueError(f"SIP_MEDIA_ENCRYPTION: {e}") from None
 
     codecs = os.getenv("SIP_AUDIO_CODECS")
+    extra_config = os.getenv("SIP_EXTRA_CONFIG")
     args = SIPRunnerArguments(
         user=config.user,
         domain=config.domain,
@@ -422,6 +444,12 @@ def sip_runner_arguments(
         sip_port=sip_port,
         jitter_buffer_mode=jitter_buffer_mode,
         jitter_buffer_ms=jitter_buffer_ms,
+        media_encryption=media_encryption,
+        extra_config=(
+            tuple(line.strip() for line in extra_config.split(";") if line.strip())
+            if extra_config
+            else None
+        ),
         body=runner_args.body if runner_args is not None else {},
         session_id=runner_args.session_id if runner_args is not None else None,
     )

@@ -21,6 +21,7 @@ from pipecat.runner.sip import (
 )
 from pipecat.runner.types import RunnerArguments, SIPRunnerArguments
 from pipecat.transports.daily.utils import DailySIPClientObject
+from pipecat.transports.sip.media_encryption import SIPMediaEncryption
 
 CLIENT = DailySIPClientObject(
     username="pipecat-abcd1234",
@@ -179,7 +180,7 @@ class TestSipRunnerArguments(unittest.TestCase):
             args.extra_params, ("medianat=stun", "stunserver=stun:stun.l.google.com:19302")
         )
         self.assertEqual(args.reg_interval, 240)
-        self.assertEqual(args.rtp_timeout, 0)
+        self.assertEqual(args.rtp_timeout, 30)
         self.assertIsNone(args.instance_id)
         self.assertEqual(args.native_log_level, "warning")
         self.assertFalse(args.sip_trace)
@@ -187,6 +188,8 @@ class TestSipRunnerArguments(unittest.TestCase):
         self.assertIsNone(args.sip_port)
         self.assertIsNone(args.jitter_buffer_mode)
         self.assertIsNone(args.jitter_buffer_ms)
+        self.assertIs(args.media_encryption, SIPMediaEncryption.NONE)
+        self.assertIsNone(args.extra_config)
         self.assertEqual(args.body, {})
         self.assertIsNone(args.session_id)
         self.assertFalse(args.handle_sigint)
@@ -205,6 +208,8 @@ class TestSipRunnerArguments(unittest.TestCase):
             "SIP_NET_INTERFACE": "127.0.0.1",
             "SIP_PORT": "5060",
             "SIP_JITTER_BUFFER": "adaptive:20-100",
+            "SIP_MEDIA_ENCRYPTION": "SRTP",
+            "SIP_EXTRA_CONFIG": "sip_verify_server no; rtp_ports 20000-20100;",
         }
         with patch.dict("os.environ", env, clear=True):
             args = sip_runner_arguments(self.CONFIG)
@@ -221,6 +226,8 @@ class TestSipRunnerArguments(unittest.TestCase):
         self.assertEqual(args.sip_port, 5060)
         self.assertEqual(args.jitter_buffer_mode, "adaptive")
         self.assertEqual(args.jitter_buffer_ms, (20, 100))
+        self.assertIs(args.media_encryption, SIPMediaEncryption.SRTP)
+        self.assertEqual(args.extra_config, ("sip_verify_server no", "rtp_ports 20000-20100"))
 
     def test_carries_the_session_over(self):
         base = RunnerArguments(
@@ -253,6 +260,10 @@ class TestSipRunnerArguments(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 sip_runner_arguments(self.CONFIG)
         self.assertIn("SIP_PORT", str(ctx.exception))
+        with patch.dict("os.environ", {"SIP_MEDIA_ENCRYPTION": "dtls"}, clear=True):
+            with self.assertRaises(ValueError) as ctx:
+                sip_runner_arguments(self.CONFIG)
+        self.assertIn("SIP_MEDIA_ENCRYPTION", str(ctx.exception))
 
 
 class TestCleanup(unittest.IsolatedAsyncioTestCase):
