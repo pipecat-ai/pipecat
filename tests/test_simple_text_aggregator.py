@@ -134,6 +134,26 @@ class TestSimpleTextAggregator(unittest.IsolatedAsyncioTestCase):
         result = await self.aggregator.flush()
         assert result.text == "W"
 
+    async def test_marks_inside_words(self):
+        """Marks written inside a word stay with it while text streams in."""
+        cases = [
+            # Armenian question and exclamation marks sit over the stressed vowel.
+            ("Ո՞վ է նա։ Ի՜նչ գեղեցիկ է։", ["Ո՞վ է նա։", "Ի՜նչ գեղեցիկ է։"], "hy"),
+            # The Lao cancellation mark silences the consonant it sits on.
+            ("ໃຊ້ໄຟລ໌ນີ້", ["ໃຊ້ໄຟລ໌ນີ້"], "lo"),
+        ]
+        for text, expected, language in cases:
+            for lang in (None, language):
+                for chunk_size in (1, 3, len(text)):
+                    with self.subTest(text=text, language=lang, chunk_size=chunk_size):
+                        aggregator = SimpleTextAggregator(language=lang)
+                        results = []
+                        for i in range(0, len(text), chunk_size):
+                            chunk = text[i : i + chunk_size]
+                            results += [a.text async for a in aggregator.aggregate(chunk)]
+                        results.append((await aggregator.flush()).text)
+                        assert results == expected
+
     async def test_japanese_multiple_sentences(self):
         """Test that Japanese sentences are properly split during streaming."""
         text = "こんにちは。元気ですか？"

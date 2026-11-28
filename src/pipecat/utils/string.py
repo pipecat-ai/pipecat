@@ -24,6 +24,9 @@ from sentencex import segment  # pyright: ignore[reportAttributeAccessIssue]
 _QUOTED_WORD_END = re.compile(r"(?<!\w)([\"'“‘«‹„‟「『]+)[\w.]+\.$")
 # A numbered-list marker such as "1." at the start of a line.
 _LIST_MARKER = re.compile(r"(?m)^[ \t]*\d+\.(?=[ \t])")
+# Armenian exclamation and question marks, written over the stressed vowel
+# inside a word ("Ինչո՞ւ"), not at the end of the sentence.
+_ARMENIAN_IN_WORD_MARKS = re.compile("[\u055c\u055e]")
 
 
 def resolve_sentence_tokenizer_language(language: str | None) -> str:
@@ -94,15 +97,11 @@ SENTENCE_ENDING_PUNCTUATION: frozenset[str] = frozenset(
         # Khmer
         "។",  # Khmer sign khan
         "៕",  # Khmer sign bariyoosan
-        # Lao
-        "໌",  # Lao cancellation mark (used as period)
         # Tibetan
         "།",  # Tibetan mark intersyllabic tsheg
         "༎",  # Tibetan mark delimiter tsheg bstar
         # Armenian
         "։",  # Armenian full stop
-        "՜",  # Armenian exclamation mark
-        "՞",  # Armenian question mark
         # Ethiopic script (Amharic)
         "።",  # Ethiopic full stop
         "፧",  # Ethiopic question mark
@@ -167,6 +166,9 @@ def match_endofsentence(text: str, *, language: str | None = None) -> int:
     # languages' rules (German, Finnish, Czech, ...) never start a sentence at a
     # digit, which would merge each item into the one before it.
     tokenizer_text = _LIST_MARKER.sub(lambda m: " " * len(m[0]), text)
+    # Sentencex's Armenian rules split after the exclamation mark, inside the
+    # word that carries it, so the in-word marks are blanked as well.
+    tokenizer_text = _ARMENIAN_IN_WORD_MARKS.sub(" ", tokenizer_text)
     sentences = _sent_tokenizer(resolve_sentence_tokenizer_language(language))(tokenizer_text)
 
     if not sentences:
