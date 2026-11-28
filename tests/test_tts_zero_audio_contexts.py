@@ -129,6 +129,35 @@ class MockLateAudioTTSService(TTSService):
             yield
 
 
+class MockSlowTTSService(TTSService):
+    """HTTP-style service whose first audio takes longer than the stop timeout.
+
+    Like a local model synthesizing a long sentence before returning any audio.
+    """
+
+    def __init__(self, push_text_frames: bool = False, **kwargs):
+        super().__init__(
+            push_start_frame=True,
+            push_stop_frames=True,
+            push_text_frames=push_text_frames,
+            sample_rate=_SAMPLE_RATE,
+            stop_frame_timeout_s=_STOP_FRAME_TIMEOUT_S,
+            **kwargs,
+        )
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        await asyncio.sleep(_STOP_FRAME_TIMEOUT_S * 2.5)
+        yield TTSAudioRawFrame(
+            audio=_FAKE_AUDIO,
+            sample_rate=_SAMPLE_RATE,
+            num_channels=1,
+            context_id=context_id,
+        )
+
+
 @dataclass
 class MarkerFrame(DataFrame):
     """Marks how far downstream processing has got."""
@@ -471,3 +500,26 @@ async def test_a_silent_streaming_context_keeps_only_its_skipped_text():
         i for i, f in enumerate(down) if isinstance(f, AggregatedTextFrame) and f.skip_tts
     )
     assert skipped_index < kinds.index(TTSStoppedFrame)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("push_text_frames", [True, False])
+async def test_slow_first_audio_is_not_a_silent_context(push_text_frames):
+    """A request still synthesizing keeps its context open past the stop timeout."""
+    tts = MockSlowTTSService(push_text_frames=push_text_frames)
+
+    down, up = await asyncio.wait_for(
+        run_test(
+            tts,
+            frames_to_send=[
+                TTSSpeakFrame("Hello there."),
+                SleepFrame(sleep=_STOP_FRAME_TIMEOUT_S * 6),
+            ],
+        ),
+        timeout=5.0,
+    )
+
+    assert _errors(up) == []
+    assert "".join(_context_text(down)).strip() == "Hello there."
+    kinds = [type(f) for f in down if isinstance(f, (TTSAudioRawFrame, TTSStoppedFrame))]
+    assert kinds == [TTSAudioRawFrame, TTSStoppedFrame]
