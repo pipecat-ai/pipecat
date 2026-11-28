@@ -1,0 +1,1 @@
+- Google LLM services now send `thinking_level: low`, the lowest level each accepts, to `gemini-4-carbon`, `gemini-4-hydrogen` and `gemini-4-neon`, which otherwise run at Google's higher default.
