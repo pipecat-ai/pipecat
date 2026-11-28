@@ -839,6 +839,9 @@ class LLMUserAggregator(LLMContextAggregator):
         # like an empty user turn that interrupted the bot.
         self._user_turn_answer_voided = False
 
+        self._stt_recommendation_switcher: str | None = None
+        self._other_service_recommended = False
+
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
             user_turn_strategies_params=self._params.user_turn_strategies_params,
@@ -1163,9 +1166,7 @@ class LLMUserAggregator(LLMContextAggregator):
         ``user_turn_strategies`` field, so apply that first — regardless of
         service type or realtime mode — then run type-specific handling.
         """
-        await self._handle_service_user_turn_strategies(
-            frame.service_name, frame.user_turn_strategies
-        )
+        await self._handle_service_user_turn_strategies(frame)
         if isinstance(frame, STTMetadataFrame):
             await self._handle_stt_metadata(frame)
         elif isinstance(frame, LLMServiceMetadataFrame):
@@ -1180,17 +1181,39 @@ class LLMUserAggregator(LLMContextAggregator):
         """
         self._ttfs_p99_latency = frame.ttfs_p99_latency
 
-    async def _handle_service_user_turn_strategies(
-        self, service_name: str, user_turn_strategies: UserTurnStrategies | None
-    ):
+    async def _handle_service_user_turn_strategies(self, frame: ServiceMetadataFrame):
         """Apply user turn strategies a service recommends via its metadata frame.
 
         The user's own ``user_turn_strategies`` replace them, except for a list
         ``user_turn_strategies_params`` extends, which the user's strategies are
         added to. ``update_strategies`` is idempotent, so this is safe to re-run
-        on a later broadcast (e.g. a ServiceSwitcher switch).
+        on a later broadcast (e.g. a ServiceSwitcher switch). The defaults an
+        STT's recommendation replaced come back when its ServiceSwitcher switches
+        to an STT that recommends none.
         """
+        service_name = frame.service_name
+        user_turn_strategies = frame.user_turn_strategies
         if user_turn_strategies is None:
+            # STT metadata from outside the switcher, such as Daily's
+            # transcription, comes from a service running alongside.
+            if (
+                isinstance(frame, STTMetadataFrame)
+                and self._stt_recommendation_switcher is not None
+                and frame.switcher_name == self._stt_recommendation_switcher
+            ):
+                logger.debug(
+                    f"{self}: `{service_name}` recommends no user turn strategies; "
+                    "using the defaults."
+                )
+                self._stt_recommendation_switcher = None
+                # Built anew: keeping the initial set would hold its smart-turn
+                # analyzer for the whole call.
+                strategies = UserTurnStrategies()
+                if self._realtime_service_mode:
+                    self._apply_realtime_mode_strategy_mutations(
+                        strategies, are_user_provided_custom_strategies=False
+                    )
+                await self._user_turn_controller.update_strategies(strategies)
             return
 
         provided = self._params.user_turn_strategies
@@ -1206,6 +1229,15 @@ class LLMUserAggregator(LLMContextAggregator):
         logger.debug(f"{self}: applying user turn strategies recommended by `{service_name}`.")
         strategies = (
             provided.merge_with(user_turn_strategies, params) if provided else user_turn_strategies
+        )
+        is_stt = isinstance(frame, STTMetadataFrame)
+        # Once another kind of service, such as a realtime LLM, has recommended
+        # strategies, the defaults never come back.
+        self._other_service_recommended |= not is_stt
+        self._stt_recommendation_switcher = (
+            frame.switcher_name
+            if is_stt and provided is None and not self._other_service_recommended
+            else None
         )
         await self._user_turn_controller.update_strategies(strategies)
 
