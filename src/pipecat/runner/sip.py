@@ -60,7 +60,10 @@ Environment variables:
   server's certificate is verified; SIP_CA_FILE names the CA certificate of a
   server with a private or self-signed one.
 - SIP_REG_INTERVAL (optional) - Seconds between registration refreshes,
-  default 240; 0 disables registration (trunk mode).
+  default 240; 0 disables registration (trunk mode). A registered account
+  sends every call through its registrar, on the connection the registration
+  keeps alive, so the far end sees the registrar's address; an unregistered
+  one calls the host in the address dialled.
 - SIP_RTP_TIMEOUT (optional) - Seconds without received RTP after which a
   call is closed as dead, so a hang-up that never arrives does not leave the
   session running; default 30, 0 turns it off.

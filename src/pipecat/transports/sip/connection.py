@@ -23,7 +23,9 @@ The sharing model, from the outside in:
 - **One user agent — one registration — per address-of-record.** Cached
   and shared: any number of connections on the same account reuse it, and
   the last of them to disconnect unregisters it, so a closed bot leaves no
-  binding behind at the registrar.
+  binding behind at the registrar. A registered account sends its calls
+  through the registrar too, on the connection the registration keeps
+  alive (see ``registrar`` on :class:`SIPConnection`).
 - **N connections per address-of-record, one call per connection.** A
   connection is a call slot. Each inbound INVITE is routed to the first
   idle connection bound to the account — the claim is synchronous, so
@@ -630,8 +632,34 @@ class SIPConnection(BaseObject):
                 certificate, point the ``SIP_CA_FILE`` environment variable
                 at its CA certificate; a server reached by IP address needs
                 a certificate that carries that address.
-            registrar: Outbound proxy to register through, when that is
-                not the domain itself.
+            registrar: The server the account registers with and sends
+                every call through, the way a desk phone or softphone
+                does. None (the default) means the account's own domain,
+                ``sip:<domain>;transport=<transport>``; give an address
+                when the server is another host, such as a session border
+                controller in front of the domain. The bot then holds one
+                connection, which the registration refresh keeps alive, so
+                the far end's hang-up reaches it on a long call too.
+
+                Two things follow. The far end sees the registrar's
+                address, not the bot's, so an address-based access list on
+                a trunk has to admit the registrar. And a registrar that
+                does not relay calls to other domains refuses them. To
+                call such a domain directly, use a connection that does
+                not register, addressed at that domain::
+
+                    carrier = SIPConnection(
+                        user="bot", domain="trunk.carrier.example.com", reg_interval=0
+                    )
+
+                It needs an address of its own: a connection on a
+                registered account's address shares that account's
+                route.
+
+                An account that does not register has no registrar: with
+                None its calls go straight to the host in the address
+                dialled. An ``outbound=`` entry in ``extra_params`` names
+                the server itself, and None then adds nothing.
             reg_interval: Seconds between registration refreshes. The
                 stack refreshes at about 90% of the interval, and over
                 TCP or TLS that refresh is the only traffic on the
@@ -767,7 +795,8 @@ class SIPConnection(BaseObject):
             user=user,
             domain=domain,
             password=password,
-            registrar=registrar,
+            registrar=registrar
+            or self._default_registrar(domain, transport, reg_interval, extra_params),
             reg_interval=reg_interval,
             transport=transport,
             dtmf_mode=dtmf_mode,
@@ -1204,6 +1233,39 @@ class SIPConnection(BaseObject):
         if consult_call is None:
             raise RuntimeError("consult SIPConnection has no active call")
         await call.attended_transfer(consult_call)
+
+    @staticmethod
+    def _default_registrar(
+        domain: str, transport: str, reg_interval: int, extra_params: tuple | None
+    ) -> str | None:
+        """Pick the registrar for an account that was given none.
+
+        A registering account uses its own domain, so its registration
+        and its calls travel on one connection that the registration
+        refresh keeps alive. Two accounts get no registrar, and their
+        calls go straight to the host in the address dialled: one that
+        does not register, and one whose ``extra_params`` already name
+        the server.
+
+        Args:
+            domain: The account's registration domain; may carry a port.
+            transport: The account's SIP transport: "udp", "tcp" or "tls".
+            reg_interval: Seconds between registration refreshes; 0 means
+                the account does not register.
+            extra_params: The account's raw stack parameters, or None.
+
+        Returns:
+            The registrar as ``sip:<domain>;transport=<transport>``, or
+            None for no registrar.
+        """
+        # The stack's raw account parameters that name the server every
+        # request is sent through: ``outbound`` for one server, and
+        # ``outbound1`` / ``outbound2`` for a first and a second. An account
+        # that sets any of them has chosen its own server.
+        raw = ("outbound=", "outbound1=", "outbound2=")
+        if reg_interval == 0 or any(p.startswith(raw) for p in extra_params or ()):
+            return None
+        return f"sip:{domain};transport={transport}"
 
     def consult_connection(self) -> "SIPConnection":
         """A second connection on this account for a transfer/consult leg.
