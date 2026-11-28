@@ -58,7 +58,7 @@ class LLMWorkerActivationArgs(WorkerActivationArgs):
 #: their frames are never mistaken for a handler's. It holds the worker rather
 #: than a flag because a handler can reach another worker, and only the worker
 #: running the tool will release what it holds.
-_IN_TOOL_CALL: contextvars.ContextVar["LLMWorker | None"] = contextvars.ContextVar(
+_IN_TOOL_CALL: contextvars.ContextVar["tuple[LLMWorker, object] | None"] = contextvars.ContextVar(
     "pipecat_in_tool_call", default=None
 )
 
@@ -119,6 +119,7 @@ class LLMWorker(PipelineWorker):
         # _register_tools wraps any handlers.
         self._defer_tool_frames = defer_tool_frames
         self._tool_call_inflight: int = 0
+        self._active_tool_calls: set[object] = set()
         self._deferred_frames: deque[tuple[Frame, FrameDirection]] = deque()
         # A handover or ending a tool asked for, held until its call is done.
         self._pending_handover: Callable[[], Awaitable[None]] | None = None
@@ -184,7 +185,14 @@ class LLMWorker(PipelineWorker):
             direction: Direction the frame should travel. Defaults to
                 ``FrameDirection.DOWNSTREAM``.
         """
-        if self._defer_tool_frames and _IN_TOOL_CALL.get() is self and not self._closing:
+        in_tool = _IN_TOOL_CALL.get()
+        if (
+            self._defer_tool_frames
+            and in_tool is not None
+            and in_tool[0] is self
+            and in_tool[1] in self._active_tool_calls
+            and not self._closing
+        ):
             self._deferred_frames.append((frame, direction))
         else:
             await super().queue_frame(frame, direction)
@@ -338,12 +346,15 @@ class LLMWorker(PipelineWorker):
     def _track_tool_call(self, method: Callable) -> Callable:
         @functools.wraps(method)
         async def wrapper(params, *args, **kwargs):
+            call_token = object()
+            self._active_tool_calls.add(call_token)
             self._tool_call_inflight += 1
-            token = _IN_TOOL_CALL.set(self)
+            token = _IN_TOOL_CALL.set((self, call_token))
             try:
                 return await method(params, *args, **kwargs)
             finally:
                 _IN_TOOL_CALL.reset(token)
+                self._active_tool_calls.discard(call_token)
                 self._tool_call_inflight = max(0, self._tool_call_inflight - 1)
                 if self._tool_call_inflight == 0:
                     if not self._closing:
