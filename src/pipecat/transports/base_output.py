@@ -463,11 +463,12 @@ class BaseOutputTransport(FrameProcessor):
 
             # Incoming audio waiting to be cut into chunks, as runs of audio that
             # came from frames with the same ``interruptible`` flag, so a chunk
-            # keeps the flag of the audio it holds, along with the type of the
-            # frames it was built from (so a flushed partial chunk can be
-            # reconstructed as the same frame type).
+            # keeps the flag of the audio it holds, along with the type and
+            # channel count of the frames it was built from (so a flushed
+            # partial chunk can be reconstructed as the same kind of frame).
             self._audio_runs: deque[tuple[bytearray, bool]] = deque()
             self._audio_buffer_cls: type[OutputAudioRawFrame] = OutputAudioRawFrame
+            self._audio_buffer_channels = params.audio_out_channels
 
             # Resamples incoming audio to the output sample rate, created when
             # audio first arrives at another rate.
@@ -657,6 +658,7 @@ class BaseOutputTransport(FrameProcessor):
 
             cls = type(frame)
             self._audio_buffer_cls = cls
+            self._audio_buffer_channels = frame.num_channels
             self._buffer_audio(resampled, uninterruptible=not frame.interruptible)
             while self._buffered_audio_bytes >= self._audio_chunk_size:
                 audio, uninterruptible = self._take_audio_chunk()
@@ -843,7 +845,7 @@ class BaseOutputTransport(FrameProcessor):
             frame = self._audio_buffer_cls(
                 audio,
                 sample_rate=self._sample_rate,
-                num_channels=self._params.audio_out_channels,
+                num_channels=self._audio_buffer_channels,
             )
             frame.transport_destination = self._destination
             frame.interruptible = not uninterruptible
