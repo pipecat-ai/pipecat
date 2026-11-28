@@ -436,6 +436,13 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_units("5-10 people", "*"), "5-10 people")
         # Uneven spacing is a minus sign, not a range, matching expand_percentages.
         self.assertEqual(await expand_units("5km -2km", "*"), "5 kilometers minus 2 kilometers")
+        # A "+/-" tolerance is not a minus sign, matching expand_percentages.
+        self.assertEqual(
+            await expand_units("accurate to +/-0.5°C", "*"),
+            "accurate to +/-0.5 degrees Celsius",
+        )
+        self.assertEqual(await expand_units("+/-2km", "*"), "+/-2 kilometers")
+        self.assertEqual(await expand_units("5km/-3km", "*"), "5 kilometers/-3 kilometers")
 
     async def test_negative(self):
         # A leading minus sign is spoken, not left as a hyphen in front of the unit.
@@ -450,6 +457,17 @@ class TestExpandUnits(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await expand_units("-5m", "*"), "minus 5 meters")
         self.assertEqual(await expand_units("-9.8 m/s", "*"), "minus 9.8 meters per second")
         self.assertEqual(await expand_units("-100 km/h", "*"), "minus 100 kilometers per hour")
+        # A +/- tolerance is not a minus sign, matching expand_percentages.
+        self.assertEqual(await expand_units("+/-0.5°C", "*"), "+/-0.5 degrees Celsius")
+        # Negative ranges speak both signs and still read the dash as "to".
+        self.assertEqual(
+            await expand_units("-10–-5°C", "*"), "minus 10 to minus 5 degrees Celsius"
+        )
+        self.assertEqual(await expand_units("−5–10°C", "*"), "minus 5 to 10 degrees Celsius")
+        self.assertEqual(
+            await expand_units("-5km–-2km", "*"),
+            "minus 5 kilometers to minus 2 kilometers",
+        )
         # An evenly spaced dash between a number and a unit is a range, as with percentages.
         self.assertEqual(await expand_units("10 - 5km", "*"), "10 to 5 kilometers")
         # A spaced dash after a non-number is a separator, not a minus.

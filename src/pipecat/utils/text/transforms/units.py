@@ -9,7 +9,7 @@
 import re
 
 from pipecat.frames.frames import TextType
-from pipecat.utils.text.transforms._minus import minus_before, say_minus
+from pipecat.utils.text.transforms._minus import say_minus
 
 # Maps unit abbreviation to (singular, plural) spoken forms.
 _UNIT_MAP: dict[str, tuple[str, str]] = {
@@ -113,14 +113,18 @@ _UNIT_QUANTITY = r"\d[\d,]*(?:\.\d+)?" + _ATTACHED_UNIT
 # A range such as "5-10km" or "20 – 25°C": the dash becomes "to". The first
 # number must not be glued to a word or another dash ("Q3-5km", "1-2-3km"), and
 # the dash is spaced on both sides or neither, so "5km -2km" keeps its minus sign.
+# An optional leading minus on either end is spoken as "minus", including a
+# Unicode minus, which is also excluded from the lookbehind so "−5–10°C" is
+# not treated as a positive range that leaves the sign behind.
 _UNIT_RANGE_RE = re.compile(
-    r"(?<![\w.,\-–])(\d[\d,]*(?:\.\d+)?" + _ATTACHED_UNIT + r"?)"
-    r"(?:[-–]|\s[-–]\s)(?=" + _UNIT_QUANTITY + r")"
+    r"(?<![\w.,\-–−])(?:([-−])\s*)?(\d[\d,]*(?:\.\d+)?" + _ATTACHED_UNIT + r"?)"
+    r"(?:[-–]|\s[-–]\s)(?:([-−])\s*)?(?=" + _UNIT_QUANTITY + r")"
 )
 
 # A minus sign in front of a unit quantity, not a hyphen joined to a preceding
-# word or number.
-_NEGATIVE_UNIT_RE = minus_before(_UNIT_QUANTITY)
+# word or number. Like _NEGATIVE_PERCENT_RE, also exclude + and / so a
+# tolerance such as "+/-0.5°C" is left alone.
+_NEGATIVE_UNIT_RE = re.compile(rf"(?<![\w.,/+])[-−](?={_UNIT_QUANTITY})")
 
 
 async def expand_units(text: str, text_type: str | TextType) -> str:
@@ -159,7 +163,12 @@ async def expand_units(text: str, text_type: str | TextType) -> str:
     def _replace_rate(match: re.Match) -> str:
         return f"{_replace(match)} per {_PER_UNIT_MAP[match.group(3).lower()]}"
 
-    text = _UNIT_RANGE_RE.sub(lambda m: f"{m.group(1).rstrip()} to ", text)
+    def _replace_range(match: re.Match) -> str:
+        first_minus = "minus " if match.group(1) else ""
+        second_minus = "minus " if match.group(3) else ""
+        return f"{first_minus}{match.group(2).rstrip()} to {second_minus}"
+
+    text = _UNIT_RANGE_RE.sub(_replace_range, text)
     text = say_minus(_NEGATIVE_UNIT_RE, text)
     text = _DEGREE_RE.sub(_replace_degrees, text)
     text = _RATE_RE.sub(_replace_rate, text)
