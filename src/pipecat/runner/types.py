@@ -336,6 +336,7 @@ class SIPRunnerArguments(RunnerArguments):
             registration entirely (trunk mode).
         rtp_timeout: Seconds without received RTP after which a call is
             declared dead and closed; 0 disables detection.
+            Defaults to 30.
         instance_id: A canonical lowercase UUID identifying this endpoint
             across restarts (RFC 5626 ``+sip.instance``); None sends no
             instance parameter.
@@ -373,7 +374,7 @@ class SIPRunnerArguments(RunnerArguments):
     auth_user: str | None = None
     extra_params: tuple | None = None
     reg_interval: int = 240
-    rtp_timeout: int = 0
+    rtp_timeout: int = 30
     instance_id: str | None = None
     native_log_level: str = "warning"
     sip_trace: bool = False

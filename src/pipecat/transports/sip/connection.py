@@ -121,6 +121,10 @@ _STDLIB_LOG_LEVELS = {
 # hangup on the close, so the flag that requests a transfer need not be trusted
 # across the close race.
 _TRANSFER_CLOSE_REASON = "Call transfered"
+# The stack's close reason when no audio arrived for ``rtp_timeout`` seconds,
+# and the reason the connection reports in its place.
+_STACK_RTP_TIMEOUT_REASON = "rtp stream error"
+RTP_TIMEOUT_CLOSE_REASON = "rtp timeout"
 
 # How long a closing connection waits for the registrar to confirm the
 # unregister before giving up on it: a dead registrar must not hold up
@@ -243,7 +247,7 @@ class _RuntimeSettings:
     sip_port: int | None = None
     expose_headers: tuple = ()
     max_concurrent_calls: int | None = 2
-    rtp_timeout: int = 0
+    rtp_timeout: int = 30
     instance_id: str | None = None
     video_size: tuple = (640, 480)
     video_fps: float = 30.0
@@ -600,7 +604,7 @@ class SIPConnection(BaseObject):
         sip_port: int | None = None,
         expose_headers: tuple = (),
         max_concurrent_calls: int | None = 2,
-        rtp_timeout: int = 0,
+        rtp_timeout: int = 30,
         instance_id: str | None = None,
         video_size: tuple = (640, 480),
         video_fps: float = 30.0,
@@ -713,10 +717,12 @@ class SIPConnection(BaseObject):
                 unlimited. Runtime-wide.
             rtp_timeout: Seconds without received RTP after which a call
                 is declared dead and closed (close reason
-                ``"rtp stream error"``) — catches peers that vanish
-                without a BYE. Direction-aware: held and send-only
-                streams are not checked. 0 (the default) disables
-                detection. Runtime-wide.
+                ``"rtp timeout"``) — catches peers that vanish
+                without a BYE, and a BYE that never arrives because the
+                connection it would travel on has gone. Direction-aware:
+                held and send-only streams are not checked, and a call
+                that has received no RTP yet is not timed. Defaults to
+                30; 0 disables detection. Runtime-wide.
             instance_id: A canonical lowercase UUID identifying this
                 endpoint across restarts, carried on registration
                 Contacts as ``+sip.instance`` (RFC 5626): a supporting
@@ -1508,6 +1514,12 @@ class SIPConnection(BaseObject):
         elif event.event is Event.CALL_CLOSED:
             self._final_stats = call.final_stats
             reason = event.text or ""
+            if reason == _STACK_RTP_TIMEOUT_REASON:
+                reason = RTP_TIMEOUT_CLOSE_REASON
+                logger.warning(
+                    f"SIP: closing the call: no audio received for {self._settings.rtp_timeout} s "
+                    "(rtp_timeout). The far end is gone, or its hang-up never arrived."
+                )
             payload = self._call_payload(
                 reason=reason,
                 established=self._call_established,

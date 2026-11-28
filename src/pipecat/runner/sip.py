@@ -62,7 +62,8 @@ Environment variables:
 - SIP_REG_INTERVAL (optional) - Seconds between registration refreshes,
   default 240; 0 disables registration (trunk mode).
 - SIP_RTP_TIMEOUT (optional) - Seconds without received RTP after which a
-  call is closed as dead; default 0 (off).
+  call is closed as dead, so a hang-up that never arrives does not leave the
+  session running; default 30, 0 turns it off.
 - SIP_AUDIO_CODECS (optional) - Comma-separated codec preference list by
   stack name, e.g. "opus/48000/2,PCMU/8000/1".
 - SIP_AUTH_USER (optional) - Digest username when it differs from the user
@@ -402,7 +403,7 @@ def sip_runner_arguments(
     """
     try:
         reg_interval = int(os.getenv("SIP_REG_INTERVAL", "240"))
-        rtp_timeout = int(os.getenv("SIP_RTP_TIMEOUT", "0"))
+        rtp_timeout = int(os.getenv("SIP_RTP_TIMEOUT", "30"))
     except ValueError:
         raise ValueError(
             "SIP_REG_INTERVAL and SIP_RTP_TIMEOUT must be integers (seconds)"

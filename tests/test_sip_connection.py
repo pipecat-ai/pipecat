@@ -127,6 +127,16 @@ async def test_connect_registers_and_emits_registered(env):
 
 
 @pytest.mark.asyncio
+async def test_rtp_timeout_defaults_to_thirty_seconds(env):
+    connection = make_connection()
+
+    await connection.connect()
+
+    (config,) = env.runtime.start.await_args.args
+    assert config.rtp_timeout == 30
+
+
+@pytest.mark.asyncio
 async def test_runtime_starts_with_config_object(env):
     # The object form is load-bearing: expose_headers and instance_id are
     # applied by Runtime.start() only when it receives a Config — rendered
@@ -626,6 +636,23 @@ async def test_call_events_relay_established_and_closed(env):
     assert closed_payloads[0]["transferred"] is False  # a hangup is not a transfer
     assert closed_payloads[0]["established"] is True
     assert not connection.has_active_call
+
+
+@pytest.mark.asyncio
+async def test_call_closed_by_the_audio_timeout_reports_rtp_timeout(env):
+    connection = make_connection()
+    await connection.connect()
+    call = make_fake_call()
+    env.ua.dial.return_value = call
+    closed_payloads, closed = capture(connection, "call_closed")
+
+    await connection.dial("sip:9196@example.com")
+    listener = call.listeners[0]
+
+    listener(StackEvent(event=Event.CALL_CLOSED, call=call.handle, text="rtp stream error"))
+    await asyncio.wait_for(closed.wait(), EVENT_TIMEOUT)
+    assert closed_payloads[0]["reason"] == "rtp timeout"
+    assert closed_payloads[0]["transferred"] is False
 
 
 @pytest.mark.asyncio
