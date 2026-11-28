@@ -1083,6 +1083,30 @@ async def test_openai_responses_http_run_inference_system_instruction_param_with
         assert "instructions" not in call_kwargs
 
 
+@pytest.mark.asyncio
+async def test_openai_responses_run_inference_sends_tool_choice():
+    """The context's tool choice reaches the request in the Responses API shape, if set."""
+    with patch.object(OpenAIResponsesLLMService, "_create_client"):
+        service = OpenAIResponsesLLMService()
+        service._client = AsyncMock()
+
+        mock_response = MagicMock()
+        mock_response.output_text = ""
+        service._client.responses.create = AsyncMock(return_value=mock_response)
+
+        context = LLMContext(
+            messages=[{"role": "user", "content": "What's the weather?"}],
+            tool_choice={"type": "function", "function": {"name": "get_weather"}},
+        )
+        await service.run_inference(context)
+
+        call_kwargs = service._client.responses.create.call_args.kwargs
+        assert call_kwargs["tool_choice"] == {"type": "function", "name": "get_weather"}
+
+        await service.run_inference(LLMContext(messages=context.messages))
+        assert "tool_choice" not in service._client.responses.create.call_args.kwargs
+
+
 # A reply schema for the response_schema tests.
 RESPONSE_SCHEMA = {
     "type": "object",
