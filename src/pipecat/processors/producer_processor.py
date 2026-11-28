@@ -9,7 +9,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from pipecat.frames.frames import Frame
+from pipecat.frames.frames import EndFrame, Frame, SystemFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -82,9 +82,7 @@ class ProducerProcessor(FrameProcessor):
 
         if await self._filter(frame):
             await self._produce(frame)
-            if self._passthrough:
-                await self.push_frame(frame, direction)
-        else:
+        if self._passthrough or isinstance(frame, (SystemFrame, EndFrame)):
             await self.push_frame(frame, direction)
 
     async def _produce(self, frame: Frame):

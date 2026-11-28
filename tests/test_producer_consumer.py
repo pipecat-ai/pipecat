@@ -49,6 +49,14 @@ class TestProducerConsumerProcessor(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
 
+    async def test_no_passthrough_blocks_unmatched_frames(self):
+        producer = ProducerProcessor(filter=text_frame_filter, passthrough=False)
+        await run_test(
+            producer,
+            frames_to_send=[Frame()],
+            expected_down_frames=[],
+        )
+
     async def test_produce_multiple_consumer_no_passthrough(self):
         producer = ProducerProcessor(filter=text_frame_filter, passthrough=False)
         consumer1 = ConsumerProcessor(producer=producer)
