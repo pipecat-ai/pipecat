@@ -48,6 +48,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators import async_tool_messages
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMStandardMessage
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService, LLMWithBackendRole
@@ -1291,8 +1292,7 @@ class OpenAILiveLLMService(LLMService[OpenAILiveLLMAdapter]):
         if frame.tool_call_id not in self._open_function_calls:
             return
         await self._send_function_call_output(
-            frame.tool_call_id,
-            json.dumps({"error": "The function call was cancelled before it produced a result."}),
+            frame.tool_call_id, async_tool_messages.cancelled_call_result(frame.result)
         )
 
     async def _send_function_call_output(self, call_id: str, output: str):
