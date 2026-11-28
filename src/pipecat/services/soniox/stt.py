@@ -495,6 +495,7 @@ class SonioxSTTService(WebsocketSTTService):
         # Set when the turn is interrupted. A word decides whether it is still
         # wanted when its turn to be sent comes round.
         self._agent_text_turn = asyncio.Event()
+        self._agent_text_stream_retired = asyncio.Event()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -756,10 +757,17 @@ class SonioxSTTService(WebsocketSTTService):
         """Send the queued words one after another, each when its moment comes."""
         while True:
             frame, interrupted = await self._agent_text_words.get()
-            await self._send_bot_word_at(frame, interrupted)
-            self._agent_text_words.task_done()
+            try:
+                await self._send_bot_word_at(frame, interrupted, self._agent_text_stream_retired)
+            finally:
+                self._agent_text_words.task_done()
 
-    async def _send_bot_word_at(self, frame: TTSTextFrame, interrupted: asyncio.Event):
+    async def _send_bot_word_at(
+        self,
+        frame: TTSTextFrame,
+        interrupted: asyncio.Event,
+        stream_retired: asyncio.Event,
+    ):
         """Send a word ``agent_text_lead_ms`` before it is played.
 
         Soniox places agent text where it sits among the audio frames, and
@@ -772,19 +780,16 @@ class SonioxSTTService(WebsocketSTTService):
         # the queue is time the lead would otherwise have lost.
         delay = nanoseconds_to_seconds(frame.pts - self.get_clock().get_time())
         delay -= assert_given(self._settings.agent_text_lead_ms) / 1000
-        if not frame.interruptible:
-            # Uninterruptible speech plays on through an interruption.
-            if delay > 0:
-                await asyncio.sleep(delay)
-        else:
-            # An interruption ends the wait: the transport drops this word's
-            # audio, so the caller never hears it.
+        # Uninterruptible speech plays through a turn interruption, but the
+        # text still belongs to the Soniox stream that carried its audio.
+        stop_waiting = interrupted if frame.interruptible else stream_retired
+        if frame.interruptible or delay > 0:
             try:
-                await asyncio.wait_for(interrupted.wait(), max(delay, 0))
+                await asyncio.wait_for(stop_waiting.wait(), max(delay, 0))
             except TimeoutError:
                 pass
-            if interrupted.is_set():
-                return
+        if stream_retired.is_set() or stop_waiting.is_set():
+            return
         await self._send_bot_text(frame)
 
     async def _send_bot_text(self, frame: TTSTextFrame):
@@ -803,11 +808,11 @@ class SonioxSTTService(WebsocketSTTService):
         await self._send_agent_text("", end_of_segment=True)
 
     def _drop_agent_text_words(self):
-        """Drop the words waiting on the clock, uninterruptible ones too."""
+        """Retire timed words when the Soniox stream changes or observation stops."""
+        self._agent_text_stream_retired.set()
+        self._agent_text_stream_retired = asyncio.Event()
         self._agent_text_turn.set()
         self._agent_text_turn = asyncio.Event()
-        # The event alone leaves uninterruptible speech, which ignores it, so
-        # the queue itself goes too.
         while not self._agent_text_words.empty():
             self._agent_text_words.get_nowait()
             self._agent_text_words.task_done()
