@@ -17,6 +17,7 @@ pytest.importorskip("mcp")
 
 from pipecat.services.keenable.search import (  # noqa: E402
     _SERVER_SEARCH_TOOL,
+    _SERVER_TOOLS,
     _SERVER_URL,
     KeenableWebSearch,
 )
@@ -65,8 +66,16 @@ class TestKeenableWebSearchConfig(unittest.TestCase):
     def test_wires_mcp_client_for_keenable_server(self):
         search, client = self._build()
         self.assertEqual(client.server_params.url, _SERVER_URL)
-        # Every tool the server advertises is exposed.
-        self.assertNotIn("tools_filter", client.client_kwargs)
+        # Only the web search and page fetch tools are exposed.
+        self.assertEqual(client.client_kwargs["tools_filter"], _SERVER_TOOLS)
+        self.assertEqual(set(_SERVER_TOOLS), {"search_web_pages", "fetch_page_content"})
+
+    def test_keyed_exposes_only_web_tools(self):
+        # With a key the server also lists monitor tools (one deletes stored
+        # results); the filter keeps them away from the LLM.
+        search, client = self._build(api_key="k")
+        self.assertEqual(client.client_kwargs["tools_filter"], _SERVER_TOOLS)
+        self.assertNotIn("delete_monitor", client.client_kwargs["tools_filter"])
 
     def test_mode_pinned_via_tools_arguments(self):
         search, client = self._build(api_key="k", mode="realtime")
