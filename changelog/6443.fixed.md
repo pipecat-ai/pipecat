@@ -1,0 +1,1 @@
+- Fixed FastAPI WebSocket shutdown frames skipping serializer cleanup and telephony auto-hangup after the socket closes.
