@@ -573,5 +573,67 @@ class TestFoldPreservesLength(unittest.TestCase):
             self.assertEqual(fold_for_matching(char), char)
 
 
+class TestPunctuationOnlyRewrite(unittest.TestCase):
+    """A rewrite that changes only the marks between words, such as ``"."`` sent as
+    ``"..."``.
+
+    Both sides keep the same letters and words, so the segment is walked word by
+    word rather than held, but the TTS side is longer. The cursors into the other
+    two texts count the original's characters, so they stay on the words the
+    provider reports.
+    """
+
+    ORIGINAL = "Okay. I can help you today."
+    TTS = "Okay... I can help you today."
+
+    def _walk(self, words: list[str]) -> list[tuple[str, str, str]]:
+        smap = TextSegmentMap(self.TTS, self.ORIGINAL, self.ORIGINAL)
+        reached = []
+        for word in words:
+            smap.advance_word(word)
+            reached.append(
+                (
+                    self.ORIGINAL[: smap.user_facing_pos],
+                    self.ORIGINAL[: smap.llm_spoken_pos],
+                    self.ORIGINAL[: smap.llm_pos],
+                )
+            )
+        return reached
+
+    def test_cursors_stop_at_the_end_of_each_word(self):
+        reached = self._walk(["Okay...", "I", "can", "help", "you", "today."])
+        self.assertEqual(
+            [llm for _, _, llm in reached],
+            [
+                "Okay.",
+                "Okay. I",
+                "Okay. I can",
+                "Okay. I can help",
+                "Okay. I can help you",
+                "Okay. I can help you today.",
+            ],
+        )
+        self.assertEqual([spoken for _, spoken, _ in reached], [llm for _, _, llm in reached])
+
+    def test_marks_reported_as_their_own_word(self):
+        reached = self._walk(["Okay", "...", "I", "can"])
+        self.assertEqual(
+            reached,
+            [
+                ("Okay.", "Okay", "Okay."),
+                ("Okay.", "Okay.", "Okay."),
+                ("Okay. I", "Okay. I", "Okay. I"),
+                ("Okay. I can", "Okay. I can", "Okay. I can"),
+            ],
+        )
+
+    def test_a_lone_angle_bracket_reported_as_a_word_is_not_a_tag(self):
+        original = "Is 3 < 5? Yes. Good."
+        smap = TextSegmentMap("Is 3 < 5? Yes... Good.", original, original)
+        for word in ["Is", "3", "<"]:
+            smap.advance_word(word)
+        self.assertEqual(original[: smap.user_facing_pos], "Is 3 <")
+
+
 if __name__ == "__main__":
     unittest.main()
