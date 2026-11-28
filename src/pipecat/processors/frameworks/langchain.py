@@ -98,10 +98,8 @@ class LangchainProcessor(FrameProcessor):
             case str():
                 return text
             case AIMessageChunk():
-                # `content` is `str | list[...]` (multi-modal); stringify if
-                # it's a list, since downstream consumers want plain text.
                 content = text.content
-                return content if isinstance(content, str) else str(content)
+                return content if isinstance(content, str) else text.text
             case _:
                 return ""
 
