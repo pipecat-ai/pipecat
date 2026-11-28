@@ -99,6 +99,12 @@ class _ResponseTimeoutError(_RetryableError):
     pass
 
 
+class _UnchainableResponseError(_RetryableError):
+    """Server couldn't continue from the previous response (``unsupported_native_response_reference``)."""
+
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
@@ -1058,7 +1064,8 @@ class OpenAIResponsesLLMService(
         """Run inference over WebSocket with retry and previous_response_id.
 
         Tries once with the ``previous_response_id`` optimization.  On a
-        retriable error (cache miss, connection limit, connection drop, or —
+        retriable error (cache miss, a chain the server can't continue,
+        connection limit, connection drop, or —
         when ``retry_on_timeout`` is set — a response that produces no output
         in time), clears state and retries once with the full context and no
         timeout.  Transport-level
@@ -1129,6 +1136,15 @@ class OpenAIResponsesLLMService(
                 f"retrying with full context ({len(full_input)} items)"
             )
             await cleanup()
+        except _UnchainableResponseError:
+            # The rejected request's lane may still carry a response, so the
+            # retry goes on another lane (the rejected one is draining).
+            logger.warning(
+                f"{self}: unsupported_native_response_reference — "
+                f"retrying with full context ({len(full_input)} items)"
+            )
+            await cleanup()
+            lane = await self._choose_next_response_lane()
         except _ConnectionLimitReachedError:
             logger.warning(
                 f"{self}: WebSocket connection limit reached — "
@@ -1196,6 +1212,8 @@ class OpenAIResponsesLLMService(
         Raises:
             _PreviousResponseNotFoundError: Server couldn't find previous response.
             _ConnectionLimitReachedError: 60-minute connection limit reached.
+            _UnchainableResponseError: Server couldn't continue from the
+                previous response.
             _ResponseTimeoutError: Response produced no output in time.
             WebsocketReconnectedError: Connection was lost and auto-recovered.
             ConnectionClosed: Connection was lost and could not be recovered.
@@ -1348,6 +1366,12 @@ class OpenAIResponsesLLMService(
                     raise _PreviousResponseNotFoundError(message)
                 elif code == "websocket_connection_limit_reached":
                     raise _ConnectionLimitReachedError(message)
+                elif code == "unsupported_native_response_reference":
+                    # The server may still run a response on this lane, so it
+                    # drains like an abandoned one until that response ends.
+                    if lane:
+                        self._draining_lanes.add(lane)
+                    raise _UnchainableResponseError(message)
                 else:
                     await self.push_error(error_msg=f"WebSocket API error: {message}")
                     break
