@@ -359,6 +359,57 @@ def test_media_encryption_defaults_to_none_and_leaves_the_account_as_before():
     assert connection._account_kwargs["media_encryption"] is SIPMediaEncryption.NONE
 
 
+@pytest.mark.parametrize(
+    "domain, transport, registrar",
+    [
+        ("example.com", "udp", "sip:example.com;transport=udp"),
+        ("example.com", "tls", "sip:example.com;transport=tls"),
+        ("example.com:5061", "tls", "sip:example.com:5061;transport=tls"),
+    ],
+)
+def test_registrar_defaults_to_the_domain_of_a_registering_account(domain, transport, registrar):
+    connection = make_connection(domain=domain, transport=transport)
+
+    assert connection._account.registrar == registrar
+    assert f'outbound="{registrar}"' in connection._account.aor()
+
+
+def test_registrar_is_not_defaulted_for_an_account_that_does_not_register():
+    connection = make_connection(reg_interval=0)
+
+    assert connection._account.registrar is None
+    assert "outbound" not in connection._account.aor()
+
+
+def test_registrar_given_is_used_as_given():
+    connection = make_connection(registrar="sbc.example.com;transport=tcp")
+
+    assert connection._account.registrar == "sbc.example.com;transport=tcp"
+    # An address given is used in trunk mode too.
+    trunk = make_connection(registrar="sbc.example.com", reg_interval=0)
+    assert trunk._account.registrar == "sbc.example.com"
+
+
+@pytest.mark.parametrize("param", ['outbound="sip:sbc.example.com"', "outbound1=sip:a.example.com"])
+def test_registrar_is_not_defaulted_over_an_outbound_in_extra_params(param):
+    connection = make_connection(extra_params=("medianat=stun", param))
+
+    assert connection._account.registrar is None
+    assert connection._account.aor().count("outbound") == 1
+
+
+@pytest.mark.asyncio
+async def test_unregistered_sibling_shares_a_registering_account(env):
+    # The consult leg of a transfer does not register; it has to agree with
+    # the registered connection whose user agent it places its call on.
+    connection = make_connection()
+    await connection.connect()
+
+    sibling = connection.consult_connection()
+    assert sibling._account_kwargs == connection._account_kwargs
+    await sibling.connect()
+
+
 @pytest.mark.parametrize("value", [SIPMediaEncryption.SRTP, "srtp", "SRTP"])
 def test_media_encryption_srtp_reaches_the_account(value):
     connection = make_connection(media_encryption=value)
