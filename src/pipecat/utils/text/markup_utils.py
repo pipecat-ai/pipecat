@@ -59,12 +59,20 @@ def strip_markup(text: str) -> str:
     return "".join(ch for _, ch in _iter_clean_chars(text))
 
 
-_COMPLETE_MARKUP_RE = re.compile(r"<[^>]+>")
+_COMPLETE_MARKUP_RE = re.compile(r"<(?:[a-zA-Z/!?][^>]*|\d\S*)>")
 """Matched '<...>' pairs in a complete text.
 
 The definition of markup for a static text, shared by
 :func:`strip_complete_markup` and :func:`split_markup_runs` so the two can't
-disagree about which characters a segment split may treat as a tag.
+disagree about which characters a segment split may treat as a tag. A tag is
+either ``'<'`` followed by a letter, ``'/'``, ``'!'`` or ``'?'`` (XML
+start/close tags, self-closing ``<break/>``, comments), or a compact
+digit-leading token with no whitespace before its ``'>'`` (numeric pause tags
+such as Rime's ``<500.0>`` or an expression adapter's ``<400ms>``). Everything
+else — a ``'<'`` followed
+by whitespace or by a digit run broken by spaces — is content, not markup:
+comparisons (``3 < 5 … 7 > 2``, ``3<5 and 7>2``) and emoticons (``<3``)
+survive stripping.
 """
 
 

@@ -74,6 +74,30 @@ class TestStripCompleteMarkupHelper(unittest.TestCase):
     def test_strip_complete_markup_keeps_emoticon(self):
         self.assertEqual(strip_complete_markup("I love you <3 always"), "I love you <3 always")
 
+    def test_strip_complete_markup_keeps_angle_brackets_used_as_comparisons(self):
+        # A '<' followed by anything but a letter, '/', '!', '?', or a compact
+        # digit run is content, so the comparison pair in "3 < 5 and 7 > 2" is
+        # not treated as one tag.
+        self.assertEqual(
+            strip_complete_markup("Is 3 < 5 and 7 > 2?"),
+            "Is 3 < 5 and 7 > 2?",
+        )
+        for text in ["Is 3<5 and 7>2?", "a <= b and c >= d", "I love you <3 and you > me"]:
+            self.assertEqual(strip_complete_markup(text), text)
+
+    def test_strip_complete_markup_keeps_tags_starting_with_a_letter_or_slash(self):
+        self.assertEqual(
+            strip_complete_markup("hello <spell>1234</spell> world"), "hello 1234 world"
+        )
+        self.assertEqual(strip_complete_markup("a <break/> b"), "a  b")
+
+    def test_strip_complete_markup_strips_numeric_pause_tags(self):
+        # Digit-leading whitespace-free tokens are tags: Rime's pause tag and
+        # an expression adapter's "<{duration_ms}ms>" pause tag.
+        self.assertEqual(strip_complete_markup("Hello <500.0> world"), "Hello  world")
+        self.assertEqual(strip_complete_markup("Hello <500> world"), "Hello  world")
+        self.assertEqual(strip_complete_markup("Hello <400ms> world"), "Hello  world")
+
 
 class TestSplitMarkupRuns(unittest.TestCase):
     """split_markup_runs() gives a tag its own run so TextSegmentMap._build can
@@ -99,6 +123,12 @@ class TestSplitMarkupRuns(unittest.TestCase):
 
     def test_lone_angle_bracket_is_content(self):
         self.assertEqual(split_markup_runs("5 < 10 always"), ["5 < 10 always"])
+
+    def test_numeric_pause_tag_gets_its_own_run(self):
+        self.assertEqual(split_markup_runs("Hello <400ms> world"), ["Hello ", "<400ms>", " world"])
+
+    def test_digit_run_broken_by_spaces_is_content(self):
+        self.assertEqual(split_markup_runs("Is 3<5 and 7>2?"), ["Is 3<5 and 7>2?"])
 
     def test_runs_concatenate_back_to_the_input(self):
         for text in [
