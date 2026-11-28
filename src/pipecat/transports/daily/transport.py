@@ -3217,6 +3217,9 @@ class DailyTransport(BaseTransport):
                     on_request_only=source_params.on_request_only,
                 )
 
+        if self._input:
+            await self._input.broadcast_frame(ClientConnectedFrame)
+
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
             await self._call_event_handler("on_first_participant_joined", participant)
@@ -3224,8 +3227,6 @@ class DailyTransport(BaseTransport):
         await self._call_event_handler("on_participant_joined", participant)
         # Also call on_client_connected for compatibility with other transports
         await self._call_event_handler("on_client_connected", participant)
-        if self._input:
-            await self._input.push_frame(ClientConnectedFrame())
 
     async def _on_participant_left(self, participant, reason):
         """Handle participant left events."""

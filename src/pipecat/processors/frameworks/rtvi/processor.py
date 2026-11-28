@@ -18,6 +18,7 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
+    ClientConnectedFrame,
     EndFrame,
     EndWorkerFrame,
     ErrorFrame,
@@ -87,6 +88,7 @@ class RTVIProcessor(FrameProcessor):
         self._client_ready_id = ""
         # Default to 0.0.0 to indicate unknown version.
         self._client_version = [0, 0, 0]
+        self._pending_client_connection: ClientConnectedFrame | None = None
         self._llm_skip_tts: bool = False  # Keep in sync with llm_service.py's configuration.
 
         # A task to process incoming transport messages.
@@ -110,14 +112,16 @@ class RTVIProcessor(FrameProcessor):
     def client_version(self) -> list[int]:
         """The negotiated client protocol version as [major, minor, patch].
 
-        Defaults to [0, 0, 0] until the client sends a ``client-ready`` message.
+        Defaults to [0, 0, 0] until the current client sends a ``client-ready`` message.
         """
+        if self._pending_client_connection is not None:
+            return [0, 0, 0]
         return self._client_version
 
     @property
     def client_ready(self) -> bool:
         """Whether the client has sent its ``client-ready`` message."""
-        return self._client_ready
+        return self._pending_client_connection is None and self._client_ready
 
     def create_rtvi_observer(self, *, params: RTVIObserverParams | None = None, **kwargs):
         """Creates a new RTVI Observer.
@@ -238,6 +242,14 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, ErrorFrame):
             await self._send_error_frame(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, ClientConnectedFrame):
+            if self._message_task:
+                # Serve the current protocol while the reset waits behind older messages.
+                self._pending_client_connection = frame
+                await self._message_queue.put((frame, None))
+            else:
+                self._reset_client_state()
+            await self.push_frame(frame, direction)
         elif isinstance(frame, InputTransportMessageFrame):
             await self._handle_transport_message(frame)
         # All other system frames
@@ -265,7 +277,9 @@ class RTVIProcessor(FrameProcessor):
     async def _start(self, frame: StartFrame):
         """Start the RTVI processor tasks."""
         if not self._message_task:
-            self._message_queue = asyncio.Queue()
+            self._message_queue: asyncio.Queue[
+                tuple[RTVI.Message | ClientConnectedFrame, str | None]
+            ] = asyncio.Queue()
             self._message_task = self.create_task(self._message_task_handler())
         await self._call_event_handler("on_bot_started")
 
@@ -282,12 +296,25 @@ class RTVIProcessor(FrameProcessor):
         if self._message_task:
             await self.cancel_task(self._message_task)
             self._message_task = None
+        if self._pending_client_connection is not None:
+            self._reset_client_state()
+            self._pending_client_connection = None
+
+    def _reset_client_state(self):
+        self._client_ready = False
+        self._client_ready_id = ""
+        self._client_version = [0, 0, 0]
 
     async def _message_task_handler(self):
         """Handle incoming transport messages."""
         while True:
             message, user_id = await self._message_queue.get()
-            await self._handle_message(message, user_id)
+            if isinstance(message, ClientConnectedFrame):
+                self._reset_client_state()
+                if message is self._pending_client_connection:
+                    self._pending_client_connection = None
+            else:
+                await self._handle_message(message, user_id)
             self._message_queue.task_done()
 
     async def _handle_transport_message(self, frame: InputTransportMessageFrame):
@@ -631,12 +658,13 @@ class RTVIProcessor(FrameProcessor):
         # aggregator onto its v2 path (server-side speech progress) while
         # the wire actually carries v1 events, and the two would collide.
         # For legacy clients, echo their declared version back.
-        if self._client_version[0] == RTVI.LEGACY_SUPPORTED_MAJOR:
-            version = ".".join(str(v) for v in self._client_version)
+        client_version = self.client_version
+        if client_version[0] == RTVI.LEGACY_SUPPORTED_MAJOR:
+            version = ".".join(str(v) for v in client_version)
         else:
             version = RTVI.PROTOCOL_VERSION
         message = RTVI.BotReady(
-            id=self._client_ready_id,
+            id=self._client_ready_id if self.client_ready else "",
             data=RTVI.BotReadyData(
                 version=version,
                 about=about,
