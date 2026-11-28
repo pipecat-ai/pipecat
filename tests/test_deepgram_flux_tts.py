@@ -493,6 +493,113 @@ def _connected_service(**kwargs) -> tuple[DeepgramFluxTTSService, AsyncMock]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["audio", "speech_metadata"])
+async def test_flux_tts_unspoken_turn_ignores_late_provider_output(message):
+    """A tool-only reply never acquires an audio context from the provider."""
+    service, websocket = _connected_service()
+    await service._handle_llm_response_start(LLMFullResponseStartFrame())
+
+    if message == "audio":
+        await service._handle_audio(AUDIO_CHUNK_1)
+    else:
+        await service._handle_message({"type": "SpeechMetadata", "speech_id": "interrupted"})
+
+    assert not service.get_audio_contexts()
+    await service.on_turn_context_completed()
+    websocket.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_flux_tts_accepts_audio_while_speak_send_is_pending():
+    """The receive task can deliver audio as soon as the transport receives Speak."""
+    service, websocket = _connected_service()
+    await service._handle_llm_response_start(LLMFullResponseStartFrame())
+    context_id = service.get_active_audio_context_id()
+
+    async def send_speak(message):
+        assert json.loads(message) == {"type": "Speak", "text": "Hello"}
+        await service._handle_audio(AUDIO_CHUNK_1)
+
+    websocket.send.side_effect = send_speak
+    assert [frame async for frame in service.run_tts("Hello", context_id)] == [None]
+    audio = await service._audio_context_manager.get(context_id, timeout=0.05)
+    assert isinstance(audio, TTSAudioRawFrame)
+    assert audio.audio == AUDIO_CHUNK_1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [OSError, asyncio.CancelledError])
+async def test_flux_tts_first_speak_send_failure_disowns_context(error):
+    """A failed first Speak leaves no eligible provider audio context."""
+    service, websocket = _connected_service()
+    await service._handle_llm_response_start(LLMFullResponseStartFrame())
+    context_id = service.get_active_audio_context_id()
+    websocket.send.side_effect = error("send stopped")
+
+    if error is asyncio.CancelledError:
+        with pytest.raises(asyncio.CancelledError):
+            await anext(service.run_tts("Hello", context_id))
+    else:
+        assert isinstance(await anext(service.run_tts("Hello", context_id)), ErrorFrame)
+
+    await service._handle_audio(AUDIO_CHUNK_1)
+    assert not service.get_audio_contexts()
+
+
+@pytest.mark.asyncio
+async def test_flux_tts_late_audio_reopens_spoken_active_turn():
+    """An open turn's previously accepted speech can resume after a playback timeout."""
+    service, websocket = _connected_service()
+    await service._handle_llm_response_start(LLMFullResponseStartFrame())
+    context_id = service.get_active_audio_context_id()
+    assert [frame async for frame in service.run_tts("First", context_id)] == [None]
+    await service.create_audio_context(context_id)
+    service._audio_context_manager.remove(context_id)
+    await service.on_audio_context_completed(context_id)
+    websocket.send.side_effect = OSError("later token failed")
+    assert isinstance(await anext(service.run_tts("Later", context_id)), ErrorFrame)
+
+    await service._handle_audio(AUDIO_CHUNK_1)
+
+    audio = await service._audio_context_manager.get(context_id, timeout=0.05)
+    assert isinstance(audio, TTSAudioRawFrame)
+    assert audio.audio == AUDIO_CHUNK_1
+
+
+@pytest.mark.asyncio
+async def test_flux_tts_interrupt_retires_a_timed_out_turn():
+    """An interrupted turn loses ownership even when playback has already timed out."""
+    service, _ = _connected_service()
+    await service._handle_llm_response_start(LLMFullResponseStartFrame())
+    context_id = service.get_active_audio_context_id()
+    assert [frame async for frame in service.run_tts("Hello", context_id)] == [None]
+    await service.on_audio_context_completed(context_id)
+
+    await service._interrupt_audio_contexts()
+
+    assert not service.get_audio_contexts()
+    assert context_id not in service._speaking_contexts
+
+
+@pytest.mark.asyncio
+async def test_flux_tts_voice_update_retires_previous_transport_speech():
+    """A new connection starts without ownership from the earlier stream."""
+    service, _ = _connected_service()
+    await service._handle_llm_response_start(LLMFullResponseStartFrame())
+    context_id = service.get_active_audio_context_id()
+    assert [frame async for frame in service.run_tts("Hello", context_id)] == [None]
+
+    with (
+        patch.object(service, "_connect", new=AsyncMock()),
+        patch.object(service, "_disconnect", new=AsyncMock()),
+    ):
+        await service._update_settings(DeepgramFluxTTSService.Settings(voice="flux-ava-en"))
+
+    await service._handle_audio(AUDIO_CHUNK_1)
+    assert not service.get_audio_contexts()
+
+
+@pytest.mark.asyncio
 async def test_flux_tts_speed_update_sends_configure():
     """A speed change is applied on the open connection, without reconnecting."""
     tts_service, websocket = _connected_service()
