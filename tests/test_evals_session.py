@@ -4230,3 +4230,220 @@ class TestCheckFrom(unittest.IsolatedAsyncioTestCase):
             check_from="turn_start",
         )
         self.assertIn("'delegate' not seen", reason or "")
+
+
+class TestScriptConversationCapture(unittest.IsolatedAsyncioTestCase):
+    """A scripted run can export its conversation in the simulation conversation format."""
+
+    @staticmethod
+    def _driver(
+        turns: list[EvalScriptTurn],
+        replies: dict[str, list[dict]],
+        *,
+        bot_audio: bool = False,
+        timeout_ms: int = 5000,
+    ) -> EvalScriptDriver:
+        async def on_progress(_):
+            pass
+
+        stream = _stream(bot_audio=bot_audio)
+        return EvalScriptDriver(
+            scenario=EvalScriptScenario(name="t", turns=turns, bot_audio=bot_audio),
+            default_timeout_ms=timeout_ms,
+            client=_RepliesClient(stream, replies),  # type: ignore[arg-type]
+            stream=stream,
+            judge=None,
+            trace=EvalTrace(),
+            progress=on_progress,
+            capture_conversation=True,
+        )
+
+    @staticmethod
+    def _result(driver: EvalScriptDriver, failures: list):
+        return driver.result(
+            failures=failures,
+            duration_ms=1,
+            events_seen=driver._stream.events_seen,
+            debug_log=[],
+        )
+
+    async def test_capture_includes_user_reply_and_function_arguments(self):
+        turn = EvalScriptTurn(
+            user="Book a table for four.",
+            expect=[EvalExpectation(event="function_call", within_ms=1000)],
+        )
+        replies = {
+            "Book a table for four.": [
+                {"type": "function_call", "name": "book_table", "args": {"party_size": 4}},
+                {
+                    "type": "function_call_stopped",
+                    "name": "book_table",
+                    "args": {"tool_call_id": "call-1", "cancelled": False},
+                },
+                {"type": "llm_response", "text": "Your table for four is booked."},
+            ]
+        }
+        driver = self._driver([turn], replies)
+
+        failures = await driver.run()
+        result = self._result(driver, failures)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(
+            result.conversation,
+            [
+                {"role": "user", "content": "Book a table for four."},
+                {
+                    "role": "tool_call",
+                    "name": "book_table",
+                    "arguments": {"party_size": 4},
+                    "cancelled": False,
+                },
+                {"role": "assistant", "content": "Your table for four is booked."},
+            ],
+        )
+
+    async def test_capture_keeps_the_greeting_before_the_first_user_turn(self):
+        turn = EvalScriptTurn(user="Hello", expect=[])
+        driver = self._driver(
+            [turn], {"Hello": [{"type": "llm_response", "text": "What can I do for you?"}]}
+        )
+        await driver._stream.append({"type": "llm_response", "text": "Hi, how can I help?"})
+
+        failures = await driver.run()
+        result = self._result(driver, failures)
+
+        self.assertEqual(
+            result.conversation,
+            [
+                {"role": "assistant", "content": "Hi, how can I help?"},
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "What can I do for you?"},
+            ],
+        )
+
+    async def test_audio_capture_uses_the_bot_transcription(self):
+        turn = EvalScriptTurn(user="Hello", expect=[])
+        driver = self._driver(
+            [turn],
+            {"Hello": [{"type": "response", "text": "Hi there."}]},
+            bot_audio=True,
+        )
+
+        failures = await driver.run()
+        result = self._result(driver, failures)
+
+        self.assertEqual(
+            result.conversation,
+            [
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there."},
+            ],
+        )
+
+    async def test_capture_waits_for_a_final_reply_that_arrives_after_the_turn(self):
+        class DelayedRepliesClient:
+            has_user_tts = False
+
+            def __init__(self, stream: EvalEventStream):
+                self._stream = stream
+
+            async def send_text(self, text: str):
+                async def reply_later():
+                    await asyncio.sleep(0.05)
+                    await self._stream.append({"type": "llm_response", "text": "Done."})
+
+                asyncio.create_task(reply_later())
+
+        async def on_progress(_):
+            pass
+
+        turn = EvalScriptTurn(user="Finish", expect=[])
+        stream = _stream()
+        driver = EvalScriptDriver(
+            scenario=EvalScriptScenario(name="t", turns=[turn]),
+            default_timeout_ms=1000,
+            client=DelayedRepliesClient(stream),  # type: ignore[arg-type]
+            stream=stream,
+            judge=None,
+            trace=EvalTrace(),
+            progress=on_progress,
+            capture_conversation=True,
+        )
+
+        failures = await driver.run()
+        result = self._result(driver, failures)
+
+        self.assertEqual(
+            result.conversation,
+            [
+                {"role": "user", "content": "Finish"},
+                {"role": "assistant", "content": "Done."},
+            ],
+        )
+
+    async def test_capture_is_empty_when_the_final_reply_never_arrives(self):
+        turn = EvalScriptTurn(user="Hello", expect=[])
+        driver = self._driver([turn], {}, timeout_ms=30)
+
+        started = time.monotonic()
+        failures = await driver.run()
+        result = self._result(driver, failures)
+
+        self.assertLess(time.monotonic() - started, 1)
+        self.assertEqual(result.conversation, [])
+
+    async def test_cancelled_function_call_is_marked_cancelled(self):
+        turn = EvalScriptTurn(user="Stop that", expect=[])
+        driver = self._driver(
+            [turn],
+            {
+                "Stop that": [
+                    {"type": "function_call", "name": "transfer_call", "args": {"to": "support"}},
+                    {
+                        "type": "function_call_stopped",
+                        "name": "transfer_call",
+                        "args": {"tool_call_id": "call-1", "cancelled": True},
+                    },
+                    {"type": "llm_response", "text": "I stopped the transfer."},
+                ]
+            },
+        )
+
+        failures = await driver.run()
+        result = self._result(driver, failures)
+
+        self.assertTrue(result.conversation[1]["cancelled"])
+
+
+class TestScriptConversationCaptureConfig(unittest.TestCase):
+    """Capture asks the bot for arguments-level function-call reports."""
+
+    def test_capture_raises_the_report_level_to_arguments(self):
+        scenario = EvalScriptScenario(name="t", turns=[EvalScriptTurn(user="hi")])
+        session = EvalScriptSession(
+            scenario,
+            "ws://localhost:7860/ws",
+            params=EvalSessionParams(capture_conversation=True),
+        )
+
+        self.assertEqual(session._client._params.report_level, "arguments")
+
+    def test_a_scenario_requiring_full_reports_keeps_full(self):
+        turn = EvalScriptTurn(
+            user="hi",
+            expect=[
+                EvalExpectation(
+                    event="function_call",
+                    calls=[EvalFunctionCall(name="book", args={"party_size": 4})],
+                )
+            ],
+        )
+        scenario = EvalScriptScenario(name="t", turns=[turn])
+        session = EvalScriptSession(
+            scenario,
+            "ws://localhost:7860/ws",
+            params=EvalSessionParams(capture_conversation=True),
+        )
+
+        self.assertEqual(session._client._params.report_level, "full")

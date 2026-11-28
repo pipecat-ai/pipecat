@@ -162,6 +162,10 @@ class EvalScriptResult:
             the report as the bot sent it, its measurements grouped by kind
             (``ttfb``, ``processing``, ``tokens``, ...). Empty for a bot that
             runs without metrics.
+        conversation: The conversation as a conversation file holds it, when
+            :attr:`~pipecat.evals.session.EvalSessionParams.capture_conversation`
+            is on and the bot's final reply arrived before teardown; otherwise
+            empty. See :mod:`pipecat.evals.conversation`.
     """
 
     scenario_name: str
@@ -173,6 +177,7 @@ class EvalScriptResult:
     debug_log: list[str] = field(default_factory=list)
     skipped: str | None = None
     bot_metrics: list[dict] = field(default_factory=list)
+    conversation: list[dict] = field(default_factory=list)
 
 
 @deprecated(

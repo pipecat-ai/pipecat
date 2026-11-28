@@ -118,6 +118,7 @@ class BaseEvalDriver(ABC, Generic[R]):
                 :attr:`~pipecat.evals.script.EvalScriptTurn.parts`.
         """
         self._stream.drop_pending_bot_output("before send")
+        self._capture_user_message(text)
         how = audio_file or ("audio" if self._client.has_user_tts else "text")
         self._trace.log(f"send: {text!r} ({how})")
         if audio_file is not None:
@@ -133,6 +134,15 @@ class BaseEvalDriver(ABC, Generic[R]):
         # Only what the bot says in reply to this input is matched from here on.
         self._stream.input_sent()
 
+    def _capture_user_message(self, text: str) -> None:
+        """Record a user turn for conversation capture.
+
+        Drivers without conversation capture leave this as a no-op.
+
+        Args:
+            text: What the user sent.
+        """
+
     async def _press(self, keys: str) -> None:
         """Send DTMF keypresses as the user's turn.
 
@@ -141,6 +151,7 @@ class BaseEvalDriver(ABC, Generic[R]):
                 bot's reply is judged knowing what was pressed.
         """
         self._stream.drop_pending_bot_output("before send")
+        self._capture_user_message(f"(DTMF keypad input: {keys})")
         self._trace.log(f"send: dtmf {keys!r}")
         await self._client.send_dtmf(keys)
         if self._judge is not None:

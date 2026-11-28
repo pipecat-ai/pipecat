@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 
 from pipecat.evals.base_driver import BaseEvalDriver
 from pipecat.evals.client import EvalClient
+from pipecat.evals.conversation import EvalConversation
 from pipecat.evals.events import EvalBotEndedError, EvalEventStream, EvalHarnessError
 from pipecat.evals.judge import EvalJudge
 from pipecat.evals.matcher import ExpectationMatcher
@@ -38,6 +39,7 @@ SEND_AFTER_MAX_WAIT_S = 30.0
 # discarded together with the answer that followed it in the same breath.
 BOT_QUIET_MAX_WAIT_S = 30.0
 SEND_AFTER_POLL_S = 0.01
+CAPTURE_POLL_S = 0.01
 
 
 class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
@@ -58,6 +60,7 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         judge: EvalJudge | None,
         trace: EvalTrace,
         progress: Callable[[EvalProgress], Awaitable[None]],
+        capture_conversation: bool = False,
     ):
         """Initialize the driver.
 
@@ -71,6 +74,8 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             trace: The run's trace.
             progress: Awaited with an :class:`~pipecat.evals.results.EvalProgress` as turns and
                 expectations resolve.
+            capture_conversation: Whether to build the run's conversation for
+                :attr:`~pipecat.evals.results.EvalScriptResult.conversation`.
         """
         super().__init__(
             client=client,
@@ -86,6 +91,13 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
         # not_run and stay that way on every path that ends the run early, so
         # the result always says which turns were actually scored.
         self.turns = [EvalScriptTurnResult(turn_index=i) for i in range(len(scenario.turns))]
+        self._capture = EvalConversation() if capture_conversation else None
+        self._capture_observed = 0
+        self._capture_bot_said = "response" if scenario.bot_audio else "llm_response"
+        self._capture_reply_needed = False
+        self._capture_active_calls = 0
+        self._capture_active_llms = 0
+        self._capture_complete = False
 
     async def run(self) -> list[EvalAssertionFailure]:
         """Drive the scenario's turns in order, filling in their records."""
@@ -111,6 +123,8 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
                     self._trace.log(f"turn {turn_idx} failed; stopping scenario (stop_on_failure)")
                     break
                 self._trace.log(f"turn {turn_idx} failed; continuing (stop_on_failure: false)")
+        if self._capture is not None:
+            await self._finish_conversation_capture()
         return failures
 
     def result(
@@ -133,7 +147,73 @@ class EvalScriptDriver(BaseEvalDriver[EvalScriptResult]):
             debug_log=debug_log,
             skipped=skipped,
             bot_metrics=self.bot_metrics(),
+            conversation=(
+                self._capture.messages
+                if self._capture is not None and self._capture_complete
+                else []
+            ),
         )
+
+    def _capture_user_message(self, text: str) -> None:
+        """Add a sent user turn to the captured conversation, ordered after prior bot output."""
+        if self._capture is None:
+            return
+        self._observe_captured_events()
+        self._capture.add_user_message(text)
+        self._capture_reply_needed = True
+
+    async def _finish_conversation_capture(self) -> None:
+        """Wait for the bot's final reply, then close the captured conversation.
+
+        A reply is still needed after a function call, since the answer that
+        follows the call is part of the conversation a rubric is meant to judge.
+        If it never arrives, the export is left empty because the partial run is
+        not a complete conversation.
+        """
+        deadline = time.monotonic() + self._default_timeout_ms / 1000
+        while True:
+            self._observe_captured_events()
+            if not self._capture_reply_needed and self._capture_active_llms == 0:
+                assert self._capture is not None
+                self._capture.end_bot_turn()
+                self._capture_complete = True
+                self._trace.log("conversation capture: complete")
+                return
+            if time.monotonic() >= deadline:
+                self._trace.log(
+                    "conversation capture: final reply not complete within "
+                    f"{self._default_timeout_ms}ms; export skipped"
+                )
+                return
+            await asyncio.sleep(CAPTURE_POLL_S)
+
+    def _observe_captured_events(self) -> None:
+        """Read the stream's events not yet read into the captured conversation."""
+        if self._capture is None:
+            return
+        events = self._stream.events_seen
+        while self._capture_observed < len(events):
+            event = events[self._capture_observed]
+            self._capture_observed += 1
+            kind = event["type"]
+            name = event.get("name") or "?"
+            if kind == "llm_started":
+                self._capture_active_llms += 1
+            elif kind == "llm_response":
+                self._capture_active_llms = max(0, self._capture_active_llms - 1)
+
+            if kind == self._capture_bot_said and event.get("text"):
+                self._capture.add_assistant_message(event["text"])
+                if self._capture_active_calls == 0:
+                    self._capture_reply_needed = False
+            elif kind == "function_call":
+                self._capture.add_tool_call(name, event.get("args") or {})
+                self._capture_active_calls += 1
+                self._capture_reply_needed = True
+            elif kind == "function_call_stopped":
+                self._capture_active_calls = max(0, self._capture_active_calls - 1)
+                if (event.get("args") or {}).get("cancelled"):
+                    self._capture.cancel_tool_call(name)
 
     def record_failure(self, failure: EvalAssertionFailure) -> None:
         """Score a run-level failure against the turn it interrupted, if any.
